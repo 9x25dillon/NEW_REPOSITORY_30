@@ -82,5 +82,33 @@ export const BIOLOGY: Biology = {
   c: 1570,
   provenance:
     "Literature defaults for a generic mammalian cell — NOT measured for this " +
-    "subject. Replace with measured values before trusting any trap position.",
+    "subject. Replace with measured values before trusting any trap position. " +
+    "See docs/MEASURING_A_CELL.md; src/inversion.ts does the fitting.",
 };
+
+/**
+ * Measured properties, once there are any.
+ *
+ * Null, and structurally so. BIOLOGY above carries literature defaults because
+ * the model needs numbers to run at all, and a reader who only saw that field
+ * could reasonably take it for data — so the distinction is given a slot of its
+ * own rather than left to a comment. Anything computed from BIOLOGY while this
+ * is null is a sketch; anything computed after it is filled in is a measurement
+ * of these cells.
+ *
+ * Fill it from a bench session, not from a paper: run beads to calibrate the
+ * pressure amplitude, track cells focusing in three media of different density,
+ * and intersect. docs/MEASURING_A_CELL.md is the procedure and src/inversion.ts
+ * is the arithmetic. `residual` is the fit's own disagreement between media and
+ * is the number that says whether to believe the rest.
+ */
+export interface Measured extends Biology {
+  /** ISO date of the session. */
+  date: string;
+  /** Media used, for the record. */
+  media: string[];
+  /** RMS disagreement between media, in units of the contrast factor. */
+  residual: number;
+}
+
+export const MEASURED: Measured | null = null;

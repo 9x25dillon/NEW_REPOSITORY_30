@@ -160,6 +160,30 @@ formally arrives and focusing time must be quoted to a tolerance, not to the
 node. And `u0 = 0` gives `T = 0` forever: a particle placed exactly on an
 antinode stays there, because that is an equilibrium — an unstable one.
 
+## Measuring the cell, rather than assuming it
+
+`src/inversion.ts` is `gorkov.ts` run backwards. A cell in a standing wave
+follows `tan(k·u) = tan(k·u₀)·exp(2kAt)` exactly, so taking logs gives a
+**straight line in t** whose slope is `2kA` — one tracked focusing event, a
+linear fit, no initial guess, and an r² that says immediately whether the cell
+was doing what the model claims.
+
+Two things make this a protocol rather than a formula:
+
+- **The pressure amplitude has to be calibrated**, not read off a signal
+  generator. Run polystyrene beads of known contrast, invert for the amplitude
+  that produced their rate constant, then use it for the cells in the same chip
+  and session.
+- **Φ is one number containing two unknowns.** A single medium constrains a
+  curve in the (ρ, κ) plane and pins neither coordinate, so the run is repeated
+  in media of different density and the curves intersected.
+  `propertiesFromContrasts` refuses a single measurement rather than inventing
+  whichever coordinate you did not think to question, and reports a residual so
+  a bad medium shows up instead of being averaged away.
+
+Validated by round trip: synthetic tracks in three media recover the cell that
+generated them to 1 kg/m³ and 2 m/s.
+
 ## The Brillouin zone is the torus
 
 A Bloch wavevector is defined only modulo a reciprocal lattice vector, so the
@@ -210,9 +234,12 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
   order of magnitude only, since it depends on the streaming pattern and hence
   the channel geometry. Cells at 5–10 µm are comfortably above it; bacteria are
   not.
-- **The subject's numbers are literature defaults**, not measurements. See
-  `config/subject.ts`. Every trap position computed today is a sketch until the
-  density and compressibility are measured.
+- **The subject's numbers are literature defaults**, not measurements.
+  `config/subject.ts` carries `MEASURED = null` as a structural slot for the
+  real ones. Every trap position computed today is a sketch until the density
+  and compressibility are measured — see
+  [docs/MEASURING_A_CELL.md](docs/MEASURING_A_CELL.md), which `src/inversion.ts`
+  implements.
 - **PZT is not a crystallographic point group.** Poled ceramic has Curie-group
   symmetry (∞mm); `4mm` is a stand-in and the table says so.
 
@@ -220,7 +247,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 62 tests, no network, no fixtures
+npm test          # 73 tests, no network, no fixtures
 npm run typecheck
 ```
 
@@ -235,8 +262,9 @@ src/symmetry.ts      the 32 groups as 3x3 matrices, closed from generators
 src/neumann.ts       which tensor components a crystal is allowed to have
 src/linalg.ts        Jacobi eigensolver and Cholesky reduction, no dependency
 src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
+src/inversion.ts     measured tracks -> contrast factor -> density and kappa
 config/subject.ts    the one subject — natal record and biological parameters
-test/                62 tests: what the modules above are actually claiming
+test/                73 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/`. The physics stays a pure function of its
