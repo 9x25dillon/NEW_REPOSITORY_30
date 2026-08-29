@@ -90,9 +90,9 @@ substrate table.
 **2 · Single-particle acoustics** — *done.* Gor'kov potential, contrast factor,
 1D radiation force, Stokes drag.
 
-**3 · Fields.** Analytic pressure fields for the two device classes: a
-half-wavelength BAW channel resonance, and an SSAW from two counter-propagating
-Rayleigh waves. Then trajectory integration under radiation force plus drag.
+**3 · Fields and motion** — *done.* `src/fields.ts`, `src/trajectory.ts`.
+Half-wavelength BAW channel resonance, SSAW from counter-propagating Rayleigh
+waves, and overdamped trajectory integration under radiation force plus drag.
 
 **4 · Tensors.** Neumann's principle: point group → non-zero independent
 components of d and c. This is what turns the substrate table from a filter into
@@ -100,6 +100,30 @@ a design tool.
 
 **5 · Bands.** Phononic-crystal dispersion over the Brillouin-zone torus. Needs
 an eigensolver; the only tier that adds a real dependency.
+
+## The motion has a closed form, and that is the referee
+
+The trajectory is overdamped — a 10 um cell in water has a momentum relaxation
+time under a microsecond, so inertia is gone before anything moves:
+
+```
+6 pi mu a (du/dt) = F_rad(u)
+```
+
+Substituting T = tan(ku) turns this into dT/dt = 2kAT, so
+
+```
+tan(k u(t)) = tan(k u0) * exp(2 k A t)        A = Phi k a^2 kappa_f p_a^2 / (6 mu)
+```
+
+**exactly.** The RK4 integrator is checked against that formula rather than
+against a finer copy of itself — convergence to a self-consistent wrong answer
+is the failure a step-halving check cannot see.
+
+Two consequences fall straight out. The approach is exponential, so a cell never
+formally arrives and focusing time must be quoted to a tolerance, not to the
+node. And `u0 = 0` gives `T = 0` forever: a particle placed exactly on an
+antinode stays there, because that is an equilibrium — an unstable one.
 
 ## BAW and SAW
 
@@ -136,7 +160,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 11 tests, no network, no fixtures
+npm test          # 31 tests, no network, no fixtures
 npm run typecheck
 ```
 
@@ -145,8 +169,10 @@ npm run typecheck
 ```
 src/pointgroups.ts   the 32 groups; piezoelectric / polar / chiral predicates
 src/gorkov.ts        contrast factor, radiation force, drag
+src/fields.ts        BAW channel resonance and SSAW; one standing wave, two devices
+src/trajectory.ts    overdamped motion, closed form, RK4, sweep limits
 config/subject.ts    the one subject — natal record and biological parameters
-test/                what the two modules above are actually claiming
+test/                31 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/`. The physics stays a pure function of its
