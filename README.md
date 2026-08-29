@@ -94,12 +94,44 @@ substrate table.
 Half-wavelength BAW channel resonance, SSAW from counter-propagating Rayleigh
 waves, and overdamped trajectory integration under radiation force plus drag.
 
-**4 · Tensors.** Neumann's principle: point group → non-zero independent
-components of d and c. This is what turns the substrate table from a filter into
-a design tool.
+**4 · Tensors** — *done.* `src/symmetry.ts`, `src/neumann.ts`. Neumann's
+principle, computed rather than tabulated: point group → independent components
+and non-zero pattern for permittivity, piezoelectric and elastic tensors.
 
 **5 · Bands.** Phononic-crystal dispersion over the Brillouin-zone torus. Needs
 an eigensolver; the only tier that adds a real dependency.
+
+## Neumann's principle, computed twice
+
+A hand-copied table of tensor patterns has hundreds of cells, no way to check
+itself, and one transposed entry sends a designer to a coefficient that does not
+exist. So this is computed, by two methods with nothing in common, and the two
+are asserted equal for all 32 groups × 3 tensors:
+
+- **Character theory** gives the count exactly. The dimension of the invariant
+  subspace is the group-average of the representation's character — a theorem
+  evaluated, not a measurement taken.
+- **An explicit projector** gives the pattern. Averaging the representation over
+  the group and composing with the intrinsic index symmetries lands on the space
+  of admissible tensors; its trace must equal the character count, and its
+  non-zero rows are the surviving components.
+
+Method 1 is blind to *which* components survive; method 2 is vulnerable to a
+mis-built representation. An error in either shows up as a disagreement rather
+than as a plausible table. Every count reproduces the published tables — 18, 8,
+10, 3, 5 … down the piezoelectric column; 21, 13, 9, 7, 6, 5, 3 for elastic.
+
+The groups themselves are **closed from generators**, not listed, and each
+group's final size is checked against the order column in `pointgroups.ts` — two
+independently written facts that have to agree, thirty-two times. A group listed
+by hand can be silently short an element, which would impose too few constraints
+and quietly report too many free components.
+
+**`432` falls out.** `pointgroups.ts` *names* it as the one non-centrosymmetric
+group that is still not piezoelectric. `neumann.ts`, which was never told,
+computes its piezoelectric tensor to zero dimensions from characters alone — and
+finds it is the only such group. The census and the group theory close on each
+other from opposite directions.
 
 ## The motion has a closed form, and that is the referee
 
@@ -160,7 +192,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 31 tests, no network, no fixtures
+npm test          # 44 tests, no network, no fixtures
 npm run typecheck
 ```
 
@@ -171,8 +203,10 @@ src/pointgroups.ts   the 32 groups; piezoelectric / polar / chiral predicates
 src/gorkov.ts        contrast factor, radiation force, drag
 src/fields.ts        BAW channel resonance and SSAW; one standing wave, two devices
 src/trajectory.ts    overdamped motion, closed form, RK4, sweep limits
+src/symmetry.ts      the 32 groups as 3x3 matrices, closed from generators
+src/neumann.ts       which tensor components a crystal is allowed to have
 config/subject.ts    the one subject — natal record and biological parameters
-test/                31 tests: what the modules above are actually claiming
+test/                44 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/`. The physics stays a pure function of its
