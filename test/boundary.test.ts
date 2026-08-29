@@ -60,6 +60,33 @@ test("the personal half never imports the physics half either", () => {
   }
 });
 
+test("the two app entry points are as separate as the two libraries", () => {
+  // The bench and the listening surface are different PAGES, not tabs on one.
+  // A tab would present them as two views of one thing, and the import graph
+  // says the same: app/main.ts knows nothing of personal/, app/listen.ts
+  // nothing of src/. If either ever needed the other, that would be the moment
+  // to stop and ask which claim was about to leak into which.
+  const main = readFileSync(join(root, "app/main.ts"), "utf8");
+  for (const spec of importsOf(main)) {
+    assert.ok(!spec.includes("personal/"),
+      `app/main.ts imports ${spec}: the bench must not reach for the tonal layer`);
+  }
+
+  const listen = readFileSync(join(root, "app/listen.ts"), "utf8");
+  for (const spec of importsOf(listen)) {
+    assert.ok(!spec.includes("src/"),
+      `app/listen.ts imports ${spec}: the listening surface must not borrow device physics`);
+    assert.ok(!spec.includes("config/"),
+      `app/listen.ts imports ${spec}: a chart is pasted in, not read from the subject file`);
+  }
+
+  // and each really does use its own half, rather than being separate by
+  // virtue of importing nothing
+  assert.ok(importsOf(main).some((s) => s.includes("src/")), "main must use src/");
+  assert.ok(importsOf(listen).some((s) => s.includes("personal/")),
+    "listen must use personal/");
+});
+
 test("both halves are self-contained: no dependencies at all", () => {
   for (const dir of ["src", "personal"]) {
     for (const { file, text } of sourcesIn(dir)) {

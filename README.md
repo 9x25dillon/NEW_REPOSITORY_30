@@ -281,7 +281,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 92 tests, no network, no fixtures
+npm test          # 93 tests, no network, no fixtures
 npm run typecheck
 
 npm run build     # tsc emits browser ESM into app/dist
@@ -313,6 +313,19 @@ that saves a fabrication run.
 different density and it solves for density and compressibility, which flows
 straight back into the Device screen.
 
+**Chord** — `app/listen.html`, a separate page rather than a fourth tab. One
+sustained sine voice per body, tuned by longitude; bodies close in longitude are
+close in pitch and beat against each other slowly, which is the whole texture. A
+chart with a tight conjunction hums; one spread out sits still. Audio starts on a
+button press and nowhere else — the AudioContext is constructed inside the click
+handler, so there is no path to sound a reader did not ask for.
+
+It is a separate page on purpose. A tab would present the two as views of one
+thing, and the import graph says otherwise: `app/main.ts` knows nothing of
+`personal/`, `app/listen.ts` nothing of `src/`, and `test/boundary.test.ts`
+enforces both. The page sounds a chart; it does not cast one — paste longitudes
+from wherever you compute them.
+
 ### Provenance is the interface
 
 `src/provenance.ts` carries the rule: **a derived value inherits the weakest
@@ -339,11 +352,12 @@ src/linalg.ts        Jacobi eigensolver and Cholesky reduction, no dependency
 src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
 src/inversion.ts     measured tracks -> contrast factor -> density and kappa
 src/provenance.ts    measured / derived / assumed, and the weakest-link rule
-app/                 the three screens; `npm run build` then serve statically
+app/index.html       the bench: substrates, device, measure
+app/listen.html      the chord: a separate page, sharing no code with the bench
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
 personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 config/subject.ts    the one subject — natal record and biological parameters
-test/                92 tests: what the modules above are actually claiming
+test/                93 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

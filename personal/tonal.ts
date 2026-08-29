@@ -128,15 +128,24 @@ export function slowestBeat(
   return best;
 }
 
-/** The classical aspects and the interval each becomes under the map. Exported
- *  because the correspondence is the interesting part and should be inspectable
- *  rather than buried in a test. */
-export const ASPECT_INTERVALS: ReadonlyArray<{ name: string; degrees: number; cents: number; interval: string }> = [
-  { name: "conjunction", degrees: 0, cents: 0, interval: "unison" },
-  { name: "semisextile", degrees: 30, cents: 200, interval: "whole tone" },
-  { name: "sextile", degrees: 60, cents: 400, interval: "major third" },
-  { name: "square", degrees: 90, cents: 600, interval: "tritone" },
-  { name: "trine", degrees: 120, cents: 800, interval: "minor sixth" },
-  { name: "quincunx", degrees: 150, cents: 1000, interval: "minor seventh" },
-  { name: "opposition", degrees: 180, cents: 1200, interval: "octave" },
+/**
+ * The classical aspects and the interval each becomes under the map. Exported
+ * because the correspondence is the interesting part and should be inspectable
+ * rather than buried in a test.
+ *
+ * `article` is carried as data rather than inferred, because the English rule
+ * is about SOUND and not spelling: "unison" begins with a vowel letter and a
+ * consonant sound, so it takes "a" and not "an". A first-letter test produced
+ * "an unison" on screen. The set is closed and seven long; it can just say.
+ */
+export const ASPECT_INTERVALS: ReadonlyArray<{
+  name: string; degrees: number; cents: number; interval: string; article: "a" | "an";
+}> = [
+  { name: "conjunction", degrees: 0, cents: 0, interval: "unison", article: "a" },
+  { name: "semisextile", degrees: 30, cents: 200, interval: "whole tone", article: "a" },
+  { name: "sextile", degrees: 60, cents: 400, interval: "major third", article: "a" },
+  { name: "square", degrees: 90, cents: 600, interval: "tritone", article: "a" },
+  { name: "trine", degrees: 120, cents: 800, interval: "minor sixth", article: "a" },
+  { name: "quincunx", degrees: 150, cents: 1000, interval: "minor seventh", article: "a" },
+  { name: "opposition", degrees: 180, cents: 1200, interval: "octave", article: "an" },
 ];

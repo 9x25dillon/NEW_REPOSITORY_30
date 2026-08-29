@@ -11,7 +11,9 @@
   },
   "include": [
     "src",
+    "personal",
+    "config",
     "app/main.ts",
-    "config"
+    "app/listen.ts"
   ]
 }

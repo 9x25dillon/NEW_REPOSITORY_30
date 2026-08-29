@@ -41,6 +41,15 @@ test("every classical aspect is an exact multiple of 200 cents", () => {
   // and the claim is specific: something that is NOT an aspect misses
   assert.ok(offWholeTone(Math.abs(centsBetween(37, 0))) > 1,
     "an arbitrary separation should not land on a whole tone");
+
+  // Articles are data because English decides them by sound, not spelling:
+  // "unison" opens with a vowel LETTER and a consonant SOUND, so a first-letter
+  // test writes "an unison" — which it did, on screen, before this existed.
+  for (const a of ASPECT_INTERVALS) {
+    assert.ok(a.article === "a" || a.article === "an", a.interval);
+  }
+  assert.equal(ASPECT_INTERVALS.find((a) => a.interval === "unison")!.article, "a");
+  assert.equal(ASPECT_INTERVALS.find((a) => a.interval === "octave")!.article, "an");
   // spot-check the named intervals against their ratios
   near(centsBetween(60, 0), 400, 1e-9, "sextile is a major third");
   near(centsBetween(90, 0), 600, 1e-9, "square is a tritone");
