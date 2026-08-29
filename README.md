@@ -7,6 +7,40 @@ Private. Under development against a single subject.
 
 ---
 
+## Two halves, and the boundary between them
+
+This repository holds two things that must not be confused, so they are kept in
+separate directories with an **enforced** import boundary (`test/boundary.test.ts`
+reads the actual import statements and fails if either half reaches for the
+other).
+
+| | `src/` — the instrument | `personal/` — the tonal layer |
+|---|---|---|
+| For | study, research, device design | listening |
+| Frequency | 1–200 MHz | 110–440 Hz |
+| Wavelength in water | under a millimetre | metres |
+| What it claims | acoustic radiation force on suspended cells | a chart, drawn and played |
+| Checkable by | an experiment | listening to it |
+
+**The distinction is physical, not editorial.** A 10 µm cell sits deep in the
+long-wavelength regime the Gor'kov potential is derived for at 1 MHz, where the
+wavelength is 1.5 mm. At 440 Hz the wavelength is 3.4 metres, the wavenumber is
+smaller by three orders of magnitude, and the radiation force on a cell from
+music at listening levels is not small — it is irrelevant. The device physics
+also needs a resonant channel or a piezoelectric substrate coupled into a
+fluid; headphones are neither.
+
+So the tonal layer is **music**. It may well be pleasant and relaxing, which is
+a real thing for music to be and needs no mechanism beyond the ordinary one.
+It is not a dose, a treatment, or the process `src/` models. If this ships to
+other people, that distinction has to survive the trip — which is what the
+boundary test is for.
+
+The tonal map is exact and makes one genuinely interesting claim: at one octave
+per half-circle, every classical aspect lands on a whole multiple of 200 cents,
+so **the major-aspect family is the whole-tone scale**. That is a statement
+about the map, and it is tested.
+
 ## What this is
 
 An instrument for answering two questions before anything is fabricated:
@@ -247,7 +281,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 73 tests, no network, no fixtures
+npm test          # 86 tests, no network, no fixtures
 npm run typecheck
 ```
 
@@ -263,11 +297,15 @@ src/neumann.ts       which tensor components a crystal is allowed to have
 src/linalg.ts        Jacobi eigensolver and Cholesky reduction, no dependency
 src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
 src/inversion.ts     measured tracks -> contrast factor -> density and kappa
+personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
+personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 config/subject.ts    the one subject — natal record and biological parameters
-test/                73 tests: what the modules above are actually claiming
+test/                86 tests: what the modules above are actually claiming
 ```
 
-`src/` never reads `config/`. The physics stays a pure function of its
-arguments, and the subject record stays a label on the work rather than a term
-in it — otherwise a prediction would stop being falsifiable, which is the only
-thing making any of this worth building.
+`src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
+The physics stays a pure function of its arguments; the subject record and the
+tonal layer stay labels on the work rather than terms in it. Otherwise a
+prediction would stop being falsifiable, which is the only thing making any of
+this worth building — and the tonal layer would start implying something it
+does not do. `test/boundary.test.ts` enforces all of it.
