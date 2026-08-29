@@ -98,8 +98,11 @@ waves, and overdamped trajectory integration under radiation force plus drag.
 principle, computed rather than tabulated: point group → independent components
 and non-zero pattern for permittivity, piezoelectric and elastic tensors.
 
-**5 · Bands.** Phononic-crystal dispersion over the Brillouin-zone torus. Needs
-an eigensolver; the only tier that adds a real dependency.
+**5 · Bands** — *done.* `src/linalg.ts`, `src/bands.ts`. 1-D layered stacks
+exactly, 2-D phononic crystals by plane-wave expansion over the Brillouin-zone
+torus. It needed an eigensolver but **not** a dependency: cyclic Jacobi plus a
+Cholesky reduction is about a hundred lines and converges unconditionally for
+real symmetric input. The repo is still dependency-free.
 
 ## Neumann's principle, computed twice
 
@@ -157,6 +160,31 @@ formally arrives and focusing time must be quoted to a tolerance, not to the
 node. And `u0 = 0` gives `T = 0` forever: a particle placed exactly on an
 antinode stays there, because that is an equilibrium — an unstable one.
 
+## The Brillouin zone is the torus
+
+A Bloch wavevector is defined only modulo a reciprocal lattice vector, so the
+zone's opposite faces are identified and the parameter space of a 2-D crystal is
+S¹ × S¹ — the same T² the old engine embedded, for entirely unrelated reasons.
+`ω(k + G) = ω(k)` is not an analogy; it is the periodicity that makes the zone a
+torus, and it is asserted as a test. The assertion is that the deviation
+*shrinks as the basis grows*, not that it is below a fixed number: the
+periodicity is exact for the untruncated problem and approximate once the
+plane-wave basis is cut off, and that distinction is what separates a truncation
+artefact from a broken symmetry.
+
+Two methods, checking each other again. The 1-D layered stack has an exact
+closed-form dispersion from the transfer-matrix trace; the 2-D expansion is a
+numerical eigenproblem. A crystal made of **stripes** is periodic in x and
+uniform in y, so along Γ–X it *is* a layered stack — and the two agree to 2×10⁻⁴
+at reasonable truncation, with the expansion converging from **above**, as a
+variational method must.
+
+Two useful facts fall out of the 1-D relation. Set the impedances equal and the
+trace collapses to `cos(kΛ)` whatever the velocity contrast: **an acoustic
+mirror is designed on impedance ratio**, not on material contrast in the loose
+sense. And `blochWavenumber` returns the wavenumber **reduced to the first
+zone**, so above the zone edge it is not `ω/c` — it is the folded value.
+
 ## BAW and SAW
 
 Shared core: pressure field → Gor'kov → where the cells go. What differs is how
@@ -192,7 +220,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 44 tests, no network, no fixtures
+npm test          # 62 tests, no network, no fixtures
 npm run typecheck
 ```
 
@@ -205,8 +233,10 @@ src/fields.ts        BAW channel resonance and SSAW; one standing wave, two devi
 src/trajectory.ts    overdamped motion, closed form, RK4, sweep limits
 src/symmetry.ts      the 32 groups as 3x3 matrices, closed from generators
 src/neumann.ts       which tensor components a crystal is allowed to have
+src/linalg.ts        Jacobi eigensolver and Cholesky reduction, no dependency
+src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
 config/subject.ts    the one subject — natal record and biological parameters
-test/                44 tests: what the modules above are actually claiming
+test/                62 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/`. The physics stays a pure function of its
