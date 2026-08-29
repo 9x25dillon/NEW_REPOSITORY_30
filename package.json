@@ -1,0 +1,16 @@
+{
+  "name": "acoustofluidic-bench",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Symmetry-first design tools for BAW and SAW cell manipulation.",
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  }
+}

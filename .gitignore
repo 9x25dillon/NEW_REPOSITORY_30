@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+# Measured data lives outside version control until it is ready to be cited.
+/data/raw/
