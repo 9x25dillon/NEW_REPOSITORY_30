@@ -6,7 +6,9 @@
   "description": "Symmetry-first design tools for BAW and SAW cell manipulation.",
   "scripts": {
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "app": "npm run build && echo \"open app/index.html\""
   },
   "devDependencies": {
     "tsx": "^4.19.2",

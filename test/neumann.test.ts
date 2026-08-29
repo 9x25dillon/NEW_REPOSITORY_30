@@ -1,12 +1,12 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { POINT_GROUPS, isPiezoelectric, pointGroup } from "../src/pointgroups.ts";
-import { SAW_SUBSTRATES } from "../src/fields.ts";
-import { GENERATORS, closeGroup, isProper, operations } from "../src/symmetry.ts";
+import { POINT_GROUPS, isPiezoelectric, pointGroup } from "../src/pointgroups.js";
+import { SAW_SUBSTRATES } from "../src/fields.js";
+import { GENERATORS, closeGroup, isProper, operations } from "../src/symmetry.js";
 import {
   drivableCoefficients, independentComponents, nonZeroComponents,
   projectorRank, tensorReport, voigt, type TensorKind,
-} from "../src/neumann.ts";
+} from "../src/neumann.js";
 
 // ── The groups themselves ───────────────────────────────────────────────────
 

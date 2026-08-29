@@ -33,7 +33,7 @@
 
 import {
   type Medium, type Particle, compressibility, contrastFactor,
-} from "./gorkov.ts";
+} from "./gorkov.js";
 
 /**
  * A one-dimensional standing pressure wave.

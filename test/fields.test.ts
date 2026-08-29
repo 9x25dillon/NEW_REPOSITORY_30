@@ -1,12 +1,12 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { LIPID_DROPLET, MAMMALIAN_CELL, WATER, radiationForce1D } from "../src/gorkov.ts";
+import { LIPID_DROPLET, MAMMALIAN_CELL, WATER, radiationForce1D } from "../src/gorkov.js";
 import {
   SAW_SUBSTRATES, bawField, bawResonance, energyDensity, forceAt, potentialAt,
   pressureAt, rayleighAngle, ssawField, ssawFrequency, ssawNodeShift,
   ssawWavelength, trapPositions, type SsawDevice,
-} from "../src/fields.ts";
-import { pointGroup, isPiezoelectric } from "../src/pointgroups.ts";
+} from "../src/fields.js";
+import { pointGroup, isPiezoelectric } from "../src/pointgroups.js";
 
 const near = (a: number, b: number, eps: number, what = "") =>
   assert.ok(Math.abs(a - b) < eps, `${what} ${a} !~ ${b} (d=${Math.abs(a - b)})`);

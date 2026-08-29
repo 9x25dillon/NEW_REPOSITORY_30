@@ -3,11 +3,11 @@ import { test } from "node:test";
 import {
   ASPECT_INTERVALS, BASE_HZ, CENTS_PER_DEGREE, beatHz, centsBetween, chord,
   droneHz, slowestBeat,
-} from "../personal/tonal.ts";
+} from "../personal/tonal.js";
 import {
   aspectCircle, cliffordPoint, embedDonut, pairRotation, separation, stereo3,
   wrap180, type Vec3,
-} from "../personal/torus.ts";
+} from "../personal/torus.js";
 
 const near = (a: number, b: number, eps: number, what = "") =>
   assert.ok(Math.abs(a - b) < eps, `${what} ${a} !~ ${b} (d=${Math.abs(a - b)})`);

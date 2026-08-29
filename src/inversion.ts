@@ -29,9 +29,9 @@
 // Two media is the minimum and three or more lets the fit report a residual.
 // propertiesFromContrasts does that intersection; it will not accept fewer.
 
-import { type Medium, type Particle, compressibility, contrastFactor } from "./gorkov.ts";
-import { type StandingWave1D } from "./fields.ts";
-import { WATER_VISCOSITY } from "./trajectory.ts";
+import { type Medium, type Particle, compressibility, contrastFactor } from "./gorkov.js";
+import { type StandingWave1D } from "./fields.js";
+import { WATER_VISCOSITY } from "./trajectory.js";
 
 /** One tracked position of one cell, from a video frame. */
 export interface Track {

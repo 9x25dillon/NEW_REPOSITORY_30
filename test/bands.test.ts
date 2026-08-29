@@ -4,7 +4,7 @@ import {
   bandGaps, bandsAt, besselJ1, blochWavenumber, brillouinPath, completeGap,
   fourierCoefficient, impedance, layeredTrace, reciprocalVectors,
   type Crystal2D, type Layer,
-} from "../src/bands.ts";
+} from "../src/bands.js";
 
 const near = (a: number, b: number, eps: number, what = "") =>
   assert.ok(Math.abs(a - b) < eps, `${what} ${a} !~ ${b} (d=${Math.abs(a - b)})`);

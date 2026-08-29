@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   LIPID_DROPLET, MAMMALIAN_CELL, WATER, collectsAt, contrastFactor,
   energyDensity, f1, f2, radiationForce1D, stokesDrag, wavenumber,
-} from "../src/gorkov.ts";
+} from "../src/gorkov.js";
 
 test("a mammalian cell has POSITIVE contrast and collects at pressure nodes", () => {
   const phi = contrastFactor(MAMMALIAN_CELL, WATER);

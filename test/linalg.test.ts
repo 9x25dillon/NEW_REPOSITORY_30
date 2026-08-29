@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   asymmetry, cholesky, generalizedSymmetricEigen, identity, symmetricEigen, zeros,
-} from "../src/linalg.ts";
+} from "../src/linalg.js";
 
 const near = (a: number, b: number, eps: number, what = "") =>
   assert.ok(Math.abs(a - b) < eps, `${what} ${a} !~ ${b} (d=${Math.abs(a - b)})`);

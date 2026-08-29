@@ -281,9 +281,50 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 86 tests, no network, no fixtures
+npm test          # 92 tests, no network, no fixtures
 npm run typecheck
+
+npm run build     # tsc emits browser ESM into app/dist
+python3 -m http.server 8099   # then open localhost:8099/app/index.html
 ```
+
+A static server is needed because the app is native ES modules, which browsers
+will not load over `file://`. There is no bundler and no framework — `tsc` emits
+the same modules the tests import, so a number on screen and a number in a test
+come from one implementation. That is the only thing that makes the provenance
+tags mean anything.
+
+## The app
+
+Three screens, in the order the work actually happens.
+
+**Substrates.** All 32 point groups with piezoelectric, polar and chiral flags
+and the drivable coefficients for each. Rows that cannot carry a wave are greyed
+out — 12 of them, the 11 centrosymmetric groups plus `432`. Pure lookup, no
+inputs, immediately useful to someone choosing a wafer.
+
+**Device.** Channel width or IDT pitch in; resonance, trap positions, focusing
+time out. Every figure carries a provenance tag, and the guards surface as
+interface: below the streaming crossover, near the iso-acoustic point, substrate
+slower than the fluid, substrate not piezoelectric. Each is a one-line message
+that saves a fabrication run.
+
+**Measure.** Paste tracked positions, get Φ with an r². Add a second medium of
+different density and it solves for density and compressibility, which flows
+straight back into the Device screen.
+
+### Provenance is the interface
+
+`src/provenance.ts` carries the rule: **a derived value inherits the weakest
+provenance among its inputs.** One assumed number anywhere upstream and the
+headline is assumed, however exact every step after it was. `blame()` names the
+leaf responsible, so an amber result always says what to go and measure.
+
+`derive()` can never return `measured`. A computed value is at best derived even
+when every input was measured, because nobody measured *it* — the difference
+between "we observed this cell focus in 42 ms" and "we calculate that it
+should". Taking a measurement therefore turns the Device screen's tiles from
+amber to **blue**, not green, and the app says so.
 
 ## Layout
 
@@ -297,10 +338,12 @@ src/neumann.ts       which tensor components a crystal is allowed to have
 src/linalg.ts        Jacobi eigensolver and Cholesky reduction, no dependency
 src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
 src/inversion.ts     measured tracks -> contrast factor -> density and kappa
+src/provenance.ts    measured / derived / assumed, and the weakest-link rule
+app/                 the three screens; `npm run build` then serve statically
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
 personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 config/subject.ts    the one subject — natal record and biological parameters
-test/                86 tests: what the modules above are actually claiming
+test/                92 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

@@ -2,13 +2,13 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   MAMMALIAN_CELL, WATER, compressibility, contrastFactor, type Medium, type Particle,
-} from "../src/gorkov.ts";
-import { bawField } from "../src/fields.ts";
-import { WATER_VISCOSITY, positionAt } from "../src/trajectory.ts";
+} from "../src/gorkov.js";
+import { bawField } from "../src/fields.js";
+import { WATER_VISCOSITY, positionAt } from "../src/trajectory.js";
 import {
   POLYSTYRENE, amplitudeFromTrack, contrastFromTrack, isoAcousticDensity,
   propertiesFromContrasts, type ContrastMeasurement, type Track,
-} from "../src/inversion.ts";
+} from "../src/inversion.js";
 
 const near = (a: number, b: number, eps: number, what = "") =>
   assert.ok(Math.abs(a - b) < eps, `${what} ${a} !~ ${b} (rel ${Math.abs((a - b) / b)})`);

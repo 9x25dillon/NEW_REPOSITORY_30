@@ -1,14 +1,14 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { LIPID_DROPLET, MAMMALIAN_CELL, WATER } from "../src/gorkov.ts";
+import { LIPID_DROPLET, MAMMALIAN_CELL, WATER } from "../src/gorkov.js";
 import {
   SAW_SUBSTRATES, bawField, energyDensity as energyDensityOf,
   envelopePhaseForIdt, ssawField, ssawNodeShift, trapPositions,
-} from "../src/fields.ts";
+} from "../src/fields.js";
 import {
   WATER_VISCOSITY, focusTime, integrate, maxSweepSpeed, positionAt,
   rateConstant, timeBetween, velocityAt,
-} from "../src/trajectory.ts";
+} from "../src/trajectory.js";
 
 const near = (a: number, b: number, eps: number, what = "") =>
   assert.ok(Math.abs(a - b) < eps, `${what} ${a} !~ ${b} (d=${Math.abs(a - b)})`);

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   POINT_GROUPS, SUBSTRATES, allowsSHG, isEnantiomorphic, isPiezoelectric,
   isPolar, isSHGEdgeCase, pointGroup, substrateIsViable,
-} from "../src/pointgroups.ts";
+} from "../src/pointgroups.js";
 
 test("the census: 32 groups, 11 centrosymmetric, 21 not", () => {
   assert.equal(POINT_GROUPS.length, 32);

@@ -29,7 +29,7 @@
 // neumann.ts contracted into a 3x3 block problem with complex coefficients;
 // that is a real extension, not a refinement, and it is not here.
 
-import { generalizedSymmetricEigen, zeros, type Matrix } from "./linalg.ts";
+import { generalizedSymmetricEigen, zeros, type Matrix } from "./linalg.js";
 
 export interface Layer {
   /** Thickness, m. */

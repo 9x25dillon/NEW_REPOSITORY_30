@@ -33,7 +33,7 @@
 // SETTING: unique axis z — see symmetry.ts. Counts are setting-independent,
 // patterns are not.
 
-import { type Mat3, multiply, operations, trace } from "./symmetry.ts";
+import { type Mat3, multiply, operations, trace } from "./symmetry.js";
 
 export type TensorKind = "permittivity" | "piezoelectric" | "elastic";
 

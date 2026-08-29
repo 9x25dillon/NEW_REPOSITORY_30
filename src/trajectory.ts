@@ -29,8 +29,8 @@
 // antinode stays there forever, because that is an equilibrium — an unstable
 // one, which is why real devices do not care.
 
-import { type Medium, type Particle, compressibility, contrastFactor } from "./gorkov.ts";
-import { type StandingWave1D, forceAt } from "./fields.ts";
+import { type Medium, type Particle, compressibility, contrastFactor } from "./gorkov.js";
+import { type StandingWave1D, forceAt } from "./fields.js";
 
 /** Dynamic viscosity of water at 25 C, Pa·s. */
 export const WATER_VISCOSITY = 8.9e-4;
