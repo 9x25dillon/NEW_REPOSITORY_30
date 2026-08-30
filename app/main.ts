@@ -25,11 +25,15 @@ import {
 import {
   GLYPH, assumed, blame, derive, measured, verdict, type Tagged,
 } from "../src/provenance.js";
+import {
+  SOHNCKE_GROUPS, axialPattern, candidates, groupsOfPointGroup,
+  type Reflection,
+} from "../src/sohncke.js";
 import { BIOLOGY, MEASURED } from "../config/subject.js";
 
 // ── state ───────────────────────────────────────────────────────────────────
 
-type View = "substrates" | "device" | "measure";
+type View = "substrates" | "device" | "measure" | "crystals";
 
 interface State {
   view: View;
@@ -506,12 +510,102 @@ function runFit(): void {
   }
 }
 
+// ── screen 4 · crystals ─────────────────────────────────────────────────────
+
+let observed = "0 0 3\n1 1 1\n2 0 0";
+
+function crystalsView(): string {
+  let refl: Reflection[] = [];
+  let parseErr = "";
+  try {
+    refl = observed.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [h, k, m] = l.split(/[\s,]+/).map(Number);
+      if (![h, k, m].every(Number.isFinite)) throw new Error(`cannot read "${l}" as "h k l"`);
+      return { h, k, l: m };
+    });
+  } catch (e) { parseErr = (e as Error).message; }
+  const left = refl.length ? candidates(refl) : [...SOHNCKE_GROUPS];
+
+  const rows = SOHNCKE_GROUPS.map((sg) => {
+    const alive = left.some((x) => x.symbol === sg.symbol);
+    const pat = (d: "a" | "b" | "c") => {
+      const p = axialPattern(sg, d, 6);
+      return p.length === 6 ? "all" : p.join(",");
+    };
+    return `<tr class="${alive ? "" : "no"}">
+      <td class="mono">${sg.number}</td>
+      <td class="mono"><b>${esc(sg.symbol)}</b></td>
+      <td class="mono">${esc(sg.pointGroup)}</td>
+      <td class="mono">${sg.lattice}</td>
+      <td class="mono">${esc(pat("a"))}</td>
+      <td class="mono">${esc(pat("b"))}</td>
+      <td class="mono">${esc(pat("c"))}</td>
+      <td class="mono">${sg.enantiomorph ? esc(sg.enantiomorph) : "·"}</td>
+      <td>${sg.common ? '<span class="yes">common</span>' : ""}</td>
+    </tr>`;
+  }).join("");
+
+  const byPG = ["1", "2", "222", "4", "422", "3", "32", "6", "622", "23", "432"]
+    .map((hm) => `${hm}&nbsp;<b>${groupsOfPointGroup(hm).length}</b>`).join(" · ");
+
+  return `
+  <h2>Crystals</h2>
+  <p class="sub">The 65 space groups a chiral molecule is allowed</p>
+
+  <div class="panel">
+    <p style="margin:0 0 6px">
+      Proteins are built from L-amino acids, so they are <b>chiral</b>, and a
+      chiral molecule cannot occupy a symmetry operation that would turn it into
+      its mirror image. Of the 230 space groups, a protein crystal is restricted
+      to the <b>65 Sohncke groups</b> — rotations, screw axes and translations,
+      with no mirrors, glides, inversions or rotoinversions.
+    </p>
+    <p class="note">
+      Their point groups are exactly the 11 chiral ones the Substrates screen
+      already lists, from a module that knows nothing about proteins. The other
+      21 are closed to protein crystallography outright. By point group: ${byPG}.
+    </p>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2 style="font-size:1rem">Observed reflections</h2>
+      <p class="sub" style="margin-bottom:10px">One "h k l" per line</p>
+      <label class="f"><span>Reflections you actually saw</span>
+        <textarea id="obs" rows="8">${esc(observed)}</textarea></label>
+      ${parseErr ? `<p class="err">${esc(parseErr)}</p>` : ""}
+      <p class="ok" style="margin-top:4px"><b>${left.length}</b> of 65 groups survive</p>
+      <p class="note">
+        This rules groups <b>out</b> and never rules one in. An observed
+        reflection is hard evidence a group is wrong; an absent one might only be
+        weak, mis-indexed, or outside the resolution collected.
+      </p>
+      <p class="note">
+        Enantiomorphic pairs have <b>identical</b> absences, so this can never
+        choose between P4<sub>1</sub> and P4<sub>3</sub>. Settling the hand needs
+        anomalous scattering — a limit of the method, not a gap here.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="scroll"><table>
+        <tr><th>№</th><th>Symbol</th><th>Point</th><th>Latt</th>
+            <th>h00</th><th>0k0</th><th>00l</th><th>Other hand</th><th></th></tr>
+        ${rows}
+      </table></div>
+      <p class="note">Axial columns list which reflections survive to index 6;
+        "all" means no screw on that axis. Greyed rows are excluded by the
+        reflections entered.</p>
+    </div>
+  </div>`;
+}
+
 // ── render ──────────────────────────────────────────────────────────────────
 
 function render(): void {
   const root = $("#root");
   root.innerHTML = state.view === "substrates" ? substratesView()
     : state.view === "device" ? deviceView()
+    : state.view === "crystals" ? crystalsView()
     : measureView();
 
   document.querySelectorAll("#nav button").forEach((b) => {
@@ -537,6 +631,8 @@ function render(): void {
   });
   const fitEl = document.getElementById("m_fit");
   if (fitEl) fitEl.addEventListener("click", runFit);
+  const obsEl = document.getElementById("obs") as HTMLTextAreaElement | null;
+  if (obsEl) obsEl.addEventListener("change", () => { observed = obsEl.value; render(); });
 }
 
 document.querySelectorAll("#nav button").forEach((b) => {

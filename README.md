@@ -281,7 +281,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 113 tests, no network, no fixtures
+npm test          # 122 tests, no network, no fixtures
 npm run typecheck
 
 npm run build     # tsc emits browser ESM into app/dist
@@ -308,6 +308,15 @@ time out. Every figure carries a provenance tag, and the guards surface as
 interface: below the streaming crossover, near the iso-acoustic point, substrate
 slower than the fluid, substrate not piezoelectric. Each is a one-line message
 that saves a fabrication run.
+
+**Crystals.** The 65 Sohncke space groups — the ones a chiral molecule is
+allowed. Proteins are built from L-amino acids, so no mirror, glide, inversion
+or rotoinversion is available to them: 65 of the 230, and their point groups are
+*exactly* the 11 chiral ones `pointgroups.ts` already computes, from a module
+that knows nothing about proteins. Enter observed reflections and it rules
+groups out by systematic absence — the assignment as it is actually made at a
+beamline. It rules **out** and never in, and it can never separate an
+enantiomorphic pair, because opposite hands have identical absences.
 
 **Measure.** Paste tracked positions, get Φ with an r². Add a second medium of
 different density and it solves for density and compressibility, which flows
@@ -388,6 +397,7 @@ src/linalg.ts        Jacobi eigensolver and Cholesky reduction, no dependency
 src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
 src/inversion.ts     measured tracks -> contrast factor -> density and kappa
 src/provenance.ts    measured / derived / assumed, and the weakest-link rule
+src/sohncke.ts       the 65 chiral space groups and their systematic absences
 app/index.html       the bench: substrates, device, measure
 app/listen.html      the chord: a separate page, sharing no code with the bench
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
@@ -395,7 +405,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                113 tests: what the modules above are actually claiming
+test/                122 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
