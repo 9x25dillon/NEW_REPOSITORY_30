@@ -24,21 +24,43 @@ import {
 
 const GLYPHS: Record<string, string> = {
   Sun: "☉", Moon: "☽", Mercury: "☿", Venus: "♀", Mars: "♂", Jupiter: "♃",
-  Saturn: "♄", Uranus: "♅", Neptune: "♆", Pluto: "♇", Node: "☊", Chiron: "⚷",
+  Saturn: "♄", Uranus: "♅", Neptune: "♆", Pluto: "♇",
+  "North Node": "☊", "South Node": "☋", Chiron: "⚷", Lilith: "⚸",
 };
 
-/** A chart to open with, so the page makes a sound on first visit. Replace it
- *  in the panel — this page sounds a chart, it does not cast one. */
-const DEFAULT_CHART = `Sun 228.6
-Moon 41.2
-Mercury 245.9
-Venus 262.4
-Mars 199.1
-Jupiter 15.7
-Saturn 258.3
-Uranus 263.8
-Neptune 276.5
-Pluto 191.4`;
+/**
+ * The chart this page opens with — the operator's own, computed from confirmed
+ * birth data (1987-11-11, 13:09, UTC−8) against the Swiss ephemeris.
+ *
+ * THE ANGLES ARE DELIBERATELY ABSENT. A body's ecliptic longitude depends only
+ * on the instant, so these fourteen are exact without knowing where the birth
+ * happened — measured, not assumed: recomputing at latitudes from the equator to
+ * 64° north moves every one of them by 0.00e+0 degrees. The Ascendant moves by
+ * 55°, the Part of Fortune with it, and the Midheaven by 17°, so those three are
+ * not here. Adding them would need a birthplace from a document, and a guessed
+ * coordinate would put three voices in the chord that are simply wrong.
+ *
+ * The South Node is left out for a different reason: it sits exactly 180° from
+ * the North, which under this map is exactly an octave, so it would double the
+ * nodal voice rather than add one. Paste it back in if you want that doubling —
+ * it is a real octave, not a rounding.
+ *
+ * Replace any of this in the panel. The page sounds a chart; it does not cast
+ * one.
+ */
+const DEFAULT_CHART = `Sun 228.94
+Moon 120.20
+Mercury 209.97
+Venus 249.86
+Mars 202.01
+Jupiter 21.64
+Saturn 259.67
+Uranus 264.74
+Neptune 276.05
+Pluto 220.27
+North Node 1.14
+Chiron 88.04
+Lilith 129.55`;
 
 function parseChart(text: string): Placement[] {
   const out: Placement[] = [];
@@ -65,12 +87,45 @@ const reduced = typeof matchMedia === "function"
 
 // ── sound ───────────────────────────────────────────────────────────────────
 
+interface Voice { osc: OscillatorNode; filter: BiquadFilterNode; }
 interface Playing {
   ctx: AudioContext;
   master: GainNode;
-  voices: OscillatorNode[];
+  voices: Voice[];
 }
 let playing: Playing | null = null;
+
+/**
+ * One drone voice: sawtooth into a lowpass that TRACKS the pitch at 3.5x.
+ *
+ * Not sine, and the difference matters more than it sounds like it should.
+ * Thirteen bare sines inside an octave and a half beat against each other in
+ * the five-to-fifteen hertz band, which is exactly where two tones stop sounding
+ * like two tones and start sounding rough. A filtered sawtooth has more
+ * harmonics, not fewer — but because the corner follows the fundamental, the low
+ * voices come out dark and the high ones bright, and the ear separates them by
+ * timbre instead of trying to fuse them. It is the same voice the torus panel in
+ * the other application uses, which is the sound this page exists to reproduce.
+ */
+function makeVoice(ctx: AudioContext, hz: number, gain: number, dest: AudioNode): Voice {
+  const osc = ctx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(hz, ctx.currentTime);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = hz * 3.5;
+  filter.Q.value = 0.7;
+
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, ctx.currentTime);
+  // Staggered so thirteen voices do not all arrive on one sample.
+  g.gain.exponentialRampToValueAtTime(gain, ctx.currentTime + 2 + Math.random() * 2);
+
+  osc.connect(filter).connect(g).connect(dest);
+  osc.start();
+  return { osc, filter };
+}
 
 function start(): void {
   const Ctor = window.AudioContext
@@ -80,36 +135,14 @@ function start(): void {
 
   const master = ctx.createGain();
   master.gain.setValueAtTime(0.0001, ctx.currentTime);
-  // A slow swell rather than a switch. Sine voices starting at full gain click,
-  // and a chord that arrives over three seconds is the difference between an
-  // instrument and an alarm.
-  master.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + 3);
+  // A slow swell rather than a switch, and quieter than a sine chord would need:
+  // a sawtooth carries far more energy for the same amplitude.
+  master.gain.exponentialRampToValueAtTime(0.09, ctx.currentTime + 3);
+  master.connect(ctx.destination);
 
-  // One gentle lowpass across the whole chord. The map tops out at 440 Hz so
-  // nothing here is bright, but the corner takes the edge off the higher
-  // voices and lets the beating sit forward.
-  const tone = ctx.createBiquadFilter();
-  tone.type = "lowpass";
-  tone.frequency.value = 1200;
-  tone.Q.value = 0.4;
-
-  const voices: OscillatorNode[] = [];
   const n = Math.max(1, placements.length);
-  for (const p of placements) {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(droneHz(p.longitude), ctx.currentTime);
-    const g = ctx.createGain();
-    // Divided by the count so a fourteen-body chart is not fourteen times as
-    // loud as a six-body one, and slightly staggered so they do not all arrive
-    // on the same sample.
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(1 / n, ctx.currentTime + 2 + Math.random() * 2);
-    osc.connect(g).connect(tone);
-    osc.start();
-    voices.push(osc);
-  }
-  tone.connect(master).connect(ctx.destination);
+  const voices = placements.map((p) =>
+    makeVoice(ctx, droneHz(p.longitude), 1 / n, master));
   playing = { ctx, master, voices };
 }
 
@@ -122,7 +155,7 @@ function stop(): void {
   master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), ctx.currentTime);
   master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.4);
   window.setTimeout(() => {
-    for (const v of voices) { try { v.stop(); } catch { /* already stopped */ } }
+    for (const v of voices) { try { v.osc.stop(); } catch { /* already stopped */ } }
     void ctx.close();
   }, 1600);
 }
@@ -297,9 +330,15 @@ chartBox.addEventListener("change", () => {
   // Retune a sounding chord in place rather than restarting it — the point of a
   // drone is that it does not stop.
   if (playing) {
-    playing.voices.forEach((osc, i) => {
+    const { ctx, voices } = playing;
+    voices.forEach((v, i) => {
       const p = placements[i];
-      if (p) osc.frequency.linearRampToValueAtTime(droneHz(p.longitude), playing!.ctx.currentTime + 1.5);
+      if (!p) return;
+      const hz = droneHz(p.longitude);
+      v.osc.frequency.linearRampToValueAtTime(hz, ctx.currentTime + 1.5);
+      // The filter has to glide with the pitch or the timbre slides out from
+      // under the note — the corner is a property of the voice, not of the room.
+      v.filter.frequency.setTargetAtTime(hz * 3.5, ctx.currentTime, 0.5);
     });
   }
 });
