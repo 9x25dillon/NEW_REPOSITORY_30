@@ -281,7 +281,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 93 tests, no network, no fixtures
+npm test          # 104 tests, no network, no fixtures
 npm run typecheck
 
 npm run build     # tsc emits browser ESM into app/dist
@@ -320,6 +320,24 @@ chart with a tight conjunction hums; one spread out sits still. Audio starts on 
 button press and nowhere else — the AudioContext is constructed inside the click
 handler, so there is no path to sound a reader did not ask for.
 
+**Sweep** puts two signals over the drones — one climbing 1 Hz to 300, one
+falling back — so the chart is heard as a *sequence* of zero-beats rather than
+as a chord. Linear in time, not exponential: 1→300 Hz is 8.2 octaves and the
+drones occupy 1.5 of them, so an exponential sweep would rush every crossing
+into a few seconds near the top.
+
+**Upcoming** is the same thing at the speed the sky moves. A transit *is* a
+sweep: the natal drone holds still while the transiting one glides through four
+weeks either side of exactness, and the interval locks as it passes — 800 cents
+for a trine, 600 for a square, 0 for a conjunction, because the map puts every
+classical aspect on a whole multiple of 200. A station has nothing to lock
+against, so what you hear is the glide slowing, stopping and reversing.
+
+The positions are computed elsewhere and **pasted in**, nine real weekly samples
+per event. `personal/transits.ts` holds no ephemeris and should not grow one: at
+a station the speed is zero, and reconstructing the turn from a speed would draw
+a straight line through the one moment that is entirely curvature.
+
 It is a separate page on purpose. A tab would present the two as views of one
 thing, and the import graph says otherwise: `app/main.ts` knows nothing of
 `personal/`, `app/listen.ts` nothing of `src/`, and `test/boundary.test.ts`
@@ -356,8 +374,9 @@ app/index.html       the bench: substrates, device, measure
 app/listen.html      the chord: a separate page, sharing no code with the bench
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
 personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
+personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 config/subject.ts    the one subject — natal record and biological parameters
-test/                93 tests: what the modules above are actually claiming
+test/                104 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

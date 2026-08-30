@@ -21,6 +21,10 @@ import {
 import {
   aspectCircle, cliffordPoint, pairRotation, separation, stereo3, type Vec3,
 } from "../personal/torus.js";
+import {
+  DEFAULT_TRANSITS, isStation, lockCents, parseTransits, reverses,
+  upcoming, type TransitEvent,
+} from "../personal/transits.js";
 
 const GLYPHS: Record<string, string> = {
   Sun: "☉", Moon: "☽", Mercury: "☿", Venus: "♀", Mars: "♂", Jupiter: "♃",
@@ -164,7 +168,9 @@ function resetButtons(): void {
   playBtn.textContent = "\u25B6\u2003Sound the chart";
   sweepBtn.textContent = "\u25B6\u2003Sweep";
   sweepStartedAt = null;
+  soundingEvent = null;
   readout.innerHTML = "";
+  renderEvents();
 }
 
 function stop(): void {
@@ -304,6 +310,92 @@ function renderVoices(): void {
       : "") +
     (beat ? `<div class="beat">slowest beat · ${beat.a}&#8202;–&#8202;${beat.b}
        at ${beat.hz.toFixed(2)} Hz${named}</div>` : "");
+}
+
+// ── transits: the sweep the sky is already running ──────────────────────────
+//
+// Same machinery as the synthetic sweep, at the rate things actually move. The
+// natal drone holds; the transiting one follows nine real weekly positions
+// across the four weeks either side of exactness. A station has no second voice
+// to lock against, so what you hear is the glide decelerating, stopping and
+// reversing — which is in the data rather than reconstructed, because at a
+// station the speed is zero and a straight line through it would erase the only
+// thing happening.
+
+const TRANSIT_SECONDS = 22;
+const transits = parseTransits(DEFAULT_TRANSITS);
+let soundingEvent: string | null = null;
+
+function startTransit(e: TransitEvent): void {
+  const Ctor = window.AudioContext
+    ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return;
+  const ctx = new Ctor();
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 2);
+  master.connect(ctx.destination);
+
+  const voices: Array<{ osc: OscillatorNode; filter: BiquadFilterNode }> = [];
+
+  // the natal drone, fixed — the thing being arrived at
+  if (e.targetLongitude !== null) {
+    voices.push(makeVoice(ctx, droneHz(e.targetLongitude), 0.55, master));
+  }
+
+  // the transiting drone, following its real track
+  const path = e.track.map(droneHz);
+  const moving = makeVoice(ctx, path[0], 0.55, master);
+  const step = TRANSIT_SECONDS / (path.length - 1);
+  path.forEach((hz, i) => {
+    const at = ctx.currentTime + i * step;
+    moving.osc.frequency.linearRampToValueAtTime(hz, at);
+    moving.filter.frequency.linearRampToValueAtTime(hz * 3.5, at);
+  });
+  voices.push(moving);
+
+  playing = { ctx, master, voices };
+  soundingEvent = e.date + e.body;
+  window.setTimeout(() => {
+    if (playing && soundingEvent === e.date + e.body) { stop(); resetButtons(); }
+  }, (TRANSIT_SECONDS + 2) * 1000);
+}
+
+function renderEvents(): void {
+  const host = document.getElementById("events");
+  if (!host) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const list = upcoming(transits, today).slice(0, 24);
+  host.innerHTML = list.map((e) => {
+    const key = e.date + e.body;
+    const what = isStation(e)
+      ? `${GLYPHS[e.body] ?? ""} ${e.body} turns ${e.direction}`
+      : `${GLYPHS[e.body] ?? ""} ${e.body} ${e.kind.toLowerCase()} natal ${GLYPHS[e.target ?? ""] ?? ""} ${e.target}`;
+    const c = lockCents(e);
+    const right = isStation(e)
+      ? (reverses(e) ? "reverses" : "—")
+      : `${Math.round(c ?? 0)}\u00A2`;
+    return `<button class="ev" data-key="${key}" aria-pressed="${soundingEvent === key}">
+      <span class="d">${e.date}</span><span class="w">${what}</span><span class="i">${right}</span>
+    </button>`;
+  }).join("");
+
+  host.querySelectorAll(".ev").forEach((b) => {
+    b.addEventListener("click", () => {
+      const key = (b as HTMLElement).dataset.key!;
+      const hit = list.find((x) => x.date + x.body === key);
+      if (!hit) return;
+      // Read the toggle state BEFORE stopping. resetButtons clears
+      // soundingEvent, so checking it afterwards always found null and the
+      // event restarted instead of stopping — a click that looked like it did
+      // nothing except make the sound begin again.
+      const wasSounding = soundingEvent === key;
+      if (playing) { stop(); resetButtons(); }
+      if (wasSounding) { renderEvents(); return; }
+      startTransit(hit);
+      renderEvents();
+    });
+  });
 }
 
 // ── the sweep readout and strip ─────────────────────────────────────────────
@@ -551,4 +643,5 @@ chartBox.addEventListener("change", () => {
 });
 
 renderVoices();
+renderEvents();
 requestAnimationFrame(frame);
