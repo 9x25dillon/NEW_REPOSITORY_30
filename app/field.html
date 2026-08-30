@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#0e0b18; --panel:#161129; --ink:#e8e2f5; --ink-2:#a99cc4;
+  --ink-3:#726592; --rule:#2a2244; --hue:#9d7bd8; --hue2:#4fd0d8; --warn:#e0a355;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+  font-size:14px;line-height:1.55;min-height:100vh;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1240px;margin:0 auto;padding:26px 20px 60px}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+h1{font-size:1.45rem;font-weight:500;margin:0;letter-spacing:-.015em}
+.here{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--hue)}
+.lede{color:var(--ink-2);max-width:44em;margin:0 0 22px;font-size:13.5px}
+.lede a{color:var(--hue2)}
+.stage{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:start}
+@media(max-width:860px){.stage{grid-template-columns:1fr}}
+canvas{width:100%;height:auto;display:block;border-radius:6px;background:#0a0814}
+#strip{margin-top:8px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:7px;padding:14px 15px;margin-bottom:12px}
+.panel h2{font-family:var(--mono);font-size:10px;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 12px;font-weight:500}
+label.f{display:block;margin-bottom:11px}
+label.f .row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-2);margin-bottom:3px}
+label.f .v{font-family:var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--hue);height:18px}
+input[type=range]:focus-visible{outline:2px solid var(--hue);outline-offset:3px}
+.toggles{display:flex;gap:6px;flex-wrap:wrap}
+.tg{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:14px;
+  border:1px solid var(--rule);background:none;color:var(--ink-3);cursor:pointer}
+.tg[aria-pressed="true"]{border-color:var(--hue);color:var(--hue);background:rgba(157,123,216,.12)}
+.tg:focus-visible{outline:2px solid var(--hue);outline-offset:2px}
+button.go{font-family:var(--sans);font-size:14px;padding:10px 24px;border-radius:24px;
+  border:1px solid var(--hue);background:rgba(157,123,216,.12);color:var(--ink);
+  cursor:pointer;width:100%;margin-top:2px}
+button.go:hover{background:rgba(157,123,216,.22)}
+button.go:focus-visible{outline:2px solid var(--hue);outline-offset:2px}
+.meta{font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.75;margin-top:10px}
+.meta b{color:var(--ink);font-weight:500}
+.warn{font-family:var(--mono);font-size:11px;color:var(--warn);border-left:2px solid var(--warn);
+  padding-left:10px;margin-top:14px;line-height:1.6}
+.note{font-size:12px;color:var(--ink-3);margin-top:14px;line-height:1.6;max-width:60em}
+.note b{color:var(--ink-2);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Field</h1><span class="here">Listening</span></header>
+  <p class="lede">A five-dimensional lattice, cut at an irrational angle and projected.
+    Each point is a voice: its distance from the centre is its pitch, its position in the
+    <em>other</em> projection decides whether it sounds at all. Never repeats, entirely
+    ordered. <a href="./listen.html">Chord</a> · <a href="./index.html">Bench</a></p>
+
+  <div class="stage">
+    <div>
+      <canvas id="c" width="1600" height="1000" aria-label="Quasicrystal point field; each point is a voice."></canvas>
+      <canvas id="strip" width="1600" height="130" aria-label="Frequency axis with sweeps and tones."></canvas>
+      <p class="note" id="readout"></p>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Field</h2>
+        <label class="f"><span class="row"><span>voices</span><span class="v" id="vVoices">48</span></span>
+          <input type="range" id="voices" min="0" max="60" value="48"></label>
+        <label class="f"><span class="row"><span>phason drift</span><span class="v" id="vDrift">0.6</span></span>
+          <input type="range" id="drift" min="0" max="30" value="6"></label>
+        <label class="f"><span class="row"><span>ceiling</span><span class="v" id="vCeil">8000 Hz</span></span>
+          <input type="range" id="ceil" min="1000" max="8000" step="100" value="8000"></label>
+      </div>
+
+      <div class="panel">
+        <h2>Cross sweeps · 6</h2>
+        <label class="f"><span class="row"><span>period</span><span class="v" id="vPeriod">70 s</span></span>
+          <input type="range" id="period" min="20" max="240" value="70"></label>
+        <div class="toggles"><button class="tg" id="tgSweep" aria-pressed="true">on</button></div>
+      </div>
+
+      <div class="panel">
+        <h2>Binaural</h2>
+        <label class="f"><span class="row"><span>pairs</span><span class="v" id="vPairs">6</span></span>
+          <input type="range" id="pairs" min="0" max="8" value="6"></label>
+        <label class="f"><span class="row"><span>beat</span><span class="v" id="vBeat">6.0 Hz</span></span>
+          <input type="range" id="beat" min="10" max="160" value="60"></label>
+        <label class="f"><span class="row"><span>spread</span><span class="v" id="vSpread">2.4 Hz</span></span>
+          <input type="range" id="spread" min="0" max="80" value="24"></label>
+      </div>
+
+      <div class="panel">
+        <h2>Tones · 2</h2>
+        <label class="f"><span class="row"><span>A</span><span class="v" id="vA">220 Hz</span></span>
+          <input type="range" id="toneA" min="20" max="8000" value="220"></label>
+        <label class="f"><span class="row"><span>B</span><span class="v" id="vB">3400 Hz</span></span>
+          <input type="range" id="toneB" min="20" max="8000" value="3400"></label>
+        <div class="toggles">
+          <button class="tg" id="tgA" aria-pressed="true">A</button>
+          <button class="tg" id="tgB" aria-pressed="true">B</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Out</h2>
+        <label class="f"><span class="row"><span>level</span><span class="v" id="vGain">0.35</span></span>
+          <input type="range" id="gain" min="0" max="100" value="35"></label>
+        <button class="go" id="go">▶&#8195;Start</button>
+        <div class="meta" id="meta"></div>
+        <div class="warn">Binaural beats need headphones — the two ears must get
+          different signals. Sustained tones near 8 kHz carry real hearing risk at
+          volume: a limiter holds peaks, it does not make long exposure safe.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module" src="./dist/app/field.js"></script>
+</body>
+</html>

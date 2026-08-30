@@ -281,7 +281,7 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 104 tests, no network, no fixtures
+npm test          # 113 tests, no network, no fixtures
 npm run typecheck
 
 npm run build     # tsc emits browser ESM into app/dist
@@ -338,6 +338,24 @@ per event. `personal/transits.ts` holds no ephemeris and should not grow one: at
 a station the speed is zero, and reconstructing the turn from a speed would draw
 a straight line through the one moment that is entirely curvature.
 
+**Field** — `app/field.html`. A five-dimensional lattice, cut at an irrational
+angle and projected. Five-fold symmetry is *forbidden* to any periodic lattice
+(the restriction theorem, tier 4), so what exists instead is a quasicrystal:
+aperiodic, never repeating, entirely ordered. Each point is a voice — radius in
+physical space sets its pitch, position in the *other* projection decides
+whether it sounds at all.
+
+Up to 60 field voices, six cross-sweeps in three crossing pairs, up to eight
+binaural pairs (hard L/R, so the beat is built in the head and a bed cannot mask
+it), and two free tones to 8 kHz. A slow **phason** — a shift of the cut, which
+in quasicrystal physics costs no energy — reorganises the field continuously
+while every surviving voice keeps its frequency. That is the "liquid" in liquid
+crystal: orientational order without positional order.
+
+Summing is `1/√n`, not `1/n`: incoherent voices add in power, so at `1/n` the
+field would vanish as voices were added. A limiter catches peaks; it is not a
+substitute for turning it down.
+
 It is a separate page on purpose. A tab would present the two as views of one
 thing, and the import graph says otherwise: `app/main.ts` knows nothing of
 `personal/`, `app/listen.ts` nothing of `src/`, and `test/boundary.test.ts`
@@ -375,8 +393,9 @@ app/listen.html      the chord: a separate page, sharing no code with the bench
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
 personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
+personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                104 tests: what the modules above are actually claiming
+test/                113 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
