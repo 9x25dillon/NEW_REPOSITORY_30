@@ -46,6 +46,11 @@ button.play{font-family:var(--sans);font-size:14px;padding:9px 22px;border-radiu
 button.play:hover{background:var(--chord-soft)}
 button.play:focus-visible,textarea:focus-visible{outline:2px solid var(--chord);outline-offset:2px}
 .hint{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+#strip{margin-top:6px;height:60px}
+.readout{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-top:12px;
+  line-height:1.7;min-height:3.4em}
+.readout b{color:var(--chord);font-weight:500}
+.readout .null{color:var(--ink);font-weight:500}
 details{margin-top:30px;border-top:1px solid var(--rule);padding-top:16px}
 summary{cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.13em;
   text-transform:uppercase;color:var(--ink-3)}
@@ -69,10 +74,13 @@ textarea{width:100%;margin-top:12px;font-family:var(--mono);font-size:13px;paddi
   <div class="stage">
     <div>
       <canvas id="c" width="1320" height="660" aria-label="A torus with one point per body, turning slowly."></canvas>
+      <canvas id="strip" width="1320" height="120" aria-label="Frequency strip: the fourteen drones, and two sweeps crossing them."></canvas>
       <div class="controls">
         <button class="play" id="play">▶&#8195;Sound the chart</button>
+        <button class="play" id="sweep">▶&#8195;Sweep</button>
         <span class="hint" id="hint">drag to turn</span>
       </div>
+      <div class="readout" id="readout"></div>
     </div>
     <div class="voices" id="voices"></div>
   </div>

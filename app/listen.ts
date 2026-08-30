@@ -16,7 +16,7 @@
 // reader did not ask for. That is browser autoplay policy and also just correct.
 
 import {
-  ASPECT_INTERVALS, chord, droneHz, slowestBeat, type Placement,
+  ASPECT_INTERVALS, chord, droneHz, pairBodies, slowestBeat, type Placement,
 } from "../personal/tonal.js";
 import {
   aspectCircle, cliffordPoint, pairRotation, separation, stereo3, type Vec3,
@@ -40,10 +40,11 @@ const GLYPHS: Record<string, string> = {
  * not here. Adding them would need a birthplace from a document, and a guessed
  * coordinate would put three voices in the chord that are simply wrong.
  *
- * The South Node is left out for a different reason: it sits exactly 180° from
- * the North, which under this map is exactly an octave, so it would double the
- * nodal voice rather than add one. Paste it back in if you want that doubling —
- * it is a real octave, not a rounding.
+ * The South Node is included, and it is worth knowing what it does: it sits
+ * exactly 180° from the North, which under this map is exactly an octave. So the
+ * nodal axis is not two voices but one voice doubled at the octave — a real
+ * octave, not a rounding. It also makes the count fourteen, which folds evenly
+ * into the seven dyads the sweep is built on.
  *
  * Replace any of this in the panel. The page sounds a chart; it does not cast
  * one.
@@ -59,6 +60,7 @@ Uranus 264.74
 Neptune 276.05
 Pluto 220.27
 North Node 1.14
+South Node 181.14
 Chiron 88.04
 Lilith 129.55`;
 
@@ -127,7 +129,7 @@ function makeVoice(ctx: AudioContext, hz: number, gain: number, dest: AudioNode)
   return { osc, filter };
 }
 
-function start(): void {
+function start(withSweep = false): void {
   const Ctor = window.AudioContext
     ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Ctor) return;
@@ -141,9 +143,28 @@ function start(): void {
   master.connect(ctx.destination);
 
   const n = Math.max(1, placements.length);
-  const voices = placements.map((p) =>
-    makeVoice(ctx, droneHz(p.longitude), 1 / n, master));
+  // Under a sweep the drones step back: they are the bed the sweeps are heard
+  // AGAINST, and at equal level the beats get lost inside the chord.
+  const bed = withSweep ? 0.55 / n : 1 / n;
+  const voices = placements.map((p) => makeVoice(ctx, droneHz(p.longitude), bed, master));
   playing = { ctx, master, voices };
+
+  if (withSweep) {
+    makeSweep(ctx, SWEEP_LO, SWEEP_HI, master);
+    makeSweep(ctx, SWEEP_HI, SWEEP_LO, master);
+    sweepStartedAt = performance.now();
+    // The sweeps end on their own; stop the drones with them so the piece has a
+    // shape rather than trailing on after the sweeps have gone.
+    window.setTimeout(() => { if (playing) { stop(); resetButtons(); } },
+      (SWEEP_SECONDS + 1) * 1000);
+  }
+}
+
+function resetButtons(): void {
+  playBtn.textContent = "\u25B6\u2003Sound the chart";
+  sweepBtn.textContent = "\u25B6\u2003Sweep";
+  sweepStartedAt = null;
+  readout.innerHTML = "";
 }
 
 function stop(): void {
@@ -159,6 +180,80 @@ function stop(): void {
     void ctx.close();
   }, 1600);
 }
+
+// ── the sweep ───────────────────────────────────────────────────────────────
+//
+// Two signals crossing over the drones: one climbing 1 Hz to 300, one falling
+// 300 back to 1. Each time a sweep passes a body's drone the beat between them
+// slows, stops, and opens out the other side — so the chart is heard as a
+// SEQUENCE of zero-beats rather than as a chord, once going up and once coming
+// down, with the two sweeps also nulling against each other where they cross.
+//
+// LINEAR IN TIME, not exponential. An exponential sweep is the musical default
+// and would be wrong here: 1 to 300 Hz is 8.2 octaves, and the fourteen drones
+// occupy 1.5 of them, so an exponential sweep would rush every crossing into a
+// few seconds near the top. Linear spreads them out evenly, and it also makes
+// the beat against a fixed drone change at a constant rate, which is the thing
+// being listened to.
+
+const SWEEP_LO = 1;
+const SWEEP_HI = 300;
+const SWEEP_SECONDS = 90;
+/** When a linear sweep reaches a given frequency, in seconds from its start. */
+function timeAt(hz: number, from: number, to: number): number {
+  return (SWEEP_SECONDS * (hz - from)) / (to - from);
+}
+
+/**
+ * One sweeping voice, with its gain scheduled around the audible floor.
+ *
+ * The ducking is not cosmetic. A sine at 1-20 Hz is inaudible and still drives
+ * the speaker cone at full excursion, which is how you damage a woofer playing
+ * something nobody can hear. Because the sweep is linear in time the crossing
+ * points are known in advance, so the whole envelope can be scheduled up front
+ * rather than tracked with a script processor.
+ */
+function makeSweep(ctx: AudioContext, from: number, to: number, dest: AudioNode): OscillatorNode {
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(from, t0);
+  osc.frequency.linearRampToValueAtTime(to, t0 + SWEEP_SECONDS);
+
+  const g = ctx.createGain();
+  const rising = to > from;
+  // Fade across the band where the sweep becomes audible: 14 Hz to 34 Hz.
+  const tIn = timeAt(rising ? 14 : 34, from, to);
+  const tFull = timeAt(rising ? 34 : 14, from, to);
+  const EPS = 0.0001;
+  const LEVEL = 0.5;
+  if (rising) {
+    g.gain.setValueAtTime(EPS, t0);
+    g.gain.setValueAtTime(EPS, t0 + tIn);
+    g.gain.exponentialRampToValueAtTime(LEVEL, t0 + tFull);
+    g.gain.setValueAtTime(LEVEL, t0 + SWEEP_SECONDS);
+  } else {
+    g.gain.setValueAtTime(LEVEL, t0);
+    g.gain.setValueAtTime(LEVEL, t0 + tIn);
+    g.gain.exponentialRampToValueAtTime(EPS, t0 + tFull);
+  }
+
+  osc.connect(g).connect(dest);
+  osc.start();
+  osc.stop(t0 + SWEEP_SECONDS + 0.2);
+  return osc;
+}
+
+/** Where the sweeps are now, given how long they have been running. */
+function sweepNow(elapsed: number): { up: number; down: number } {
+  const t = Math.max(0, Math.min(1, elapsed / SWEEP_SECONDS));
+  return {
+    up: SWEEP_LO + (SWEEP_HI - SWEEP_LO) * t,
+    down: SWEEP_HI - (SWEEP_HI - SWEEP_LO) * t,
+  };
+}
+
+let sweepStartedAt: number | null = null;
 
 // ── the voice list ──────────────────────────────────────────────────────────
 
@@ -186,13 +281,117 @@ function renderVoices(): void {
     if (hit) named = ` — near the ${hit.name}, ${hit.article} ${hit.interval}`;
   }
 
+  // Fourteen bodies folded into seven dyads, tightest first. Each pair's own
+  // beat is the slow pulse it contributes; the sweep then crosses all fourteen
+  // drones in turn, so the pairing organises what you are listening to rather
+  // than changing which frequencies sound.
+  const { pairs, unpaired } = pairBodies(placements);
+
   el.innerHTML = `<div class="cap">Voices</div>` +
     voices.map((v) => `<div class="voice">
         <span class="g">${GLYPHS[v.id] ?? "·"}&#8202;<span style="font-family:var(--mono);font-size:11px;color:var(--ink-3)">${v.id}</span></span>
         <span class="hz">${v.hz.toFixed(1)} Hz</span>
       </div>`).join("") +
+    (pairs.length
+      ? `<div class="cap" style="margin-top:16px">${pairs.length} ${pairs.length === 1 ? "dyad" : "dyads"}</div>` +
+        pairs.map((d) => `<div class="voice">
+          <span class="g" style="font-size:13px">${GLYPHS[d.a.id] ?? "·"}${GLYPHS[d.b.id] ?? "·"}</span>
+          <span class="hz">${d.beatHz.toFixed(2)} Hz</span>
+        </div>`).join("") +
+        (unpaired.length
+          ? `<div class="voice"><span class="g" style="font-size:13px">${unpaired.map((u) => GLYPHS[u.id] ?? "·").join("")}</span><span class="hz">unpaired</span></div>`
+          : "")
+      : "") +
     (beat ? `<div class="beat">slowest beat · ${beat.a}&#8202;–&#8202;${beat.b}
        at ${beat.hz.toFixed(2)} Hz${named}</div>` : "");
+}
+
+// ── the sweep readout and strip ─────────────────────────────────────────────
+
+const strip = document.getElementById("strip") as HTMLCanvasElement;
+const stripCtx = strip.getContext("2d")!;
+const readout = document.getElementById("readout")!;
+
+/** Log position of a frequency on the strip, 0..1. Log rather than linear
+ *  because the drones cluster in the top third and would otherwise pile up. */
+const stripX = (hz: number) => Math.log(Math.max(hz, 1)) / Math.log(340);
+
+function drawStrip(): void {
+  const w = strip.width;
+  const h = strip.height;
+  const px = w / 1320;
+  stripCtx.clearRect(0, 0, w, h);
+  const col = getComputedStyle(document.body).getPropertyValue("--chord").trim() || "#6a4a92";
+  stripCtx.strokeStyle = col;
+  stripCtx.fillStyle = col;
+
+  stripCtx.globalAlpha = 0.18;
+  stripCtx.lineWidth = 1 * px;
+  stripCtx.beginPath();
+  stripCtx.moveTo(0, h / 2);
+  stripCtx.lineTo(w, h / 2);
+  stripCtx.stroke();
+
+  stripCtx.globalAlpha = 0.34;
+  stripCtx.lineWidth = 1.6 * px;
+  for (const p of placements) {
+    const x = stripX(droneHz(p.longitude)) * w;
+    stripCtx.beginPath();
+    stripCtx.moveTo(x, h * 0.28);
+    stripCtx.lineTo(x, h * 0.72);
+    stripCtx.stroke();
+  }
+
+  if (sweepStartedAt === null) { stripCtx.globalAlpha = 1; return; }
+  const { up, down } = sweepNow((performance.now() - sweepStartedAt) / 1000);
+  for (const [hz, dir] of [[up, 1], [down, -1]] as const) {
+    const x = stripX(hz) * w;
+    stripCtx.globalAlpha = 0.95;
+    stripCtx.beginPath();
+    stripCtx.moveTo(x, h / 2 - 16 * px * dir);
+    stripCtx.lineTo(x - 7 * px, h / 2 - 30 * px * dir);
+    stripCtx.lineTo(x + 7 * px, h / 2 - 30 * px * dir);
+    stripCtx.closePath();
+    stripCtx.fill();
+    stripCtx.globalAlpha = 0.45;
+    stripCtx.beginPath();
+    stripCtx.moveTo(x, h * 0.14);
+    stripCtx.lineTo(x, h * 0.86);
+    stripCtx.stroke();
+  }
+  stripCtx.globalAlpha = 1;
+}
+
+/** The nearest drone to a frequency, and how fast it is beating against it. */
+function nearestDrone(hz: number): { id: string; beat: number } | null {
+  let best: { id: string; beat: number } | null = null;
+  for (const p of placements) {
+    const beat = Math.abs(droneHz(p.longitude) - hz);
+    if (!best || beat < best.beat) best = { id: p.id, beat };
+  }
+  return best;
+}
+
+function updateReadout(): void {
+  if (sweepStartedAt === null) return;
+  const elapsed = (performance.now() - sweepStartedAt) / 1000;
+  const { up, down } = sweepNow(elapsed);
+  const line = (label: string, hz: number) => {
+    const n = nearestDrone(hz);
+    if (!n) return "";
+    // Under a hertz the beat has stopped being a beat and become a unison. That
+    // moment is the entire point of the sweep, so it gets named rather than
+    // being left as a number approaching zero.
+    const at = n.beat < 1
+      ? `<span class="null">nulling on ${n.id}</span>`
+      : `${n.beat.toFixed(1)} Hz against ${n.id}`;
+    return `${label} <b>${hz.toFixed(1)} Hz</b> — ${at}`;
+  };
+  const cross = Math.abs(up - down);
+  readout.innerHTML = `${line("rising", up)}<br>${line("falling", down)}<br>` +
+    (cross < 1
+      ? `<span class="null">the two sweeps are crossing</span>`
+      : `sweeps ${cross.toFixed(1)} Hz apart · ${Math.max(0, SWEEP_SECONDS - elapsed).toFixed(0)}s left`);
 }
 
 // ── the torus ───────────────────────────────────────────────────────────────
@@ -297,6 +496,8 @@ function frame(now: number): void {
     rot.yaw += dt * 1.6;
   }
   draw();
+  drawStrip();
+  updateReadout();
   requestAnimationFrame(frame);
 }
 
@@ -315,9 +516,15 @@ canvas.addEventListener("pointerup", release);
 canvas.addEventListener("pointercancel", release);
 
 const playBtn = document.getElementById("play") as HTMLButtonElement;
+const sweepBtn = document.getElementById("sweep") as HTMLButtonElement;
+
 playBtn.addEventListener("click", () => {
-  if (playing) { stop(); playBtn.textContent = "▶ Sound the chart"; }
-  else { start(); playBtn.textContent = "◼ Stop"; }
+  if (playing) { stop(); resetButtons(); }
+  else { start(false); playBtn.textContent = "\u25FC\u2003Stop"; }
+});
+sweepBtn.addEventListener("click", () => {
+  if (playing) { stop(); resetButtons(); }
+  else { start(true); sweepBtn.textContent = "\u25FC\u2003Stop"; }
 });
 
 const chartBox = document.getElementById("chart") as HTMLTextAreaElement;

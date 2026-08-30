@@ -128,6 +128,56 @@ export function slowestBeat(
   return best;
 }
 
+/** Two bodies sounding together, and the beat between them. */
+export interface Dyad {
+  a: Placement;
+  b: Placement;
+  /** Separation in degrees, 0..180. */
+  separation: number;
+  /** Beat between their two drones, Hz — zero when they meet. */
+  beatHz: number;
+}
+
+/**
+ * Fold a set of bodies into pairs, closest first.
+ *
+ * Greedy on separation: take the tightest remaining pair, set it aside, repeat.
+ * Not a global optimum — that would be a matching problem — and it does not need
+ * to be, because the object is to put the SLOW beats in the foreground and the
+ * tightest pair is the slowest beat there is. Greedy takes it first by
+ * construction.
+ *
+ * Separation is measured the short way round the circle, so a pair straddling
+ * 0 degrees is as close as it sounds rather than 359 degrees apart. An odd
+ * body out is returned unpaired rather than doubled with someone: pairing it
+ * twice would put its drone in the chord twice and quietly raise its volume.
+ */
+export function pairBodies(
+  placements: readonly Placement[],
+): { pairs: Dyad[]; unpaired: Placement[] } {
+  const left = [...placements];
+  const pairs: Dyad[] = [];
+
+  while (left.length >= 2) {
+    let best = { i: 0, j: 1, sep: Infinity };
+    for (let i = 0; i < left.length; i++) {
+      for (let j = i + 1; j < left.length; j++) {
+        const d = Math.abs(left[i].longitude - left[j].longitude) % 360;
+        const sep = d > 180 ? 360 - d : d;
+        if (sep < best.sep) best = { i, j, sep };
+      }
+    }
+    // Splice the higher index first or the lower one shifts under it.
+    const b = left.splice(best.j, 1)[0];
+    const a = left.splice(best.i, 1)[0];
+    pairs.push({
+      a, b, separation: best.sep,
+      beatHz: beatHz(droneHz(a.longitude), droneHz(b.longitude)),
+    });
+  }
+  return { pairs, unpaired: left };
+}
+
 /**
  * The classical aspects and the interval each becomes under the map. Exported
  * because the correspondence is the interesting part and should be inspectable

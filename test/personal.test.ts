@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   ASPECT_INTERVALS, BASE_HZ, CENTS_PER_DEGREE, beatHz, centsBetween, chord,
-  droneHz, slowestBeat,
+  droneHz, pairBodies, slowestBeat,
 } from "../personal/tonal.js";
 import {
   aspectCircle, cliffordPoint, embedDonut, pairRotation, separation, stereo3,
@@ -179,4 +179,56 @@ test("the donut and the angle helpers behave", () => {
   assert.equal(wrap180(360), 0);
   near(separation(10, 350), 20, 1e-12, "separation crosses the seam");
   near(separation(0, 180), 180, 1e-12);
+});
+
+// ── Pairing ─────────────────────────────────────────────────────────────────
+
+test("fourteen bodies fold into seven pairs, tightest first", () => {
+  const bodies = Array.from({ length: 14 }, (_, i) => ({
+    id: `b${i}`, longitude: (i * 26.7) % 360,
+  }));
+  const { pairs, unpaired } = pairBodies(bodies);
+  assert.equal(pairs.length, 7);
+  assert.equal(unpaired.length, 0);
+
+  // every body used exactly once — pairing one twice would double its drone
+  const used = pairs.flatMap((p) => [p.a.id, p.b.id]);
+  assert.equal(new Set(used).size, 14);
+
+  // greedy takes the tightest first, so separations are non-decreasing
+  for (let i = 1; i < pairs.length; i++) {
+    assert.ok(pairs[i].separation >= pairs[i - 1].separation - 1e-9,
+      `pair ${i} is tighter than pair ${i - 1}`);
+  }
+});
+
+test("pairing measures the short way round, and leaves an odd body alone", () => {
+  // 359 and 1 are two degrees apart, not 358
+  const { pairs } = pairBodies([
+    { id: "a", longitude: 359 }, { id: "b", longitude: 1 },
+    { id: "c", longitude: 100 }, { id: "d", longitude: 200 },
+  ]);
+  assert.equal(pairs[0].separation, 2);
+  assert.deepEqual([pairs[0].a.id, pairs[0].b.id].sort(), ["a", "b"]);
+
+  const odd = pairBodies([
+    { id: "x", longitude: 10 }, { id: "y", longitude: 12 }, { id: "z", longitude: 200 },
+  ]);
+  assert.equal(odd.pairs.length, 1);
+  assert.deepEqual(odd.unpaired.map((p) => p.id), ["z"]);
+  assert.equal(pairBodies([]).pairs.length, 0);
+  assert.equal(pairBodies([{ id: "solo", longitude: 5 }]).unpaired.length, 1);
+});
+
+test("the tightest pair carries the slowest beat, which is the point", () => {
+  const bodies = [
+    { id: "far", longitude: 0 }, { id: "alsofar", longitude: 170 },
+    { id: "near1", longitude: 300 }, { id: "near2", longitude: 301.2 },
+  ];
+  const { pairs } = pairBodies(bodies);
+  assert.deepEqual([pairs[0].a.id, pairs[0].b.id].sort(), ["near1", "near2"]);
+  assert.ok(pairs[0].beatHz < pairs[1].beatHz,
+    "the tightest pair must also beat the slowest");
+  // and it agrees with slowestBeat over the whole set
+  assert.equal(slowestBeat(bodies)!.hz.toFixed(9), pairs[0].beatHz.toFixed(9));
 });
