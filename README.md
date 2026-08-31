@@ -480,6 +480,21 @@ its own lobes and is consumed. **Its body is the next world:** the medium, the
 lattice pitch, what is dissolved in the water and what lives in it are all
 derived from what you fed it.
 
+**The reign has one verb and it is not the trigger.** A structure fires along
+its own group's directions and they were fixed when you placed it — a 222 shows
+two lobes and nothing will ever change that, so whether a building bears on the
+king is not something you get to decide by aiming. But the king is dense and you
+are lipid, so it does not share your sign, and the node you stand in **shoves
+it** at around 210 µm/s against its own 26 µm/s walk. You do not aim the gun.
+You aim the king, and then you go and let the gun off — which cannot be done
+from the same place, because charging means standing on the building.
+
+The cones are drawn at their true reach for exactly this reason. They carry
+seven times a structure's holding radius, and while the surface drew them at
+one, the player was shown a forty-micron stub and handed a three-hundred-micron
+gun; the one decision in the fight was invisible. The bot that learned to herd
+lands 15 discharges out of 19 where the blind one managed a handful all sweep.
+
 The recipe list is not a design document. A protein is built from L-amino acids,
 so it is chiral, so of the 32 point groups exactly **11** are open to it — and
 those eleven are every cell in the game. A pentamer never joins anything,
@@ -569,7 +584,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                201 tests: what the modules above are actually claiming
+test/                202 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

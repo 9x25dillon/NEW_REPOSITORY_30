@@ -19,7 +19,7 @@
 import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
-  STRIKE_RANGE, VOLLEY_WIND,
+  LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn,
   beast, crown, enterWorld, particleOf, placeCell, readoutFor,
   startRun, step,
 } from "../game/run.js";
@@ -74,6 +74,13 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME "
       + "LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING "
       + "A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS.",
+  },
+  aim: {
+    id: "aim", title: "YOU CANNOT AIM A BUILDING",
+    body: "A STRUCTURE FIRES ALONG ITS OWN GROUP'S DIRECTIONS AND THEY WERE FIXED WHEN YOU "
+      + "PLACED IT. THE CONES ARE WHERE IT REACHES. THE KING IS DENSE AND YOU ARE NOT, SO "
+      + "IT ANSWERS TO THE OTHER LATTICE AND YOUR OWN NODE SHOVES IT - ABOUT EIGHT TIMES "
+      + "FASTER THAN IT WALKS. YOU DO NOT AIM THE GUN. YOU AIM THE KING.",
   },
   coil: {
     id: "coil", title: "IT IS TELLING YOU",
@@ -410,6 +417,7 @@ export class Game {
           this.say(`THE THRONE TAKES ${ev.group}  ·  C TO CROWN`);
           break;
         case "crown":
+          this.teach("aim");
           this.flash = 0.9; this.flashRed = false; this.shake = 10;
           this.sfx.spent();
           this.say(`${ev.group} WAKES  ·  MASS ${ev.mass}`);
@@ -631,11 +639,42 @@ export class Game {
    *  a holding point at the end of each. */
   private drawStructures(): void {
     const g = this.ctx;
-    for (const s of this.run.structures) {
+    const run = this.run;
+    const k = run.throne;
+    const fighting = run.phase === "reign" && k.awake && k.hp > 0;
+
+    for (const s of run.structures) {
       const x = px(s.x), y = px(s.y);
       const R = px(s.reach);
       const rgb = s.ruin ? "110,140,160" : JADE;
       const a = s.ruin ? 0.4 : 0.85;
+
+      // WHERE THIS BUILDING ACTUALLY REACHES. Its arms carry seven times its
+      // holding radius, and until these were drawn the player was shown a
+      // forty-micron stub and handed a three-hundred-micron gun — which makes
+      // the only decision in the fight, where the king is standing, invisible.
+      // A building cannot be aimed. The king can.
+      if (fighting) {
+        const live = bearsOn(s, k.x, k.y);
+        const far = px(s.reach * LOBE_RANGE);
+        for (const [dx, dy] of s.lobes) {
+          const th = Math.atan2(dy, dx);
+          const cone = g.createRadialGradient(x, y, R * 0.6, x, y, far);
+          cone.addColorStop(0, `rgba(${rgb},${live ? 0.3 : 0.075})`);
+          cone.addColorStop(1, "rgba(0,0,0,0)");
+          g.fillStyle = cone;
+          g.beginPath();
+          g.moveTo(x, y);
+          g.arc(x, y, far, th - LOBE_ARC, th + LOBE_ARC);
+          g.closePath();
+          g.fill();
+        }
+        if (live) {
+          g.strokeStyle = `rgba(${rgb},0.75)`;
+          g.lineWidth = 1.4;
+          g.beginPath(); g.arc(x, y, R + 5, 0, Math.PI * 2); g.stroke();
+        }
+      }
 
       g.strokeStyle = `rgba(${rgb},${(a * 0.28).toFixed(3)})`;
       g.lineWidth = 1;

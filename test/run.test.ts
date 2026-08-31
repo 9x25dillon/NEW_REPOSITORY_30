@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
-  VOLLEY_WIND, placeCell, readoutFor, startRun, step,
+  LOBE_RANGE, VOLLEY_WIND, bearsOn, placeCell, readoutFor, startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
 import { cellFor } from "../game/lattice.js";
@@ -377,6 +377,48 @@ test("your own node shoves a king off you, unless you gave it no handle", () => 
     + `${(arrived * 1e6).toFixed(1)} um away)`);
 });
 
+test("the guns cannot turn, so the king is what you aim", () => {
+  // The whole verb of the reign. A structure fires along its own group's
+  // directions and they were fixed when you placed it — a 222 shows two lobes,
+  // due east and due west, and nothing will ever change that. But a sovereign
+  // is dense and you are lipid, so it does not share your sign, and the node you
+  // are standing in shoves it at about eight times its own walking speed.
+  const run = startRun(41);
+  grant(run, ["222"]);
+  stand(run, run.throne.x, run.throne.y);
+  placeCell(run, 0);
+  crown(run);
+
+  const gun = structureFrom(900, "222", 300e-6, 330e-6);
+  run.structures = [gun];
+  run.entities = [];
+
+  // Park it due north of the gun, which is the one place a two-lobed pattern
+  // can never reach.
+  run.throne.x = 300e-6;
+  run.throne.y = 150e-6;
+  assert.ok(!bearsOn(gun, run.throne.x, run.throne.y), "nothing points at it yet");
+
+  // Lean on it toward the eastern arm.
+  const target = { x: gun.x + gun.reach * 3, y: gun.y };
+  for (let i = 0; i < 60 * 5; i++) {
+    const k = run.throne;
+    if (bearsOn(gun, k.x, k.y)) break;
+    const ax = k.x - target.x, ay = k.y - target.y;
+    const ar = Math.hypot(ax, ay) || 1e-12;
+    stand(run, k.x + (ax / ar) * 30e-6, k.y + (ay / ar) * 30e-6);
+    run.integrity = MAX_INTEGRITY;
+    step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+    run.events.length = 0;
+  }
+  assert.ok(bearsOn(gun, run.throne.x, run.throne.y),
+    `it should be herdable into the line (${(run.throne.x * 1e6).toFixed(0)}, `
+    + `${(run.throne.y * 1e6).toFixed(0)} um)`);
+
+  // And now the building that could not be aimed lands.
+  assert.ok(discharge(run, gun) > 0, "and then the gun connects");
+});
+
 // ── birth ───────────────────────────────────────────────────────────────────
 
 test("killing it births the world it was made of", () => {
@@ -446,6 +488,27 @@ test("a cluster is one particle, and building makes it harder to carry", () => {
  * rounds of this build shipped something the author had never watched play
  * itself, and both times it turned out that nothing could actually happen.
  */
+/**
+ * The nearest point on any of your buildings' firing lines.
+ *
+ * Where the king has to be standing for something you own to be able to hit it.
+ */
+function herdTarget(run: Run): { x: number; y: number } | null {
+  const k = run.throne;
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (const s of run.structures) {
+    const out = Math.min(s.reach * (LOBE_RANGE - 1),
+      Math.max(s.reach * 2, Math.hypot(k.x - s.x, k.y - s.y)));
+    for (const [lx, ly] of s.lobes) {
+      const t = { x: s.x + lx * out, y: s.y + ly * out };
+      const d = Math.hypot(t.x - k.x, t.y - k.y);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+  }
+  return best;
+}
+
 function makeBot(feedTarget = 2): (r: Run) => Input {
   let resting = false;
   let placed = 0;
@@ -512,19 +575,29 @@ function makeBot(feedTarget = 2): (r: Run) => Input {
     if (run.phase === "settle" && run.throne.fed.length >= feedTarget && placed >= 4) crown(run);
 
     if (run.phase === "reign" && !resting) {
-      let best: { x: number; y: number } | null = null;
-      let bestScore = -1;
+      const k = run.throne;
+
+      // Something already bears on it: go and let it off.
+      let ready: { x: number; y: number } | null = null;
+      let readyStrength = -1;
       for (const s of run.structures) {
-        const toKing = Math.atan2(run.throne.y - s.y, run.throne.x - s.x);
-        let score = -1;
-        for (const [dx, dy] of s.lobes) {
-          let d = Math.abs(Math.atan2(dy, dx) - toKing);
-          while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
-          if (d < 0.55) score = Math.max(score, s.strength);
+        if (bearsOn(s, k.x, k.y) && s.strength > readyStrength) {
+          readyStrength = s.strength;
+          ready = { x: s.x, y: s.y };
         }
-        if (score > bestScore) { bestScore = score; best = { x: s.x, y: s.y }; }
       }
-      if (best && bestScore > 0) return seek(run, best.x, best.y, true);
+      if (ready) return seek(run, ready.x, ready.y, true);
+
+      // Nothing does. The guns cannot turn, so move the target: a sovereign is
+      // dense and you are lipid, so it answers to the other lattice and your own
+      // node shoves it — about eight times faster than it walks. Stand on the
+      // far side of it from where you want it and lean.
+      const aim = herdTarget(run);
+      if (aim) {
+        const ax = k.x - aim.x, ay = k.y - aim.y;
+        const ar = Math.hypot(ax, ay) || 1e-12;
+        return seek(run, k.x + (ax / ar) * 30e-6, k.y + (ay / ar) * 30e-6, true);
+      }
     }
 
     if (!resting) {

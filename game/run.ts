@@ -707,10 +707,44 @@ function driveStructures(run: Run, dt: number): void {
   for (const s of spent) discharge(run, s);
 }
 
-/** Half-angle of a discharge lobe, radians. */
-const LOBE_ARC = 0.55;
+/**
+ * The shape of what a building covers: half-angle of a lobe, and how far it
+ * carries as a multiple of the structure's own holding radius.
+ *
+ * These were buried constants and the surface did not know them, so it drew
+ * each building's arms out to its HOLDING radius — about forty microns — while
+ * they actually reach seven times that. The player was shown a stub and given a
+ * three-hundred-micron gun, which makes the one decision in the fight (where
+ * the king is standing) unreadable. They are exported now because the renderer
+ * has to draw the same cone the damage is computed in.
+ */
+export const LOBE_ARC = 0.55;
+export const LOBE_RANGE = 7;
+/** And how far the same discharge scours the wildlife. */
+export const LOBE_SCOUR = 4;
 /** Damage per group-order, per arm that finds the king. */
 export const DISCHARGE_GAIN = 8;
+
+/**
+ * Does one of this building's arms point at (x, y) from where it stands?
+ *
+ * The same test `discharge` makes, exported so the surface can draw the cones
+ * and light the one that is live. A building cannot be aimed — its arms are its
+ * group's own directions and they were fixed when you placed it — so the only
+ * thing that can be aimed is the KING, and this is the function that says
+ * whether you have finished aiming it.
+ */
+export function bearsOn(s: Structure, x: number, y: number): boolean {
+  const dx = x - s.x, dy = y - s.y;
+  if (Math.hypot(dx, dy) > s.reach * LOBE_RANGE) return false;
+  const toward = Math.atan2(dy, dx);
+  for (const [lx, ly] of s.lobes) {
+    let d = Math.abs(Math.atan2(ly, lx) - toward);
+    while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
+    if (d < LOBE_ARC) return true;
+  }
+  return false;
+}
 
 /**
  * A structure spends itself.
@@ -727,7 +761,7 @@ export function discharge(run: Run, s: Structure): number {
 
   if (k.awake && k.hp > 0) {
     const toKing = Math.atan2(k.y - s.y, k.x - s.x);
-    const range = s.reach * 7;
+    const range = s.reach * LOBE_RANGE;
     if (Math.hypot(k.x - s.x, k.y - s.y) < range) {
       for (const [dx, dy] of s.lobes) {
         const a = Math.atan2(dy, dx);
@@ -739,7 +773,7 @@ export function discharge(run: Run, s: Structure): number {
   }
 
   // it also scours the beasts standing in its arms
-  const reach = s.reach * 4;
+  const reach = s.reach * LOBE_SCOUR;
   for (const e of [...run.entities]) {
     if (e.faction !== "beast") continue;
     const r = Math.hypot(e.x - s.x, e.y - s.y);

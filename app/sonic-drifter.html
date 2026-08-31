@@ -1539,14 +1539,27 @@
     for (const s of spent) discharge(run, s);
   }
   var LOBE_ARC = 0.55;
+  var LOBE_RANGE = 7;
+  var LOBE_SCOUR = 4;
   var DISCHARGE_GAIN = 8;
+  function bearsOn(s, x, y) {
+    const dx = x - s.x, dy = y - s.y;
+    if (Math.hypot(dx, dy) > s.reach * LOBE_RANGE) return false;
+    const toward = Math.atan2(dy, dx);
+    for (const [lx, ly] of s.lobes) {
+      let d = Math.abs(Math.atan2(ly, lx) - toward);
+      while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
+      if (d < LOBE_ARC) return true;
+    }
+    return false;
+  }
   function discharge(run, s) {
     run.structures = run.structures.filter((x) => x !== s);
     const k = run.throne;
     let damage = 0;
     if (k.awake && k.hp > 0) {
       const toKing = Math.atan2(k.y - s.y, k.x - s.x);
-      const range = s.reach * 7;
+      const range = s.reach * LOBE_RANGE;
       if (Math.hypot(k.x - s.x, k.y - s.y) < range) {
         for (const [dx, dy] of s.lobes) {
           const a = Math.atan2(dy, dx);
@@ -1556,7 +1569,7 @@
         }
       }
     }
-    const reach = s.reach * 4;
+    const reach = s.reach * LOBE_SCOUR;
     for (const e of [...run.entities]) {
       if (e.faction !== "beast") continue;
       const r = Math.hypot(e.x - s.x, e.y - s.y);
@@ -2023,6 +2036,11 @@
       title: "IT SHARES YOUR SIGN",
       body: "BOTH LATTICES ARE ONE FIELD A QUARTER WAVELENGTH APART, AND YOUR OWN CONTRAST PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS."
     },
+    aim: {
+      id: "aim",
+      title: "YOU CANNOT AIM A BUILDING",
+      body: "A STRUCTURE FIRES ALONG ITS OWN GROUP'S DIRECTIONS AND THEY WERE FIXED WHEN YOU PLACED IT. THE CONES ARE WHERE IT REACHES. THE KING IS DENSE AND YOU ARE NOT, SO IT ANSWERS TO THE OTHER LATTICE AND YOUR OWN NODE SHOVES IT - ABOUT EIGHT TIMES FASTER THAN IT WALKS. YOU DO NOT AIM THE GUN. YOU AIM THE KING."
+    },
     coil: {
       id: "coil",
       title: "IT IS TELLING YOU",
@@ -2347,6 +2365,7 @@
             this.say(`THE THRONE TAKES ${ev.group}  \xB7  C TO CROWN`);
             break;
           case "crown":
+            this.teach("aim");
             this.flash = 0.9;
             this.flashRed = false;
             this.shake = 10;
@@ -2582,11 +2601,37 @@
      *  a holding point at the end of each. */
     drawStructures() {
       const g2 = this.ctx;
-      for (const s of this.run.structures) {
+      const run = this.run;
+      const k = run.throne;
+      const fighting = run.phase === "reign" && k.awake && k.hp > 0;
+      for (const s of run.structures) {
         const x = px(s.x), y = px(s.y);
         const R = px(s.reach);
         const rgb = s.ruin ? "110,140,160" : JADE;
         const a = s.ruin ? 0.4 : 0.85;
+        if (fighting) {
+          const live = bearsOn(s, k.x, k.y);
+          const far = px(s.reach * LOBE_RANGE);
+          for (const [dx, dy] of s.lobes) {
+            const th = Math.atan2(dy, dx);
+            const cone = g2.createRadialGradient(x, y, R * 0.6, x, y, far);
+            cone.addColorStop(0, `rgba(${rgb},${live ? 0.3 : 0.075})`);
+            cone.addColorStop(1, "rgba(0,0,0,0)");
+            g2.fillStyle = cone;
+            g2.beginPath();
+            g2.moveTo(x, y);
+            g2.arc(x, y, far, th - LOBE_ARC, th + LOBE_ARC);
+            g2.closePath();
+            g2.fill();
+          }
+          if (live) {
+            g2.strokeStyle = `rgba(${rgb},0.75)`;
+            g2.lineWidth = 1.4;
+            g2.beginPath();
+            g2.arc(x, y, R + 5, 0, Math.PI * 2);
+            g2.stroke();
+          }
+        }
         g2.strokeStyle = `rgba(${rgb},${(a * 0.28).toFixed(3)})`;
         g2.lineWidth = 1;
         g2.beginPath();
