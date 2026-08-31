@@ -87,8 +87,44 @@ test("the two app entry points are as separate as the two libraries", () => {
     "listen must use personal/");
 });
 
-test("both halves are self-contained: no dependencies at all", () => {
-  for (const dir of ["src", "personal"]) {
+test("the game builds on the physics half and never on the personal half", () => {
+  // game/ is a third thing: it is allowed to depend on src/, because a game
+  // whose rules are the library's physics is the point of it. It is not allowed
+  // to reach for personal/ or for the subject. A radiation force does not stop
+  // being falsifiable because something scores points off it, but it would stop
+  // being falsifiable the moment it took a birth time as an input.
+  const game = sourcesIn("game");
+  assert.ok(game.length > 0, "there should be a game to check");
+  for (const { file, text } of game) {
+    for (const spec of importsOf(text)) {
+      assert.ok(!spec.includes("personal/"),
+        `${file} imports ${spec}: the game must not reach for the tonal layer`);
+      assert.ok(!spec.includes("config/"),
+        `${file} imports ${spec}: the game must not read the subject file`);
+    }
+  }
+  assert.ok(game.some(({ text }) => importsOf(text).some((s) => s.includes("src/"))),
+    "and it really must use the physics, rather than be separate by using nothing");
+});
+
+test("the game's surface is as separate as the other two", () => {
+  // app/drifter.ts draws the game; app/sfx.ts makes its noises. Those noises
+  // are UI sound at a few hundred hertz and the field is at ten megahertz —
+  // four orders apart and unrelated — which is exactly the confusion this file
+  // exists to keep from setting in.
+  for (const entry of ["app/drifter.ts", "app/pad.ts", "app/sfx.ts"]) {
+    const text = readFileSync(join(root, entry), "utf8");
+    for (const spec of importsOf(text)) {
+      assert.ok(!spec.includes("personal/"),
+        `${entry} imports ${spec}: the game must not reach for the tonal layer`);
+      assert.ok(!spec.includes("config/"),
+        `${entry} imports ${spec}: the game must not read the subject file`);
+    }
+  }
+});
+
+test("all three halves are self-contained: no dependencies at all", () => {
+  for (const dir of ["src", "personal", "game"]) {
     for (const { file, text } of sourcesIn(dir)) {
       for (const spec of importsOf(text)) {
         assert.ok(spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("node:"),

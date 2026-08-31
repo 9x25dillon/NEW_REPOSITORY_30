@@ -15,6 +15,10 @@
     "config",
     "app/main.ts",
     "app/listen.ts",
-    "app/field.ts"
+    "app/field.ts",
+    "game",
+    "app/drifter.ts",
+    "app/sfx.ts",
+    "test/pad.test.ts"
   ]
 }

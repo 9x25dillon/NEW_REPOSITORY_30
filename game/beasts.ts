@@ -1,0 +1,72 @@
+// game/beasts.ts — the six ways a body can be in the water with you.
+//
+// A beast is not a stat block with a colour. It is a Particle, and the only
+// thing that decides how it behaves toward you is the sign of its contrast
+// factor against the water it is in — which is why this table has densities and
+// sound speeds in it and no faction, no tint, and no "type advantage".
+//
+// SIGN IS RANGE. Both lattices are a quarter wavelength apart and you are
+// standing in one of them. A body that shares your sign answers to the same
+// lattice, so your drive REELS IT INTO YOUR LAP; a body of the opposite sign is
+// driven off your node and held in the ring a quarter pitch out, where it can
+// be killed at leisure and cannot touch you. Nothing here is asymmetric on
+// purpose — it is one subtraction, done per world, in world.wildlifeFor.
+//
+// It lives apart from run.ts because worlds need it too: which of these a water
+// carries is derived from what a body of YOUR density does in that water, and
+// world.ts cannot import the run to find out.
+
+import { type Particle } from "../src/gorkov.js";
+
+export type Behaviour = "hunt" | "drift" | "split";
+
+export interface Beast {
+  id: string;
+  label: string;
+  particle: Particle;
+  hold: number;
+  speed: number;
+  behaviour: Behaviour;
+  damage: number;
+  drain: number;
+  score: number;
+}
+
+const LIPID = { rho: 915, c: 1450 };
+const FLESH = { rho: 1100, c: 1570 };
+const FAINT = { rho: 1050, c: 1520 };
+
+/**
+ * Swim speeds are set against the idle lattice, not against each other.
+ *
+ * A body's trap velocity goes as its radius squared, so the big ones are held
+ * hardest — and any hunter slower than the idle drive's pull on IT is a hunter
+ * that never arrives, no matter what its stat line says. Each speed below is
+ * comfortably above that body's own trap velocity at pilot.CRUISE_AMPLITUDE and
+ * far below it at full grip, which is the window the whole fight lives in: they
+ * walk through your idle field and they do not walk through your grip.
+ */
+export const BEASTS: Readonly<Record<string, Beast>> = {
+  vesicle: {
+    id: "vesicle", label: "VESICLE", particle: { radius: 5.5e-6, ...LIPID },
+    hold: 1.05, speed: 5.0e-5, behaviour: "hunt", damage: 1, drain: 0, score: 2,
+  },
+  mote: {
+    id: "mote", label: "MOTE", particle: { radius: 0.9e-6, ...FAINT },
+    hold: 0.9, speed: 0, behaviour: "drift", damage: 0, drain: 24, score: 1,
+  },
+  husk: {
+    id: "husk", label: "HUSK", particle: { radius: 12e-6, ...FLESH },
+    hold: 2.1, speed: 6.0e-5, behaviour: "hunt", damage: 1, drain: 0, score: 4,
+  },
+  splitter: {
+    id: "splitter", label: "SPLITTER", particle: { radius: 6.5e-6, ...LIPID },
+    hold: 0.95, speed: 7.0e-5, behaviour: "split", damage: 1, drain: 0, score: 3,
+  },
+};
+
+export function beast(id: string): Beast {
+  const b = BEASTS[id];
+  if (!b) throw new Error(`no beast ${id}`);
+  return b;
+}

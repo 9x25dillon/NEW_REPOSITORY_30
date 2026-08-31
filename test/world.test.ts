@@ -1,0 +1,150 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+
+import {
+  cadence, emptyThrone, epitaphFor, feed, firstWorld, holdPoints, poolFor,
+  reachOf, sovereignInertia, sovereignParticle, structureFrom, volley, worldFrom,
+} from "../game/world.js";
+import { BUILDABLE, cellFor } from "../game/lattice.js";
+import { YOU } from "../game/pilot.js";
+import { contrastFactor } from "../src/gorkov.js";
+import { lobeCount } from "../game/shape.js";
+
+function king(fed: string[]) {
+  const k = emptyThrone(0, 0);
+  for (const hm of fed) feed(k, cellFor(hm));
+  return k;
+}
+
+test("a king is the most symmetric thing it was fed", () => {
+  const k = king(["2", "422", "222"]);
+  assert.equal(k.hm, "422", "order 8 beats order 4 and order 2");
+  assert.equal(k.mass, 2 + 8 + 4);
+  assert.equal(k.freedom, 8 + 1 + 3);
+  assert.ok(k.maxHp > 0 && k.hp === k.maxHp);
+});
+
+test("feeding it a 432 leaves it with no handle at all", () => {
+  // The one group that is non-centrosymmetric and still not piezoelectric: no
+  // drivable coefficient, so no way for the field to touch what you made.
+  assert.ok(king(["432"]).anchored);
+  assert.ok(!king(["622", "422", "23"]).anchored, "everything else can be pushed");
+});
+
+test("a king's volley is its own group's symmetry", () => {
+  for (const hm of ["2", "3", "6", "422", "23"]) {
+    assert.equal(volley(king([hm])).length, lobeCount(hm), `${hm} should throw its own arms`);
+  }
+  // and it turns, so the gaps between arms cannot be camped
+  const k = king(["6"]);
+  const a = volley(k).map(([x, y]) => Math.atan2(y, x));
+  k.spin = 0.4;
+  const b = volley(k).map(([x, y]) => Math.atan2(y, x));
+  assert.ok(a.some((v, i) => Math.abs(v - b[i]) > 0.3));
+});
+
+test("a heavier king is slower but harder to be near", () => {
+  assert.ok(cadence(king(["2"])) > cadence(king(["622", "422", "23"])));
+  assert.ok(cadence(king(["622", "422", "23", "432"])) >= 1.15, "never faster than readable");
+  assert.ok(sovereignInertia(king(["622"])) > sovereignInertia(king(["2"])));
+});
+
+test("the king is a body in the water: your node reels it in", () => {
+  const p = sovereignParticle(king(["422"]));
+  assert.ok(contrastFactor(p, { rho: 997, c: 1497 }) > 0, "positive in a normal water");
+  assert.ok(contrastFactor(p, { rho: 1010, c: 1720 }) > 0, "and in the stiffest one it can make");
+});
+
+test("different kings leave genuinely different worlds", () => {
+  const thin = worldFrom(king(["2", "2"]), 2);
+  const closed = worldFrom(king(["432", "622", "23", "422"]), 2);
+
+  assert.notEqual(thin.name, closed.name, "the name is its crystal system");
+  assert.ok(closed.medium.c > thin.medium.c + 200, "a heavier body leaves a stiffer water");
+  assert.ok(closed.pitch < thin.pitch * 0.7, "and a finer lattice");
+  assert.ok(closed.inheritance > thin.inheritance, "and more of what you built standing");
+  assert.notDeepEqual(thin.pool, closed.pool, "and different matter dissolved in it");
+});
+
+test("the pool is not a fixed point", () => {
+  // The bug this test exists for: deriving the water from the PARTS of what was
+  // fed reproduces itself forever. Feed the throne 222s, whose parts are a
+  // dimer and a girdle, and you get back dimers and girdles, which build 222s.
+  // Eight aeons of headless play produced eight identical worlds.
+  const w = worldFrom(king(["222", "222"]), 2);
+  assert.ok(!w.pool.includes("a2"), "a squared king must not leave the water it came from");
+  assert.ok(w.pool.includes("a3"), "its body opens the next axis up");
+
+  // and it keeps climbing with mass
+  assert.ok(poolFor(king(["2"]), 2).includes("a2"));
+  assert.ok(poolFor(king(["422", "422"]), 2).includes("a4"));
+  assert.ok(poolFor(king(["622", "622", "422", "432"]), 2).includes("a6"));
+});
+
+test("only one principal axis is ever dissolved at a time", () => {
+  // Two different axials refuse to bind, so a water holding both is not richer,
+  // it is unusable.
+  for (const fed of [["2"], ["222", "222"], ["422", "422"], ["622", "432", "23"]]) {
+    const pool = poolFor(king(fed), 3);
+    const axials = new Set(pool.filter((m) => m.startsWith("a") && m !== "a5"));
+    assert.equal(axials.size, 1, `[${pool}] carries ${axials.size} principal axes`);
+  }
+});
+
+test("from the third aeon some of the water is simply useless", () => {
+  assert.ok(!poolFor(king(["2"]), 2).includes("a5"));
+  assert.ok(poolFor(king(["2"]), 3).includes("a5"), "pentamers, which build nothing ever");
+});
+
+test("a structure holds along its own group's directions", () => {
+  const s = structureFrom(1, "622", 400e-6, 300e-6);
+  assert.equal(holdPoints(s).length, 6);
+  assert.equal(structureFrom(2, "222", 0, 0).lobes.length, 2);
+  assert.ok(reachOf("622") > reachOf("2"), "more order reaches further");
+  for (const [x, y] of holdPoints(s)) {
+    assert.ok(Math.abs(Math.hypot(x - s.x, y - s.y) - s.reach) < 1e-12);
+  }
+});
+
+test("the epitaph reports the world it is about to make", () => {
+  const k = king(["422", "222"]);
+  const w = worldFrom(k, 3);
+  const e = epitaphFor(k, w);
+  assert.equal(e.name, w.name);
+  assert.ok(e.lines.some(([label]) => label === "BORN OF"));
+  assert.ok(e.lines.some(([, v]) => v.includes(`${w.medium.c.toFixed(0)}`)));
+});
+
+test("the first water is nobody's", () => {
+  const w = firstWorld();
+  assert.equal(w.aeon, 1);
+  assert.equal(w.inheritance, 0);
+  assert.deepEqual(w.wildlife, ["vesicle"]);
+});
+
+test("no king can leave behind a water that will not carry you", () => {
+  // The medium is derived from the sovereign, and the derivation used to be
+  // able to land on the player's own iso-acoustic point: fed a 1, a 1 and a 2
+  // it produced rho 940 / c 1410, where a body of your density has a contrast
+  // factor of 0.0005 and the field moves you at one per cent of normal speed.
+  // Grip does not help — it multiplies a number that is already zero — so the
+  // run was over and nothing said so. Every reachable water is checked.
+  let worst = Infinity;
+  let via = "";
+  for (const a of BUILDABLE) {
+    for (const b of BUILDABLE) {
+      for (const c of ["", ...BUILDABLE]) {
+        const k = emptyThrone(0, 0);
+        feed(k, cellFor(a));
+        feed(k, cellFor(b));
+        if (c) feed(k, cellFor(c));
+        for (const aeon of [2, 5]) {
+          const phi = Math.abs(contrastFactor(YOU, worldFrom(k, aeon).medium));
+          if (phi < worst) { worst = phi; via = `${a}+${b}${c ? `+${c}` : ""} at aeon ${aeon}`; }
+        }
+      }
+    }
+  }
+  assert.ok(worst >= 0.02,
+    `a king can strand you: phi ${worst.toFixed(4)} via ${via}`);
+});

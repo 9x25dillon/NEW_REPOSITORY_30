@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { POINT_GROUPS, isEnantiomorphic } from "../src/pointgroups.js";
 import {
   SOHNCKE_GROUPS, allowsChiral, axialPattern, candidates, groupsOfPointGroup,
-  latticeAllows, reflectionAllowed, screwAllows, spaceGroup,
+  latticeAllows, reflectionAllowed, spaceGroup,
 } from "../src/sohncke.js";
 
 test("there are exactly 65, numbered inside 1..230 and all distinct", () => {

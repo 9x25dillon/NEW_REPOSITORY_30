@@ -384,6 +384,142 @@ between "we observed this cell focus in 42 ms" and "we calculate that it
 should". Taking a measurement therefore turns the Device screen's tiles from
 amber to **blue**, not green, and the app says so.
 
+## The game
+
+`app/sonic-drifter.html` — one self-contained file, no build step to open it, no
+network. **You are a body in the water, and only the field moves you.**
+
+A pair of crossed standing waves is what an acoustic tweezer physically is. You
+are a nine-micron lipid body standing in one, with a density, a sound speed and
+a contrast factor like everything else on screen, and there is no velocity term
+anywhere in the game: if you want to go somewhere you put a trap there and fall
+into it. One screen pixel is one micron and the arena is 900 µm × 660 µm of
+water at 10 MHz, well inside the long-wavelength regime `gorkov.ts` is derived
+under.
+
+### The controls are the device
+
+| | | what it actually is |
+| --- | --- | --- |
+| **L stick** | steer | the offset of the node from your body. Full deflection is a quarter pitch — `sin(2ku)` peaks at λ/8, so pushing further would give you *less* pull, and the stick is capped where the physics caps it. |
+| **RT** | grip | apodisation. The drive concentrates from 1.9 trap pitches down to 0.62, which is the difference between a weak lattice everywhere and one trap under your hand. Costs stamina as amplitude squared. |
+| **A** | burst | the amplifier's peak rating against its continuous one. Twice the drive for 120 ms, and force goes as pressure squared, so four times the speed — about 200 µm, and every other body in the water lurches with you. |
+| **X / Y** | place, crown | a cell onto the ground, or into the throne if you are standing on it. |
+
+Keyboard plays the same game: WASD, space, K, E or 1–9, C.
+
+There is no invert button any more, and its absence is the mechanic. Both
+lattices are rigidly a quarter wavelength apart and the trap re-centres on you
+every frame, so nothing a player could press changes which one holds them up —
+your own contrast factor decides it. What the button used to fake now falls out
+of a subtraction: **a body that shares your sign comes to the node you are
+standing in, and a body of the opposite sign is pinned in the ring a quarter
+pitch out, where it cannot touch you.** Near or far, lethal or harmless, is one
+comparison against your own density — and a later world that puts your contrast
+on the other side of zero turns the whole bestiary over with it.
+
+### The field is a shield, and stamina is its clock
+
+A standing wave is a fence. That is what a tweezer is *for*, and it is why the
+idle drive is pinned at 0.18 of maximum and not higher: at half amplitude
+nothing in the water could reach the player at all — the entire bestiary parked
+itself one node out, about eighty microns away, and stood there. It was not a
+difficulty problem, it was a game in which nothing could happen.
+
+So gripping fences the water off and lets you move at 700 µm/s; releasing drops
+the lattice and everything that was standing off comes in while you get your
+stamina back. Running out is how this kills you.
+
+### The colour language is still the physics
+
+Nothing in the update loop special-cases attraction or repulsion. Every body on
+screen is a `Particle`, and the sign of `contrastFactor` against **this world's
+medium** decides everything, including for you:
+
+**cool → Φ > 0 → answers to nodes.  warm → Φ < 0 → answers to antinodes.**
+
+| | what it is | how it is dealt with |
+| --- | --- | --- |
+| VESICLE | lipid, Φ < 0 — your sign in the first water | it comes to your feet. Grip and it dies there |
+| MOTE | under the streaming crossover | no lattice holds it. It walks through your fence and drains you |
+| HUSK | Φ > 0, dense | held at arm's length in the first water, and in your lap in a water that turns you over |
+| SPLITTER | lipid, comes apart into motes | kill it away from yourself |
+
+Which of these a water carries is not a per-level table: `world.wildlifeFor`
+sorts them by whether they share your sign in that medium and stocks the ones
+that can actually reach you.
+
+### Settle, crown, reign, birth
+
+You gather motifs and crystallise them into cells; a placed cell is a
+**structure** that stays, projecting holding points along its own group's
+in-plane directions — six for a 622, two for a 222 — so it goes on gathering and
+merging while you are elsewhere. What you carry to the **throne** is what the
+sovereign becomes: its group is the most symmetric thing you fed it, and its
+volley is that group's symmetry seen from above, so a sixfold king throws six
+arms and you live in the gaps. Then it wakes and eats what you built, and your
+structures are the only thing that hurts it — drive one and it discharges along
+its own lobes and is consumed. **Its body is the next world:** the medium, the
+lattice pitch, what is dissolved in the water and what lives in it are all
+derived from what you fed it.
+
+The recipe list is not a design document. A protein is built from L-amino acids,
+so it is chiral, so of the 32 point groups exactly **11** are open to it — and
+those eleven are every cell in the game. A pentamer never joins anything,
+because a five-fold axis tiles no lattice. A cell's **structure** is its group
+order and its **freedom** is the independent piezoelectric components
+`neumann.ts` finds surviving in it, and Neumann's principle puts those in exact
+tension: `432` is order 24 with none at all, so the field cannot touch a king
+you fed it and you cannot push it off you.
+
+### It is tested as a game, not only as physics
+
+`test/run.test.ts` runs a bot that **has a body and cannot teleport** — every
+intention has to be spelt as a stick deflection and then waited for. It settles
+a world, crowns it, dashes out of incoming volleys, takes its own buildings
+apart to kill the thing it crowned, and is born into the world that comes out of
+the corpse. Writing it that way found things no unit test would have:
+
+- **A persistent lattice fences everything out.** At the first cruise amplitude
+  the bestiary pinned itself one node away and the game had no threats in it.
+- **The bite window.** A body only counted as *held* within 9 µm of a trap but
+  could touch you at 22, so a hunter deep inside your grip, on its way to your
+  node, was still free to bite. Every run died in that ring. The capture radius
+  is the well half-width — a quarter pitch — because that is what being caught
+  means.
+- **The frame rate had become a game constant.** You stop when you reach the
+  node, so the furthest you can travel between frames is the lead itself; at a
+  quarter pitch that capped you near 1300 µm/s no matter how hard the water was
+  driven, and a burst worth four times the force got nothing for it. A burst
+  reaches for the far side of the well instead.
+- **A king that vibrated in place.** `du/dt = A sin(2ku)` relaxes at `2k|A|` and
+  `A` goes as `a²`, so a nineteen-micron sovereign is nearly five time constants
+  per frame and explicit Euler multiplies the error by four every step. Sizing
+  the substeps by *displacement* looks equivalent and fails exactly at the node,
+  where there is no displacement to measure: it must come from the rate.
+- **A king that ended the run by existing.** Fed a 1, a 1 and a 2, `worldFrom`
+  produced a water sitting on the player's own iso-acoustic point — contrast
+  0.0005, one per cent of normal speed, and grip multiplies zero. Every
+  reachable world is now checked against that.
+
+The same test also checks the one decision the game is about, by playing it: the
+same policy over six seeds closes the cycle three times on one helping and never
+on two. **A richer king really is a harder fight.**
+
+The physics is not pasted into the page. `app/build-drifter.mjs` bundles
+`app/drifter.ts → game/pilot.ts → game/wave.ts → src/fields.ts → src/gorkov.ts`,
+so the shipped file contains the same Gor'kov potential the test suite runs
+against, and editing `src/` changes the game.
+
+```
+npm run drifter        # rebuild app/sonic-drifter.html
+```
+
+**`game/` is a third directory, and the boundary test covers it.** It may import
+`src/`, because a game whose rules are the library's physics is the point of it.
+It may not import `personal/` or `config/`. The game's beeps are UI sound at a
+few hundred hertz; the field is at ten megahertz.
+
 ## Layout
 
 ```
@@ -400,15 +536,27 @@ src/provenance.ts    measured / derived / assumed, and the weakest-link rule
 src/sohncke.ts       the 65 chiral space groups and their systematic absences
 app/index.html       the bench: substrates, device, measure
 app/listen.html      the chord: a separate page, sharing no code with the bench
+game/wave.ts         the field: crossed standing waves, apodisation, stamina
+game/pilot.ts        you, as a body the field moves: steering, grip, the burst
+game/lattice.ts      the eleven cells a chiral world permits, and why not a twelfth
+game/beasts.ts       four bodies, told apart by contrast factor and nothing else
+game/shape.ts        what a point group looks like from directly above it
+game/world.ts        worlds, sovereigns, and what is born out of a body
+game/run.ts          the aeon: settle, crown, reign, birth
+app/drifter.ts       SONIC DRIFTER: the game surface, canvas and rendering
+app/pad.ts           the controller, and the keyboard standing in for one
+app/sfx.ts           procedural UI sound, after TAPBLADE; no assets
+app/sonic-drifter.html   the game, bundled into one file with no network at all
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
 personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                122 tests: what the modules above are actually claiming
+test/                190 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
+`game/` reads `src/` and nothing else of the three.
 The physics stays a pure function of its arguments; the subject record and the
 tonal layer stay labels on the work rather than terms in it. Otherwise a
 prediction would stop being falsifiable, which is the only thing making any of

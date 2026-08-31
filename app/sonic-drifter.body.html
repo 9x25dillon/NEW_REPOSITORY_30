@@ -1,0 +1,2591 @@
+<title>Sonic Drifter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground:#05070e; --panel:#0b1220; --rule:#16243a;
+    --node:#78e1f5; --anti:#ff8cbe; --gold:#ffc94a;
+    --ink:#cfe9f5; --muted:#4a6076; --faint:#2b3e50;
+    --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; min-height:100%; background:var(--ground); }
+  html, body, #stage, canvas { touch-action:none; -webkit-user-select:none; user-select:none; }
+  body {
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:18px; padding:22px 16px 26px;
+    font-family:var(--mono); color:var(--ink);
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  header { text-align:center; display:flex; flex-direction:column; gap:7px; }
+  .mark {
+    font-size:13px; font-weight:600; letter-spacing:0.42em;
+    color:var(--node); text-indent:0.42em;
+  }
+  .sub {
+    margin:0; max-width:56ch; font-size:11.5px; line-height:1.6;
+    color:var(--muted); text-wrap:balance;
+  }
+
+  #stage { position:relative; line-height:0; }
+  canvas {
+    display:block; cursor:none; background:var(--ground);
+    border:1px solid var(--rule); border-radius:2px;
+    /* the bloom is the whole look: a cool halo off the field, and depth under it */
+    box-shadow:
+      0 0 0 1px rgba(120,225,245,0.07),
+      0 0 70px rgba(60,150,200,0.16),
+      0 26px 90px rgba(0,0,0,0.9);
+  }
+  canvas:focus-visible { outline:2px solid var(--node); outline-offset:4px; }
+
+  /* Three chips, and they are not decoration: they are the three facts the
+     simulation runs on - the two lattices, and the size below which neither
+     of them can help you. */
+  .legend {
+    list-style:none; margin:0; padding:0;
+    display:flex; flex-wrap:wrap; justify-content:center; gap:8px 22px;
+    font-size:10.5px; color:var(--muted);
+  }
+  .legend li { display:flex; align-items:center; gap:8px; }
+  .legend b { color:var(--ink); font-weight:600; letter-spacing:0.08em; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .dot.node { background:var(--node); box-shadow:0 0 9px rgba(120,225,245,0.75); }
+  .dot.anti { background:var(--anti); box-shadow:0 0 9px rgba(255,140,190,0.6); }
+  .dot.small { width:3px; height:3px; background:var(--gold); }
+
+  .controls {
+    margin:0; font-size:10px; letter-spacing:0.16em; color:var(--faint);
+    text-align:center;
+  }
+  .controls kbd {
+    font:inherit; color:var(--muted); border:1px solid var(--rule);
+    border-radius:2px; padding:1px 5px;
+  }
+
+  @media (max-width: 880px) { .sub { font-size:11px; } }
+  @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
+</style>
+<header>
+  <div class="mark">SONIC DRIFTER</div>
+  <p class="sub">
+    You are the field &mdash; a pair of crossed standing waves at 10&nbsp;MHz in water.
+    One screen pixel is one micron. Every force here is the Gor&rsquo;kov radiation
+    potential, computed live.
+  </p>
+</header>
+
+<div id="stage">
+  <canvas id="game" width="800" height="600" tabindex="0"
+          aria-label="Sonic Drifter - an acoustic tweezer you play with one hand"></canvas>
+</div>
+
+<ul class="legend">
+  <li><span class="dot node"></span><b>NODE</b> &Phi;&nbsp;&gt;&nbsp;0 &middot; denser than water &middot; falls in</li>
+  <li><span class="dot anti"></span><b>ANTINODE</b> &Phi;&nbsp;&lt;&nbsp;0 &middot; lighter &middot; climbs out</li>
+  <li><span class="dot small"></span><b>1.5&nbsp;&micro;m</b> below this, streaming wins</li>
+</ul>
+
+<p class="controls">
+  <kbd>HOLD</kbd> pull &nbsp; <kbd>SHIFT</kbd> push &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>M</kbd> mute
+</p>
+
+<script>"use strict";
+(() => {
+  var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key3, value) => key3 in obj ? __defProp(obj, key3, { enumerable: true, configurable: true, writable: true, value }) : obj[key3] = value;
+  var __publicField = (obj, key3, value) => __defNormalProp(obj, typeof key3 !== "symbol" ? key3 + "" : key3, value);
+
+  // src/pointgroups.ts
+  var POINT_GROUPS = [
+    ["1", "C1", "triclinic", 1, 1, false, 0],
+    ["-1", "Ci", "triclinic", 2, 1, true, 0],
+    ["2", "C2", "monoclinic", 2, 2, false, 0],
+    ["m", "Cs", "monoclinic", 2, 1, false, 1],
+    ["2/m", "C2h", "monoclinic", 4, 2, true, 1],
+    ["222", "D2", "orthorhombic", 4, 2, false, 0],
+    ["mm2", "C2v", "orthorhombic", 4, 2, false, 2],
+    ["mmm", "D2h", "orthorhombic", 8, 2, true, 3],
+    ["4", "C4", "tetragonal", 4, 4, false, 0],
+    ["-4", "S4", "tetragonal", 4, 2, false, 0],
+    ["4/m", "C4h", "tetragonal", 8, 4, true, 1],
+    ["422", "D4", "tetragonal", 8, 4, false, 0],
+    ["4mm", "C4v", "tetragonal", 8, 4, false, 4],
+    ["-42m", "D2d", "tetragonal", 8, 2, false, 2],
+    ["4/mmm", "D4h", "tetragonal", 16, 4, true, 5],
+    ["3", "C3", "trigonal", 3, 3, false, 0],
+    ["-3", "S6", "trigonal", 6, 3, true, 0],
+    ["32", "D3", "trigonal", 6, 3, false, 0],
+    ["3m", "C3v", "trigonal", 6, 3, false, 3],
+    ["-3m", "D3d", "trigonal", 12, 3, true, 3],
+    ["6", "C6", "hexagonal", 6, 6, false, 0],
+    ["-6", "C3h", "hexagonal", 6, 3, false, 1],
+    ["6/m", "C6h", "hexagonal", 12, 6, true, 1],
+    ["622", "D6", "hexagonal", 12, 6, false, 0],
+    ["6mm", "C6v", "hexagonal", 12, 6, false, 6],
+    ["-6m2", "D3h", "hexagonal", 12, 3, false, 4],
+    ["6/mmm", "D6h", "hexagonal", 24, 6, true, 7],
+    ["23", "T", "cubic", 12, 3, false, 0],
+    ["m-3", "Th", "cubic", 24, 3, true, 3],
+    ["432", "O", "cubic", 24, 4, false, 0],
+    ["-43m", "Td", "cubic", 24, 3, false, 6],
+    ["m-3m", "Oh", "cubic", 48, 4, true, 9]
+  ].map(([hm, schoenflies, system, order, axis2, inversion, mirrors]) => ({
+    hm,
+    schoenflies,
+    system,
+    order,
+    axis: axis2,
+    inversion,
+    mirrors
+  }));
+  var BY_HM = new Map(POINT_GROUPS.map((g2) => [g2.hm, g2]));
+  function pointGroup(hm) {
+    const g2 = BY_HM.get(hm);
+    if (!g2) throw new Error(`no point group ${hm}`);
+    return g2;
+  }
+  var NON_PIEZO_ACENTRIC = "432";
+  function isPiezoelectric(g2) {
+    return !g2.inversion && g2.hm !== NON_PIEZO_ACENTRIC;
+  }
+  var POLAR = /* @__PURE__ */ new Set(["1", "2", "m", "mm2", "3", "3m", "4", "4mm", "6", "6mm"]);
+  function isPolar(g2) {
+    return POLAR.has(g2.hm);
+  }
+
+  // src/symmetry.ts
+  var S3 = Math.sqrt(3) / 2;
+  function multiply(a, b) {
+    const out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        let s = 0;
+        for (let k = 0; k < 3; k++) s += a[i][k] * b[k][j];
+        out[i][j] = s;
+      }
+    }
+    return out;
+  }
+  function trace(m) {
+    return m[0][0] + m[1][1] + m[2][2];
+  }
+  var E = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  var INVERSION = [[-1, 0, 0], [0, -1, 0], [0, 0, -1]];
+  var C2Z = [[-1, 0, 0], [0, -1, 0], [0, 0, 1]];
+  var C2X = [[1, 0, 0], [0, -1, 0], [0, 0, -1]];
+  var C4Z = [[0, -1, 0], [1, 0, 0], [0, 0, 1]];
+  var C3Z = [[-0.5, -S3, 0], [S3, -0.5, 0], [0, 0, 1]];
+  var C6Z = [[0.5, -S3, 0], [S3, 0.5, 0], [0, 0, 1]];
+  var MZ = [[1, 0, 0], [0, 1, 0], [0, 0, -1]];
+  var MX = [[-1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  var S4Z = multiply(MZ, C4Z);
+  var C3_111 = [[0, 0, 1], [1, 0, 0], [0, 1, 0]];
+  var GENERATORS = {
+    "1": [E],
+    "-1": [INVERSION],
+    "2": [C2Z],
+    "m": [MZ],
+    "2/m": [C2Z, INVERSION],
+    "222": [C2Z, C2X],
+    "mm2": [C2Z, MX],
+    "mmm": [C2Z, C2X, INVERSION],
+    "4": [C4Z],
+    "-4": [S4Z],
+    "4/m": [C4Z, INVERSION],
+    "422": [C4Z, C2X],
+    "4mm": [C4Z, MX],
+    "-42m": [S4Z, C2X],
+    "4/mmm": [C4Z, C2X, INVERSION],
+    "3": [C3Z],
+    "-3": [C3Z, INVERSION],
+    "32": [C3Z, C2X],
+    "3m": [C3Z, MX],
+    "-3m": [C3Z, C2X, INVERSION],
+    "6": [C6Z],
+    "-6": [C3Z, MZ],
+    "6/m": [C6Z, INVERSION],
+    "622": [C6Z, C2X],
+    "6mm": [C6Z, MX],
+    "-6m2": [C3Z, MZ, C2X],
+    "6/mmm": [C6Z, C2X, INVERSION],
+    "23": [C2Z, C3_111],
+    "m-3": [C2Z, C3_111, INVERSION],
+    "432": [C4Z, C3_111],
+    "-43m": [S4Z, C3_111],
+    "m-3m": [C4Z, C3_111, INVERSION]
+  };
+  function key(m) {
+    return m.map((r) => r.map((v) => (Math.abs(v) < 1e-12 ? 0 : v).toFixed(9)).join(",")).join(";");
+  }
+  function closeGroup(generators, cap = 200) {
+    const seen = /* @__PURE__ */ new Map();
+    const add = (m) => {
+      const k = key(m);
+      if (!seen.has(k)) seen.set(k, m);
+    };
+    add(E);
+    for (const g2 of generators) add(g2);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      const current = [...seen.values()];
+      for (const a of current) {
+        for (const b of current) {
+          const k = key(multiply(a, b));
+          if (!seen.has(k)) {
+            seen.set(k, multiply(a, b));
+            grew = true;
+            if (seen.size > cap) {
+              throw new Error(`group did not close within ${cap} elements \u2014 check the generators`);
+            }
+          }
+        }
+      }
+    }
+    return [...seen.values()];
+  }
+  var CACHE = /* @__PURE__ */ new Map();
+  function operations(hm) {
+    const hit = CACHE.get(hm);
+    if (hit) return hit;
+    const gens = GENERATORS[hm];
+    if (!gens) throw new Error(`no generators for point group ${hm}`);
+    const ops = closeGroup(gens);
+    CACHE.set(hm, ops);
+    return ops;
+  }
+
+  // src/neumann.ts
+  function normalizeZero(n) {
+    return n === 0 ? 0 : n;
+  }
+  function symSquareChar(r) {
+    const t = trace(r);
+    return (t * t + trace(multiply(r, r))) / 2;
+  }
+  function independentComponents(hm, kind) {
+    const ops = operations(hm);
+    let sum = 0;
+    for (const r of ops) {
+      const chi = trace(r);
+      const sym2 = symSquareChar(r);
+      if (kind === "permittivity") {
+        sum += sym2;
+      } else if (kind === "piezoelectric") {
+        sum += chi * sym2;
+      } else {
+        const w = sym2;
+        const wOfSquare = symSquareChar(multiply(r, r));
+        sum += (w * w + wOfSquare) / 2;
+      }
+    }
+    const dim = sum / ops.length;
+    const rounded = Math.round(dim);
+    if (Math.abs(dim - rounded) > 1e-9) {
+      throw new Error(`${hm}/${kind}: character average ${dim} is not an integer`);
+    }
+    return normalizeZero(rounded);
+  }
+
+  // src/sohncke.ts
+  var g = (number, symbol, pointGroup2, lattice, screws = [], enantiomorph, common) => ({ number, symbol, pointGroup: pointGroup2, lattice, screws, enantiomorph, common });
+  var S = (dir, order, sub) => ({ dir, order, sub });
+  var SOHNCKE_GROUPS = [
+    // triclinic · 1
+    g(1, "P1", "1", "P", [], void 0, true),
+    // monoclinic · 2 (unique axis b)
+    g(3, "P2", "2", "P"),
+    g(4, "P21", "2", "P", [S("b", 2, 1)], void 0, true),
+    g(5, "C2", "2", "C", [], void 0, true),
+    // orthorhombic · 222
+    g(16, "P222", "222", "P"),
+    g(17, "P2221", "222", "P", [S("c", 2, 1)]),
+    g(18, "P21212", "222", "P", [S("a", 2, 1), S("b", 2, 1)], void 0, true),
+    g(19, "P212121", "222", "P", [S("a", 2, 1), S("b", 2, 1), S("c", 2, 1)], void 0, true),
+    g(20, "C2221", "222", "C", [S("c", 2, 1)], void 0, true),
+    g(21, "C222", "222", "C"),
+    g(22, "F222", "222", "F"),
+    g(23, "I222", "222", "I"),
+    g(24, "I212121", "222", "I", [S("a", 2, 1), S("b", 2, 1), S("c", 2, 1)]),
+    // tetragonal · 4
+    g(75, "P4", "4", "P"),
+    g(76, "P41", "4", "P", [S("c", 4, 1)], "P43"),
+    g(77, "P42", "4", "P", [S("c", 4, 2)]),
+    g(78, "P43", "4", "P", [S("c", 4, 3)], "P41"),
+    g(79, "I4", "4", "I"),
+    g(80, "I41", "4", "I", [S("c", 4, 1)]),
+    // tetragonal · 422
+    g(89, "P422", "422", "P"),
+    g(90, "P4212", "422", "P", [S("a", 2, 1), S("b", 2, 1)]),
+    g(91, "P4122", "422", "P", [S("c", 4, 1)], "P4322"),
+    g(92, "P41212", "422", "P", [S("c", 4, 1), S("a", 2, 1), S("b", 2, 1)], "P43212", true),
+    g(93, "P4222", "422", "P", [S("c", 4, 2)]),
+    g(94, "P42212", "422", "P", [S("c", 4, 2), S("a", 2, 1), S("b", 2, 1)]),
+    g(95, "P4322", "422", "P", [S("c", 4, 3)], "P4122"),
+    g(96, "P43212", "422", "P", [S("c", 4, 3), S("a", 2, 1), S("b", 2, 1)], "P41212", true),
+    g(97, "I422", "422", "I"),
+    g(98, "I4122", "422", "I", [S("c", 4, 1)]),
+    // trigonal · 3
+    g(143, "P3", "3", "P"),
+    g(144, "P31", "3", "P", [S("c", 3, 1)], "P32"),
+    g(145, "P32", "3", "P", [S("c", 3, 2)], "P31"),
+    g(146, "R3", "3", "R"),
+    // trigonal · 32
+    g(149, "P312", "32", "P"),
+    g(150, "P321", "32", "P"),
+    g(151, "P3112", "32", "P", [S("c", 3, 1)], "P3212"),
+    g(152, "P3121", "32", "P", [S("c", 3, 1)], "P3221", true),
+    g(153, "P3212", "32", "P", [S("c", 3, 2)], "P3112"),
+    g(154, "P3221", "32", "P", [S("c", 3, 2)], "P3121", true),
+    g(155, "R32", "32", "R", [], void 0, true),
+    // hexagonal · 6
+    g(168, "P6", "6", "P"),
+    g(169, "P61", "6", "P", [S("c", 6, 1)], "P65", true),
+    g(170, "P65", "6", "P", [S("c", 6, 5)], "P61"),
+    g(171, "P62", "6", "P", [S("c", 6, 2)], "P64"),
+    g(172, "P64", "6", "P", [S("c", 6, 4)], "P62"),
+    g(173, "P63", "6", "P", [S("c", 6, 3)]),
+    // hexagonal · 622
+    g(177, "P622", "622", "P"),
+    g(178, "P6122", "622", "P", [S("c", 6, 1)], "P6522", true),
+    g(179, "P6522", "622", "P", [S("c", 6, 5)], "P6122"),
+    g(180, "P6222", "622", "P", [S("c", 6, 2)], "P6422"),
+    g(181, "P6422", "622", "P", [S("c", 6, 4)], "P6222"),
+    g(182, "P6322", "622", "P", [S("c", 6, 3)]),
+    // cubic · 23
+    g(195, "P23", "23", "P"),
+    g(196, "F23", "23", "F"),
+    g(197, "I23", "23", "I"),
+    g(198, "P213", "23", "P", [S("a", 2, 1), S("b", 2, 1), S("c", 2, 1)]),
+    g(199, "I213", "23", "I", [S("a", 2, 1), S("b", 2, 1), S("c", 2, 1)]),
+    // cubic · 432
+    g(207, "P432", "432", "P"),
+    g(208, "P4232", "432", "P", [S("c", 4, 2)]),
+    g(209, "F432", "432", "F"),
+    g(210, "F4132", "432", "F", [S("c", 4, 1)]),
+    g(211, "I432", "432", "I"),
+    g(212, "P4332", "432", "P", [S("c", 4, 3)], "P4132"),
+    g(213, "P4132", "432", "P", [S("c", 4, 1)], "P4332"),
+    g(214, "I4132", "432", "I", [S("c", 4, 1)])
+  ];
+  var BY_SYMBOL = new Map(SOHNCKE_GROUPS.map((s) => [s.symbol, s]));
+  function groupsOfPointGroup(hm) {
+    return SOHNCKE_GROUPS.filter((s) => s.pointGroup === hm);
+  }
+
+  // game/lattice.ts
+  var CELLISH = { rho: 1100, c: 1570 };
+  var LIPIDISH = { rho: 915, c: 1450 };
+  var LIGHT = { rho: 1050, c: 1520 };
+  var MOTIFS = {
+    a1: {
+      id: "a1",
+      label: "MONOMER",
+      role: "axial",
+      order: 1,
+      particle: { radius: 6e-6, ...CELLISH },
+      note: "NO SYMMETRY AT ALL. BUILDS THE GROUP THAT ASKS FOR NONE"
+    },
+    a2: {
+      id: "a2",
+      label: "DIMER",
+      role: "axial",
+      order: 2,
+      particle: { radius: 7e-6, ...CELLISH },
+      note: "A TWO-FOLD AXIS. THE COMMONEST THING IN THE MEDIUM"
+    },
+    a3: {
+      id: "a3",
+      label: "TRIMER",
+      role: "axial",
+      order: 3,
+      particle: { radius: 65e-7, ...CELLISH },
+      note: "A THREE-FOLD AXIS"
+    },
+    a4: {
+      id: "a4",
+      label: "TETRAMER",
+      role: "axial",
+      order: 4,
+      particle: { radius: 5e-6, ...CELLISH },
+      note: "A FOUR-FOLD AXIS. SMALLER, SO SLOWER TO GATHER"
+    },
+    a5: {
+      id: "a5",
+      label: "PENTAMER",
+      role: "axial",
+      order: 5,
+      particle: { radius: 6e-6, ...CELLISH },
+      note: "FIVE-FOLD. NO LATTICE WILL EVER TAKE IT"
+    },
+    a6: {
+      id: "a6",
+      label: "HEXAMER",
+      role: "axial",
+      order: 6,
+      particle: { radius: 4e-6, ...CELLISH },
+      note: "A SIX-FOLD AXIS. THE SMALLEST AXIAL, AND THE HARDEST"
+    },
+    g: {
+      id: "g",
+      label: "GIRDLE",
+      role: "girdle",
+      order: 2,
+      particle: { radius: 55e-7, ...LIPIDISH },
+      note: "A TWO-FOLD ACROSS THE AXIS. LIPID-BOUND, SO IT FLEES THE NODE"
+    },
+    d: {
+      id: "d",
+      label: "DIAGONAL",
+      role: "diagonal",
+      order: 3,
+      particle: { radius: 16e-7, ...LIGHT },
+      note: "A THREE-FOLD DOWN A BODY DIAGONAL. TOO SMALL FOR THE FIELD TO HOLD WELL"
+    }
+  };
+  function motif(id) {
+    const m = MOTIFS[id];
+    if (!m) throw new Error(`no motif ${id}`);
+    return m;
+  }
+  var RECIPES = [
+    { parts: ["a1"], group: "1" },
+    { parts: ["a2"], group: "2" },
+    { parts: ["a3"], group: "3" },
+    { parts: ["a4"], group: "4" },
+    { parts: ["a6"], group: "6" },
+    { parts: ["a2", "g"], group: "222" },
+    { parts: ["a3", "g"], group: "32" },
+    { parts: ["a4", "g"], group: "422" },
+    { parts: ["a6", "g"], group: "622" },
+    { parts: ["a2", "d"], group: "23" },
+    { parts: ["a4", "d"], group: "432" }
+  ];
+  var key2 = (ids) => [...new Set(ids)].sort().join("+");
+  var BY_PARTS = new Map(RECIPES.map((r) => [key2(r.parts), r]));
+  var SEED_MASS = 4;
+  function assemble(parts, seed = SEED_MASS) {
+    const all = [...parts].sort();
+    const distinct = [...new Set(all)].sort();
+    const ms = distinct.map(motif);
+    const hit = BY_PARTS.get(key2(distinct));
+    const enough = all.length >= seed;
+    if (hit) {
+      return {
+        parts: all,
+        distinct,
+        mass: all.length,
+        group: hit.group,
+        refusal: null,
+        partial: !enough,
+        crystallises: enough
+      };
+    }
+    const axials = ms.filter((m) => m.role === "axial");
+    const partial = RECIPES.some((r) => distinct.length < r.parts.length && distinct.every((id) => r.parts.includes(id)));
+    let refusal = "unknown";
+    if (ms.some((m) => m.order === 5)) refusal = "five-fold";
+    else if (axials.length > 1) refusal = "two-axes";
+    else if (axials.length === 0 && ms.length > 0) refusal = "no-axis";
+    const fiveFold = ms.some((m) => m.order === 5);
+    return {
+      parts: all,
+      distinct,
+      mass: all.length,
+      group: null,
+      refusal: partial && !fiveFold ? null : refusal,
+      partial: partial && !fiveFold,
+      crystallises: false
+    };
+  }
+  function cellFor(hm) {
+    const g2 = pointGroup(hm);
+    const freedom = independentComponents(hm, "piezoelectric");
+    const ability = isPolar(g2) ? "thrust" : isPiezoelectric(g2) ? "weave" : "anchor";
+    return {
+      group: g2,
+      structure: g2.order,
+      freedom,
+      variants: groupsOfPointGroup(hm).length,
+      ability,
+      blurb: BLURB[ability]
+    };
+  }
+  var BLURB = {
+    thrust: "POLAR: ONE DIRECTION SURVIVES EVERY OPERATION, SO IT CAN PUSH ALONG IT",
+    weave: "PIEZOELECTRIC BUT NOT POLAR: IT TURNS YOUR PRESSURE INTO STRUCTURE",
+    anchor: "ORDER 24 AND NOT ONE DRIVABLE COMPONENT. IT CANNOT BE MOVED, WHICH IS THE POINT"
+  };
+  var BUILDABLE = RECIPES.map((r) => r.group);
+
+  // src/gorkov.ts
+  function compressibility(m) {
+    return 1 / (m.rho * m.c * m.c);
+  }
+  function f1(p, med) {
+    return 1 - compressibility(p) / compressibility(med);
+  }
+  function f2(p, med) {
+    return 2 * (p.rho - med.rho) / (2 * p.rho + med.rho);
+  }
+  function contrastFactor(p, med) {
+    return f1(p, med) / 3 + f2(p, med) / 2;
+  }
+  var TAU = Math.PI * 2;
+  var CROSSOVER_RADIUS_ORDER = 15e-7;
+  var WATER = { rho: 997, c: 1497 };
+  var MAMMALIAN_CELL = { radius: 75e-7, rho: 1100, c: 1570 };
+
+  // src/fields.ts
+  function forceAt(w, u, p) {
+    const phi = contrastFactor(p, w.medium);
+    const kappa = compressibility(w.medium);
+    return Math.PI * Math.pow(p.radius, 3) * kappa * w.amplitude * w.amplitude * phi * w.k * Math.sin(2 * (w.k * u + w.phase));
+  }
+  function trapPositions(w, p, span) {
+    const phi = contrastFactor(p, w.medium);
+    if (phi === 0) return [];
+    const offset = phi > 0 ? Math.PI / 2 : 0;
+    const period = Math.PI / w.k;
+    const out = [];
+    const first = (offset - w.phase) / w.k;
+    let u = first - Math.ceil(first / period) * period;
+    while (u < -1e-15) u += period;
+    for (; u < span - 1e-15; u += period) out.push(u);
+    return out;
+  }
+  var SAW_SUBSTRATES = [
+    { name: "Lithium niobate", cut: "128 deg Y-cut, X-propagating", velocity: 3980, hm: "3m" },
+    { name: "Lithium tantalate", cut: "36 deg Y-cut, X-propagating (leaky)", velocity: 4212, hm: "3m" },
+    { name: "Quartz", cut: "ST-cut, X-propagating", velocity: 3158, hm: "32" }
+  ];
+  function ssawWavelength(d) {
+    return 2 * d.fingerPitch;
+  }
+  function ssawFrequency(d) {
+    return d.substrate.velocity / ssawWavelength(d);
+  }
+  function ssawField(d, amplitudePa) {
+    const wavelength = ssawWavelength(d);
+    return {
+      k: 2 * Math.PI / wavelength,
+      wavelength,
+      frequency: ssawFrequency(d),
+      amplitude: amplitudePa,
+      // Two waves of phase difference p sum to an envelope cos(kx - p/2).
+      phase: envelopePhaseForIdt(d.idtPhase ?? 0),
+      medium: d.medium
+    };
+  }
+  function envelopePhaseForIdt(idtPhaseRad) {
+    return -idtPhaseRad / 2;
+  }
+
+  // game/wave.ts
+  var WATER_VISCOSITY = 89e-5;
+  var SUBSTRATE = SAW_SUBSTRATES[0];
+  var GRIP_RISE = 9e5;
+  var GRIP_FALL = 7e5;
+  var STAMINA_MAX = 100;
+  var STAMINA_REGEN = 21;
+  var STAMINA_DRAIN = 17;
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = a + 1831565813 >>> 0;
+      let t = a;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function newWave(pitch, maxAmplitude, focus = 0, medium = WATER) {
+    return {
+      pitch,
+      phaseX: 0,
+      phaseY: 0,
+      amplitude: 0,
+      maxAmplitude,
+      stamina: STAMINA_MAX,
+      spent: false,
+      medium,
+      aimX: 0,
+      aimY: 0,
+      focus,
+      inverted: false
+    };
+  }
+  function axis(w, phase, amplitude) {
+    return ssawField(
+      { fingerPitch: w.pitch, substrate: SUBSTRATE, medium: w.medium, idtPhase: phase },
+      amplitude
+    );
+  }
+  function axisX(w, amplitude = w.amplitude) {
+    return axis(w, w.phaseX, amplitude);
+  }
+  function axisY(w, amplitude = w.amplitude) {
+    return axis(w, w.phaseY, amplitude);
+  }
+  function envelopeAt(w, x, y) {
+    if (w.focus <= 0) return 1;
+    const dx = x - w.aimX, dy = y - w.aimY;
+    return Math.exp(-(dx * dx + dy * dy) / (2 * w.focus * w.focus));
+  }
+  function localAmplitude(w, x, y) {
+    return w.amplitude * envelopeAt(w, x, y);
+  }
+  function frequency(w) {
+    return ssawFrequency({ fingerPitch: w.pitch, substrate: SUBSTRATE, medium: w.medium });
+  }
+  function phaseForNodeAt(w, u) {
+    const k = Math.PI / w.pitch;
+    return -2 * (Math.PI / 2 - k * u);
+  }
+  function aimAt(w, x, y, invert = false) {
+    const off = invert ? w.pitch / 2 : 0;
+    w.phaseX = phaseForNodeAt(w, x + off);
+    w.phaseY = phaseForNodeAt(w, y + off);
+    w.aimX = x;
+    w.aimY = y;
+    w.inverted = invert;
+  }
+  function trapsX(w, p, span) {
+    return trapPositions(axisX(w), p, span);
+  }
+  function trapsY(w, p, span) {
+    return trapPositions(axisY(w), p, span);
+  }
+  function driftVelocity(forceN, radiusM, viscosityPaS) {
+    return forceN / (6 * Math.PI * viscosityPaS * radiusM);
+  }
+  function velocityAt(w, x, y, p) {
+    if (w.amplitude <= 0) return { vx: 0, vy: 0 };
+    const amp = localAmplitude(w, x, y);
+    if (amp <= 0) return { vx: 0, vy: 0 };
+    const mu = WATER_VISCOSITY;
+    return {
+      vx: driftVelocity(forceAt(axisX(w, amp), x, p), p.radius, mu),
+      vy: driftVelocity(forceAt(axisY(w, amp), y, p), p.radius, mu)
+    };
+  }
+  function peakForce(s, p) {
+    return forceAt(s, (Math.PI / 4 - s.phase) / s.k, p);
+  }
+  var REF_PITCH = 15e-5;
+  var REF_AMPLITUDE = 2e5;
+  var REF_WAVE = ssawField(
+    { fingerPitch: REF_PITCH, substrate: SUBSTRATE, medium: WATER },
+    REF_AMPLITUDE
+  );
+  var CROSSOVER_PARTICLE = { ...MAMMALIAN_CELL, radius: CROSSOVER_RADIUS_ORDER };
+  var STREAMING_COEFF = driftVelocity(peakForce(REF_WAVE, CROSSOVER_PARTICLE), CROSSOVER_RADIUS_ORDER, WATER_VISCOSITY) / (REF_AMPLITUDE * REF_AMPLITUDE);
+  function streamingSpeed(amplitudePa) {
+    return STREAMING_COEFF * amplitudePa * amplitudePa;
+  }
+  function grip(w, held, dt) {
+    if (w.spent && w.stamina > STAMINA_MAX * 0.25) w.spent = false;
+    const want = held && !w.spent ? w.maxAmplitude : 0;
+    if (w.amplitude < want) w.amplitude = Math.min(want, w.amplitude + GRIP_RISE * dt);
+    else if (w.amplitude > want) w.amplitude = Math.max(want, w.amplitude - GRIP_FALL * dt);
+    const f = w.amplitude / w.maxAmplitude;
+    if (want > 0) {
+      w.stamina -= STAMINA_DRAIN * f * f * dt;
+      if (w.stamina <= 0) {
+        w.stamina = 0;
+        w.spent = true;
+      }
+    } else {
+      w.stamina = Math.min(STAMINA_MAX, w.stamina + STAMINA_REGEN * dt);
+    }
+    return w.amplitude;
+  }
+
+  // game/run.ts
+  var ARENA_W = 8e-4;
+  var ARENA_H = 6e-4;
+  var PITCH = 8e-5;
+  var MAX_AMPLITUDE = 2e5;
+  var FOCUS = 52e-6;
+  var HOLD_FLOOR = 0.35;
+  var SNAP_RADIUS = 9e-6;
+  var BIND_RADIUS = 22e-6;
+  var BIND_DWELL = 0.28;
+  var BIND_GRIP = 0.3;
+  var MAX_INTEGRITY = 4;
+  var IFRAME = 1.4;
+  var AMBIENT = 11e-6;
+  var LIPID = { rho: 915, c: 1450 };
+  var FLESH = { rho: 1100, c: 1570 };
+  var FAINT = { rho: 1050, c: 1520 };
+  var HOSTILES = {
+    vesicle: {
+      id: "vesicle",
+      label: "VESICLE",
+      particle: { radius: 55e-7, ...LIPID },
+      hold: 1.15,
+      speed: 46e-6,
+      behaviour: "hunt",
+      damage: 1,
+      drain: 0,
+      from: 1,
+      weight: 10,
+      score: 2
+    },
+    mote: {
+      id: "mote",
+      label: "MOTE",
+      particle: { radius: 9e-7, ...FAINT },
+      // No hold time that matters: streaming owns it, so it is not trappable in
+      // practice at any drive. Thrust is what clears motes.
+      hold: 0.9,
+      speed: 0,
+      behaviour: "drift",
+      damage: 0,
+      drain: 26,
+      from: 2,
+      weight: 8,
+      score: 1
+    },
+    husk: {
+      id: "husk",
+      label: "HUSK",
+      particle: { radius: 12e-6, ...FLESH },
+      hold: 2.3,
+      speed: 31e-6,
+      behaviour: "hunt",
+      damage: 1,
+      drain: 0,
+      from: 2,
+      weight: 6,
+      score: 4
+    },
+    splitter: {
+      id: "splitter",
+      label: "SPLITTER",
+      particle: { radius: 65e-7, ...LIPID },
+      hold: 1,
+      speed: 64e-6,
+      behaviour: "split",
+      damage: 1,
+      drain: 0,
+      from: 3,
+      weight: 6,
+      score: 3
+    },
+    siphon: {
+      id: "siphon",
+      label: "SIPHON",
+      particle: { radius: 5e-6, ...LIPID },
+      hold: 1.4,
+      speed: 42e-6,
+      behaviour: "keep-away",
+      damage: 0,
+      drain: 19,
+      from: 4,
+      weight: 5,
+      score: 4
+    },
+    pulsar: {
+      id: "pulsar",
+      label: "PULSAR",
+      particle: { radius: 9e-6, ...LIPID },
+      hold: 3.6,
+      speed: 36e-6,
+      behaviour: "flip",
+      damage: 1,
+      drain: 0,
+      from: 3,
+      weight: 0,
+      score: 25
+    }
+  };
+  var PULSAR_DENSE = { radius: 9e-6, rho: 1120, c: 1600 };
+  function hostile(id) {
+    const h = HOSTILES[id];
+    if (!h) throw new Error(`no hostile ${id}`);
+    return h;
+  }
+  function quotaFor(depth) {
+    return 4 + Math.floor(depth * 1.5);
+  }
+  function isBossDepth(depth) {
+    return depth % 3 === 0;
+  }
+  function startRun(seed = 1) {
+    const run = {
+      wave: newWave(PITCH, MAX_AMPLITUDE, FOCUS),
+      depth: 1,
+      phase: "play",
+      entities: [],
+      pillars: [],
+      cells: [],
+      cool: [],
+      integrity: MAX_INTEGRITY,
+      iframe: 0,
+      cleared: 0,
+      quota: quotaFor(1),
+      crafted: 0,
+      score: 0,
+      t: 0,
+      spawnIn: 1.2,
+      pool: ["a2", "g"],
+      choices: [],
+      events: [],
+      aim: { x: ARENA_W / 2, y: ARENA_H / 2 },
+      rand: rng(seed),
+      nextId: 0
+    };
+    for (let i = 0; i < 11; i++) run.entities.push(newMotif(run, true));
+    run.entities.push(newHostile(run, "vesicle"));
+    return run;
+  }
+  function clusterParticle(parts) {
+    let v = 0, mr = 0, mc = 0;
+    for (const id of parts) {
+      const p = motif(id).particle;
+      const vi = p.radius ** 3;
+      v += vi;
+      mr += p.rho * vi;
+      mc += p.c * vi;
+    }
+    if (v === 0) return { radius: 1e-6, rho: WATER.rho, c: WATER.c };
+    return { radius: Math.cbrt(v), rho: mr / v, c: mc / v };
+  }
+  function particleOf(e) {
+    if (e.faction === "motif") return clusterParticle(e.parts);
+    if (e.species === "pulsar" && e.dense) return PULSAR_DENSE;
+    return hostile(e.species).particle;
+  }
+  function labelOf(e) {
+    if (e.faction === "hostile") return hostile(e.species).label;
+    const a = assemble(e.parts);
+    if (e.parts.length === 1) return motif(e.parts[0]).label;
+    return a.group ? `${a.group}  x${a.mass}` : `CLUSTER x${a.mass}`;
+  }
+  function edge(run) {
+    if (run.rand() < 0.5) {
+      return { x: run.rand() < 0.5 ? 4e-6 : ARENA_W - 4e-6, y: run.rand() * ARENA_H };
+    }
+    return { x: run.rand() * ARENA_W, y: run.rand() < 0.5 ? 4e-6 : ARENA_H - 4e-6 };
+  }
+  function blank(run, faction, at) {
+    return {
+      id: run.nextId++,
+      faction,
+      species: "",
+      parts: [],
+      x: at.x,
+      y: at.y,
+      ang: run.rand() * Math.PI * 2,
+      held: 0,
+      dwell: 0,
+      partner: -1,
+      flash: 0,
+      spin: run.rand() * 6.28,
+      beat: 3,
+      dense: false,
+      trail: []
+    };
+  }
+  function newMotif(run, anywhere = false) {
+    const at = anywhere ? { x: 0.1 * ARENA_W + run.rand() * 0.8 * ARENA_W, y: 0.1 * ARENA_H + run.rand() * 0.8 * ARENA_H } : edge(run);
+    const e = blank(run, "motif", at);
+    e.parts = [run.pool[Math.floor(run.rand() * run.pool.length)]];
+    return e;
+  }
+  function newHostile(run, species, at) {
+    const e = blank(run, "hostile", at ?? edge(run));
+    e.species = species;
+    e.beat = 2.6;
+    return e;
+  }
+  function tableFor(depth) {
+    return Object.values(HOSTILES).filter((h) => h.weight > 0 && h.from <= depth).map((h) => [h.id, h.weight]);
+  }
+  function pickHostile(run) {
+    const table = tableFor(run.depth);
+    let total = 0;
+    for (const [, w] of table) total += w;
+    let r = run.rand() * total;
+    for (const [id, w] of table) {
+      r -= w;
+      if (r <= 0) return id;
+    }
+    return table[table.length - 1][0];
+  }
+  function spawnGap(depth) {
+    return Math.max(1.1, 4.2 - depth * 0.32);
+  }
+  function step(run, input, dt) {
+    run.t += dt;
+    run.aim.x = Math.max(0, Math.min(ARENA_W, input.aim.x));
+    run.aim.y = Math.max(0, Math.min(ARENA_H, input.aim.y));
+    const w = run.wave;
+    aimAt(w, run.aim.x, run.aim.y, input.invert);
+    const wasSpent = w.spent;
+    const relief = run.cells.some((c) => c.ability === "anchor") ? 0.62 : 1;
+    const s0 = w.stamina;
+    grip(w, input.held && run.phase === "play", dt);
+    if (w.stamina < s0) w.stamina = s0 - (s0 - w.stamina) * relief;
+    if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
+    if (run.iframe > 0) run.iframe -= dt;
+    for (let i = 0; i < run.cool.length; i++) {
+      if (run.cool[i] > 0) run.cool[i] = Math.max(0, run.cool[i] - dt);
+    }
+    for (const p of run.pillars) p.life -= dt;
+    run.pillars = run.pillars.filter((p) => p.life > 0);
+    if (run.phase !== "play") {
+      move(run, dt);
+      return;
+    }
+    run.spawnIn -= dt;
+    if (run.spawnIn <= 0) {
+      run.spawnIn = spawnGap(run.depth) * (0.75 + run.rand() * 0.5);
+      const live = run.entities.filter((e) => e.faction === "hostile").length;
+      if (live < 2 + run.depth) run.entities.push(newHostile(run, pickHostile(run)));
+    }
+    const motifs = run.entities.filter((e) => e.faction === "motif").length;
+    if (motifs < 12) run.entities.push(newMotif(run));
+    move(run, dt);
+    settle(run, dt);
+    if (w.amplitude >= w.maxAmplitude * BIND_GRIP) mergePass(run, dt);
+    else for (const e of run.entities) {
+      if (e.faction === "motif") {
+        e.dwell = 0;
+        e.partner = -1;
+      }
+    }
+    crystallise(run);
+    contact(run, dt);
+    if (run.cleared >= run.quota && run.phase === "play") openDescent(run);
+  }
+  function move(run, dt) {
+    const w = run.wave;
+    const uStream = streamingSpeed(w.amplitude);
+    for (const e of run.entities) {
+      const p = particleOf(e);
+      const { vx, vy } = velocityAt(w, e.x, e.y, p);
+      let dx = vx, dy = vy;
+      if (uStream > 0) {
+        e.ang += (run.rand() * 2 - 1) * 5 * dt;
+        dx += uStream * Math.cos(e.ang);
+        dy += uStream * Math.sin(e.ang);
+      }
+      const ca = Math.PI * e.x / ARENA_W;
+      const cb = Math.PI * e.y / ARENA_H;
+      dx += AMBIENT * Math.sin(ca) * Math.cos(cb);
+      dy += -AMBIENT * Math.cos(ca) * Math.sin(cb);
+      if (e.faction === "hostile" && run.phase === "play") {
+        const h = hostile(e.species);
+        const hx = run.aim.x - e.x, hy = run.aim.y - e.y;
+        const r = Math.hypot(hx, hy) || 1e-12;
+        if (h.behaviour === "keep-away") {
+          const want = 15e-5;
+          const push = r < want ? -1 : 1;
+          dx += hx / r * h.speed * push;
+          dy += hy / r * h.speed * push;
+        } else if (h.behaviour !== "drift") {
+          dx += hx / r * h.speed;
+          dy += hy / r * h.speed;
+        }
+        if (h.behaviour === "flip") {
+          e.beat -= dt;
+          if (e.beat <= 0) {
+            e.beat = 2.6;
+            e.dense = !e.dense;
+            e.held = 0;
+            run.events.push({ kind: "flip", x: e.x, y: e.y, dense: e.dense });
+          }
+        }
+      }
+      for (const q of run.pillars) {
+        const qx = q.x - e.x, qy = q.y - e.y;
+        const r = Math.hypot(qx, qy);
+        if (r > 1e-9 && r < 7e-5 && contrastFactor(p, WATER) > 0) {
+          const pull = 5e-5 * q.strength * (1 - r / 7e-5);
+          dx += qx / r * pull;
+          dy += qy / r * pull;
+        }
+      }
+      e.x += dx * dt;
+      e.y += dy * dt;
+      e.spin += dt * 1.5;
+      const rad = p.radius;
+      if (e.x < rad) {
+        e.x = rad;
+        e.ang = Math.PI - e.ang;
+      }
+      if (e.x > ARENA_W - rad) {
+        e.x = ARENA_W - rad;
+        e.ang = Math.PI - e.ang;
+      }
+      if (e.y < rad) {
+        e.y = rad;
+        e.ang = -e.ang;
+      }
+      if (e.y > ARENA_H - rad) {
+        e.y = ARENA_H - rad;
+        e.ang = -e.ang;
+      }
+      e.trail.push(e.x, e.y);
+      while (e.trail.length > 18) e.trail.shift();
+      if (e.flash > 0) e.flash -= dt;
+    }
+  }
+  function settle(run, dt) {
+    const w = run.wave;
+    const dead = [];
+    for (const e of run.entities) {
+      const p = particleOf(e);
+      if (w.amplitude <= 0 || envelopeAt(w, e.x, e.y) < HOLD_FLOOR) {
+        e.held = 0;
+        continue;
+      }
+      const xs = trapPositions(axisX(w), p, ARENA_W);
+      const ys = trapPositions(axisY(w), p, ARENA_H);
+      const nx = nearest(xs, e.x);
+      const ny = nearest(ys, e.y);
+      if (nx === null || ny === null) {
+        e.held = 0;
+        continue;
+      }
+      if (Math.hypot(nx - e.x, ny - e.y) < SNAP_RADIUS + p.radius * 0.5) {
+        e.held += dt;
+        if (e.faction === "hostile" && e.held >= hostile(e.species).hold) dead.push(e);
+      } else {
+        e.held = 0;
+      }
+    }
+    for (const e of dead) kill(run, e);
+  }
+  var KILL_REFUND = 22;
+  function kill(run, e) {
+    const h = hostile(e.species);
+    run.entities = run.entities.filter((x) => x !== e);
+    run.cleared++;
+    run.score += h.score * run.depth;
+    run.wave.stamina = Math.min(100, run.wave.stamina + KILL_REFUND);
+    if (run.wave.stamina > 25) run.wave.spent = false;
+    run.events.push({ kind: "kill", x: e.x, y: e.y, species: e.species, score: h.score * run.depth });
+    if (h.behaviour === "split") {
+      for (let i = 0; i < 2; i++) {
+        const m = newHostile(run, "mote", {
+          x: e.x + (run.rand() * 2 - 1) * 2e-5,
+          y: e.y + (run.rand() * 2 - 1) * 2e-5
+        });
+        run.entities.push(m);
+      }
+    }
+  }
+  function mergePass(run, dt) {
+    const ms = run.entities.filter((e) => e.faction === "motif");
+    const gone = /* @__PURE__ */ new Set();
+    for (let i = 0; i < ms.length; i++) {
+      const a = ms[i];
+      if (gone.has(a.id)) continue;
+      let best = null;
+      let bestR = BIND_RADIUS;
+      for (let j = i + 1; j < ms.length; j++) {
+        const b = ms[j];
+        if (gone.has(b.id)) continue;
+        const r = Math.hypot(a.x - b.x, a.y - b.y);
+        if (r < bestR) {
+          bestR = r;
+          best = b;
+        }
+      }
+      if (!best) {
+        a.dwell = 0;
+        a.partner = -1;
+        continue;
+      }
+      const asm = assemble([...a.parts, ...best.parts]);
+      if (!asm.group && !asm.partial) {
+        if (a.flash <= 0) {
+          a.flash = 0.45;
+          best.flash = 0.45;
+          run.events.push({
+            kind: "refuse",
+            x: (a.x + best.x) / 2,
+            y: (a.y + best.y) / 2,
+            text: asm.refusal ?? "unknown"
+          });
+        }
+        const dx = a.x - best.x, dy = a.y - best.y, r = Math.hypot(dx, dy) || 1e-9;
+        a.x += dx / r * 6e-6;
+        a.y += dy / r * 6e-6;
+        best.x -= dx / r * 6e-6;
+        best.y -= dy / r * 6e-6;
+        a.dwell = 0;
+        a.partner = -1;
+        continue;
+      }
+      if (a.partner === best.id) a.dwell += dt;
+      else {
+        a.partner = best.id;
+        a.dwell = dt;
+      }
+      if (a.dwell >= BIND_DWELL) {
+        a.parts = [...a.parts, ...best.parts];
+        a.x = (a.x + best.x) / 2;
+        a.y = (a.y + best.y) / 2;
+        a.dwell = 0;
+        a.partner = -1;
+        a.flash = 0.4;
+        gone.add(best.id);
+        run.events.push({ kind: "merge", x: a.x, y: a.y });
+      }
+    }
+    if (gone.size) run.entities = run.entities.filter((e) => !gone.has(e.id));
+  }
+  function crystallise(run) {
+    const keep = [];
+    for (const e of run.entities) {
+      if (e.faction !== "motif") {
+        keep.push(e);
+        continue;
+      }
+      const asm = assemble(e.parts);
+      if (asm.crystallises && asm.group) {
+        const cell = cellFor(asm.group);
+        run.cells.push(cell);
+        run.cool.push(0);
+        run.crafted++;
+        run.score += cell.structure * 5;
+        run.wave.stamina = 100;
+        run.wave.spent = false;
+        run.events.push({ kind: "crystal", x: e.x, y: e.y, group: asm.group });
+      } else {
+        keep.push(e);
+      }
+    }
+    run.entities = keep;
+  }
+  var TOUCH = 17e-6;
+  function contact(run, dt) {
+    const w = run.wave;
+    let bite = 0;
+    let drain = 0;
+    for (const e of run.entities) {
+      if (e.faction !== "hostile") continue;
+      const h = hostile(e.species);
+      const r = Math.hypot(e.x - run.aim.x, e.y - run.aim.y);
+      if (h.behaviour === "keep-away") {
+        if (r < 22e-5) drain += h.drain;
+        continue;
+      }
+      if (e.held > 0) continue;
+      if (r < TOUCH + particleOf(e).radius) {
+        e.flash = 0.3;
+        if (h.damage > 0) bite += h.damage;
+        else drain += h.drain;
+      }
+    }
+    if (drain > 0) {
+      w.stamina = Math.max(0, w.stamina - drain * dt);
+      if (w.stamina <= 0) w.spent = true;
+    }
+    if (bite > 0 && run.iframe <= 0) {
+      run.integrity -= 1;
+      run.iframe = IFRAME;
+      for (const e of run.entities) {
+        if (e.faction !== "hostile") continue;
+        const dx = e.x - run.aim.x, dy = e.y - run.aim.y;
+        const r = Math.hypot(dx, dy);
+        if (r < 9e-5 && r > 1e-9) {
+          e.x += dx / r * 8e-5;
+          e.y += dy / r * 8e-5;
+          e.held = 0;
+        }
+      }
+      run.events.push({ kind: "hit", x: run.aim.x, y: run.aim.y });
+      if (run.integrity <= 0) {
+        run.integrity = 0;
+        run.phase = "dead";
+        run.events.push({ kind: "death" });
+      }
+    }
+  }
+  function cooldownOf(c) {
+    return c.freedom === 0 ? Infinity : 5.5 / (c.freedom + 1);
+  }
+  function fireCell(run, index) {
+    const c = run.cells[index];
+    if (!c) return "cooling";
+    if (c.ability === "anchor") return "passive";
+    if (run.cool[index] > 0) return "cooling";
+    if (run.wave.amplitude < run.wave.maxAmplitude * BIND_GRIP) return "no-grip";
+    if (c.ability === "thrust") {
+      const reach = 6e-5 + 14e-6 * c.structure;
+      const kick = 7e-5 + 2e-5 * c.structure;
+      const motes = run.entities.filter(
+        (e) => e.faction === "hostile" && e.species === "mote" && Math.hypot(e.x - run.aim.x, e.y - run.aim.y) < reach
+      );
+      for (const e of run.entities) {
+        const dx = e.x - run.aim.x, dy = e.y - run.aim.y;
+        const r = Math.hypot(dx, dy);
+        if (r < reach && r > 1e-9) {
+          const f = (1 - r / reach) * kick;
+          e.x += dx / r * f;
+          e.y += dy / r * f;
+          e.dwell = 0;
+          e.partner = -1;
+          e.held = 0;
+          if (e.faction === "hostile" && e.species === "mote") e.flash = 0.4;
+        }
+      }
+      for (const m of motes) kill(run, m);
+      run.cool[index] = cooldownOf(c);
+      run.events.push({ kind: "thrust", x: run.aim.x, y: run.aim.y, reach });
+      return "thrust";
+    }
+    run.pillars.push({ x: run.aim.x, y: run.aim.y, strength: c.structure / 8, life: 14 });
+    run.cool[index] = cooldownOf(c);
+    run.events.push({ kind: "pillar", x: run.aim.x, y: run.aim.y });
+    return "pillar";
+  }
+  function choicesFor(run) {
+    const pools = [
+      [["a2", "g"], "THE COMMON PAIR"],
+      [["a3", "g"], "THREE-FOLD"],
+      [["a4", "g"], "FOUR-FOLD"],
+      [["a6", "g"], "SIX-FOLD"],
+      [["a4", "d"], "BODY DIAGONAL"],
+      [["a2", "d"], "CUBIC SEED"],
+      [["a1", "a5"], "THE UNPROMISING"]
+    ];
+    const out = [];
+    const taken = /* @__PURE__ */ new Set();
+    while (out.length < 3 && taken.size < pools.length) {
+      const i = Math.floor(run.rand() * pools.length);
+      const [pool, label] = pools[i];
+      const key3 = pool.join("+");
+      if (taken.has(key3)) continue;
+      taken.add(key3);
+      out.push({ pool, label, unlocks: buildableFrom(pool) });
+    }
+    return out;
+  }
+  function buildableFrom(pool) {
+    const out = [];
+    for (const id of pool) {
+      const solo = assemble(new Array(SEED_MASS).fill(id));
+      if (solo.group) out.push(solo.group);
+    }
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i + 1; j < pool.length; j++) {
+        const mix = assemble([pool[i], pool[i], pool[j], pool[j]]);
+        if (mix.group) out.push(mix.group);
+      }
+    }
+    return [...new Set(out)];
+  }
+  function openDescent(run) {
+    run.phase = "descend";
+    run.choices = choicesFor(run);
+    run.events.push({ kind: "quota" });
+  }
+  function descend(run, choice) {
+    if (run.phase !== "descend") return;
+    const c = run.choices[choice] ?? run.choices[0];
+    run.pool = c ? [...c.pool] : run.pool;
+    run.depth++;
+    run.phase = "play";
+    run.cleared = 0;
+    run.quota = quotaFor(run.depth);
+    run.spawnIn = 1.4;
+    run.choices = [];
+    run.pillars = [];
+    run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 1);
+    run.wave.stamina = 100;
+    run.wave.spent = false;
+    run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 5);
+    for (let i = 0; i < 5; i++) run.entities.push(newMotif(run, true));
+    if (isBossDepth(run.depth)) run.entities.push(newHostile(run, "pulsar"));
+    run.events.push({ kind: "descend", depth: run.depth });
+  }
+  function readoutFor(e) {
+    const p = particleOf(e);
+    const phi = contrastFactor(p, WATER);
+    const isHostile = e.faction === "hostile";
+    const asm = isHostile ? null : assemble(e.parts);
+    return {
+      label: labelOf(e),
+      radius: p.radius,
+      contrast: phi,
+      goesTo: phi > 0 ? "NODE" : "ANTINODE",
+      authority: (p.radius / 15e-7) ** 2,
+      held: e.held,
+      needs: isHostile ? hostile(e.species).hold : 0,
+      hint: isHostile ? holdHint(e) : asm && asm.group ? `${asm.group} AT ${asm.mass}/${SEED_MASS}` : asm && asm.partial ? "NEEDS AN AXIS" : "WILL NOT BIND"
+    };
+  }
+  function holdHint(e) {
+    const h = hostile(e.species);
+    if (h.behaviour === "drift") return "TOO SMALL TO HOLD - USE THRUST";
+    if (h.behaviour === "keep-away") return "DRAG IT IN FIRST";
+    if (h.behaviour === "flip") return "IT CHANGES SIGN - FOLLOW IT";
+    return contrastFactor(particleOf(e), WATER) > 0 ? "PULL IT IN AND HOLD IT" : "PUSH MODE - HOLD IT IN AN ANTINODE";
+  }
+  function nearest(list, v) {
+    if (list.length === 0) return null;
+    let best = list[0];
+    for (const u of list) if (Math.abs(u - v) < Math.abs(best - v)) best = u;
+    return best;
+  }
+
+  // app/sfx.ts
+  var Sfx = class {
+    constructor() {
+      __publicField(this, "ac", null);
+      __publicField(this, "muted", false);
+    }
+    /** Must be called from inside a user gesture or the context stays suspended. */
+    unlock() {
+      if (!this.ac) {
+        try {
+          const Ctor = window.AudioContext ?? window.webkitAudioContext;
+          this.ac = Ctor ? new Ctor() : null;
+        } catch {
+          this.ac = null;
+        }
+      }
+      if (this.ac && this.ac.state === "suspended") void this.ac.resume();
+    }
+    /**
+     * One voice.
+     *
+     * `delay` schedules the note forward on the AUDIO clock rather than through
+     * setTimeout. A JS timer is jittery by tens of milliseconds under load, which
+     * is audible as a limp arpeggio; the audio clock is sample-accurate and keeps
+     * playing on time even while the main thread is busy drawing.
+     */
+    tone(freq, dur, type, vol, slide, delay = 0) {
+      const ac = this.ac;
+      if (!ac || this.muted) return;
+      const t = ac.currentTime + delay;
+      const o = ac.createOscillator();
+      const g2 = ac.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, slide), t + dur);
+      g2.gain.setValueAtTime(1e-4, t);
+      g2.gain.exponentialRampToValueAtTime(vol, t + 8e-3);
+      g2.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+      o.connect(g2);
+      g2.connect(ac.destination);
+      o.start(t);
+      o.stop(t + dur + 0.02);
+    }
+    noise(dur, vol) {
+      const ac = this.ac;
+      if (!ac || this.muted) return;
+      const n = Math.max(1, Math.floor(ac.sampleRate * dur));
+      const buf = ac.createBuffer(1, n, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const src = ac.createBufferSource();
+      src.buffer = buf;
+      const g2 = ac.createGain();
+      g2.gain.value = vol;
+      src.connect(g2);
+      g2.connect(ac.destination);
+      src.start();
+    }
+    /** Rising interval, brighter with the streak. */
+    capture(streak) {
+      const base = 440 * Math.pow(2, Math.min(streak - 1, 6) / 12);
+      this.tone(base, 0.09, "square", 0.05, void 0, 0);
+      this.tone(base * 1.5, 0.13, "square", 0.045, void 0, 0.07);
+      this.tone(base * 2, 0.16, "triangle", 0.03, void 0, 0.145);
+    }
+    /** An enemy held until it comes apart. */
+    dissolve() {
+      this.tone(320, 0.26, "sawtooth", 0.04, 90);
+      this.noise(0.18, 0.03);
+    }
+    /** The grip closing. Barely there on purpose — it happens constantly. */
+    gripOn() {
+      this.tone(180, 0.05, "sine", 0.022);
+    }
+    /** Stepping the phase over to the other lattice. A bare fifth, so the two
+     *  modes are audibly the same thing at two settings. */
+    invert(up) {
+      this.tone(up ? 392 : 261, 0.07, "triangle", 0.032, void 0, 0);
+      this.tone(up ? 587 : 196, 0.09, "triangle", 0.026, void 0, 0.045);
+    }
+    hurt() {
+      this.noise(0.09, 0.05);
+      this.tone(120, 0.1, "sawtooth", 0.035, 60);
+    }
+    spent() {
+      this.tone(300, 0.5, "sawtooth", 0.05, 55);
+      this.noise(0.3, 0.035);
+    }
+    lesson() {
+      this.tone(660, 0.08, "sine", 0.028);
+    }
+  };
+
+  // app/drifter.ts
+  var PX_PER_M = 1e6;
+  var VIEW_W = 800;
+  var VIEW_H = 600;
+  var px = (m) => m * PX_PER_M;
+  var mx = (p) => p / PX_PER_M;
+  var WASH_W = 100;
+  var WASH_H = 75;
+  var INK = "#cfe9f5";
+  var DIM = "#4a6076";
+  var FAINT2 = "#2b3e50";
+  var NODE_RGB = "120,225,245";
+  var ANTI_RGB = "255,140,190";
+  var GOLD = "#ffc94a";
+  var RED = "#ff4d6d";
+  var MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
+  function rgbOf(e) {
+    const phi = contrastFactor(particleOf(e), WATER);
+    if (e.faction === "hostile") return phi > 0 ? "150,220,255" : "255,90,130";
+    if (Math.abs(phi) < 0.02) return "190,200,215";
+    return phi > 0 ? "127,216,232" : "232,120,165";
+  }
+  var LESSONS = {
+    node: {
+      id: "node",
+      title: "CONTRAST FACTOR",
+      body: "PHI = f1/3 + f2/2. COOL BODIES ARE DENSER AND STIFFER THAN WATER SO PHI IS POSITIVE AND THEY FALL INTO NODES. WARM ONES ARE LIGHTER AND SOFTER, SO THE SAME FIELD SENDS THEM THE OTHER WAY."
+    },
+    invert: {
+      id: "invert",
+      title: "BOTH LATTICES ARE YOURS",
+      body: "NODES AND ANTINODES ARE ONE FIELD A QUARTER WAVELENGTH APART. STEPPING THE IDT PHASE CHANGES WHICH SITS UNDER YOUR HAND. IT IS THE ONLY STEERING A REAL DEVICE HAS, AND IT IS HOW YOU CATCH THE WARM ONES."
+    },
+    husk: {
+      id: "husk",
+      title: "PULL IS NOT THE SAFE MODE",
+      body: "A HUSK IS DENSER THAN WATER. ITS CONTRAST IS POSITIVE, SO YOUR NODE DOES NOT PUSH IT AWAY - IT REELS IT IN. HOLDING GRIP NEAR ONE IS HOW YOU GET HIT."
+    },
+    mote: {
+      id: "mote",
+      title: "BELOW THE CROSSOVER",
+      body: "RADIATION FORCE GOES AS RADIUS CUBED. STREAMING DRAG GOES AS RADIUS. THEIR RATIO GOES AS RADIUS SQUARED, SO UNDER ABOUT 1.5 MICRONS STREAMING WINS AND NO TRAP HOLDS. MORE POWER CANNOT HELP: IT DRIVES BOTH."
+    },
+    spent: {
+      id: "spent",
+      title: "ENERGY DENSITY GOES AS PRESSURE SQUARED",
+      body: "E = p^2 / 4 rho c^2. DOUBLE THE GRIP AND IT COSTS FOUR TIMES AS MUCH. HOLDING ON IS THE EXPENSIVE MOVE; AIMING IS THE CHEAP ONE."
+    },
+    crystal: {
+      id: "crystal",
+      title: "ELEVEN, AND NEVER A TWELFTH",
+      body: "A PROTEIN IS BUILT FROM L-AMINO ACIDS, SO IT IS CHIRAL, SO IT CANNOT SIT IN ANY OPERATION THAT WOULD MIRROR IT. OF THE 32 POINT GROUPS EXACTLY 11 SURVIVE THAT. THOSE 11 ARE EVERY CELL YOU WILL EVER BUILD."
+    },
+    fivefold: {
+      id: "fivefold",
+      title: "FIVE-FOLD TILES NOTHING",
+      body: "THE CRYSTALLOGRAPHIC RESTRICTION THEOREM. A FIVE-FOLD AXIS GENERATES NO LATTICE, SO A PENTAMER NEVER JOINS ANYTHING. IT IS NOT A PUZZLE WITH A TRICK - IT IS THE OLDEST HARD NO IN THE SUBJECT."
+    },
+    tension: {
+      id: "tension",
+      title: "STRENGTH COSTS YOU CONTROL",
+      body: "A CELL'S STRUCTURE IS ITS GROUP ORDER. ITS FREEDOM IS HOW MANY INDEPENDENT PIEZOELECTRIC COMPONENTS SURVIVE IN IT. NEUMANN'S PRINCIPLE PUTS THOSE IN EXACT TENSION: 432 IS ORDER 24 WITH NONE AT ALL."
+    },
+    pulsar: {
+      id: "pulsar",
+      title: "IT BREATHES",
+      body: "A BUBBLE'S COMPRESSIBILITY SWEEPS IT ACROSS THE ISO-ACOUSTIC POINT, SO ITS CONTRAST CHANGES SIGN. NEITHER HALF OF YOUR FIELD HOLDS IT ALONE. FOLLOW THE COLOUR AND SWITCH WITH IT."
+    }
+  };
+  var Game = class {
+    constructor(canvas2) {
+      __publicField(this, "canvas", canvas2);
+      __publicField(this, "ctx");
+      __publicField(this, "sfx", new Sfx());
+      __publicField(this, "run");
+      __publicField(this, "screen", "title");
+      __publicField(this, "aim", { x: ARENA_W / 2, y: ARENA_H / 2 });
+      __publicField(this, "held", false);
+      __publicField(this, "wasHeld", false);
+      __publicField(this, "invert", false);
+      __publicField(this, "wasInvert", false);
+      __publicField(this, "shift", false);
+      __publicField(this, "seed", 20260830);
+      __publicField(this, "sparks", []);
+      __publicField(this, "popups", []);
+      __publicField(this, "rings", []);
+      __publicField(this, "flash", 0);
+      __publicField(this, "flashRed", false);
+      __publicField(this, "shake", 0);
+      __publicField(this, "t", 0);
+      __publicField(this, "best", 0);
+      __publicField(this, "deepest", 1);
+      __publicField(this, "seen", /* @__PURE__ */ new Set());
+      __publicField(this, "card", null);
+      __publicField(this, "cardT", 0);
+      __publicField(this, "toast", "");
+      __publicField(this, "toastT", 0);
+      __publicField(this, "hover", -1);
+      __publicField(this, "last", 0);
+      __publicField(this, "running", false);
+      __publicField(this, "washCanvas");
+      __publicField(this, "washCtx");
+      __publicField(this, "wash");
+      __publicField(this, "cosX", new Float32Array(WASH_W));
+      __publicField(this, "cosY", new Float32Array(WASH_H));
+      __publicField(this, "envX", new Float32Array(WASH_W));
+      __publicField(this, "envY", new Float32Array(WASH_H));
+      __publicField(this, "vignette");
+      const ctx = canvas2.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      this.ctx = ctx;
+      canvas2.width = VIEW_W;
+      canvas2.height = VIEW_H;
+      this.run = startRun(this.seed);
+      this.washCanvas = document.createElement("canvas");
+      this.washCanvas.width = WASH_W;
+      this.washCanvas.height = WASH_H;
+      const wc = this.washCanvas.getContext("2d");
+      if (!wc) throw new Error("no 2d context for the field buffer");
+      this.washCtx = wc;
+      this.wash = wc.createImageData(WASH_W, WASH_H);
+      const v = ctx.createRadialGradient(
+        VIEW_W / 2,
+        VIEW_H / 2,
+        VIEW_H * 0.34,
+        VIEW_W / 2,
+        VIEW_H / 2,
+        VIEW_H * 0.84
+      );
+      v.addColorStop(0, "rgba(0,0,0,0)");
+      v.addColorStop(1, "rgba(0,0,0,0.66)");
+      this.vignette = v;
+      this.bindInput();
+      this.fit();
+      window.addEventListener("resize", () => this.fit());
+    }
+    // ── input ─────────────────────────────────────────────────────────────────
+    bindInput() {
+      const toWorld = (ev) => {
+        const r = this.canvas.getBoundingClientRect();
+        return {
+          x: mx((ev.clientX - r.left) / r.width * VIEW_W),
+          y: mx((ev.clientY - r.top) / r.height * VIEW_H)
+        };
+      };
+      this.canvas.addEventListener("pointermove", (e) => {
+        const p = toWorld(e);
+        this.aim.x = Math.max(0, Math.min(ARENA_W, p.x));
+        this.aim.y = Math.max(0, Math.min(ARENA_H, p.y));
+        if (this.held) this.invert = (e.buttons & 2) !== 0 || this.shift;
+        if (this.screen === "descend") this.hover = this.cardAt(px(p.x), px(p.y));
+      });
+      this.canvas.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        this.sfx.unlock();
+        const p = toWorld(e);
+        this.aim.x = p.x;
+        this.aim.y = p.y;
+        if (this.screen === "title" || this.screen === "dead") {
+          this.begin();
+          return;
+        }
+        if (this.screen === "descend") {
+          const i = this.cardAt(px(p.x), px(p.y));
+          if (i >= 0) this.take(i);
+          return;
+        }
+        const slot = this.slotAt(px(p.x), px(p.y));
+        if (slot >= 0) {
+          this.use(slot);
+          return;
+        }
+        this.held = true;
+        this.invert = e.button === 2 || this.shift;
+        this.canvas.setPointerCapture(e.pointerId);
+      });
+      const up = () => {
+        this.held = false;
+        this.invert = false;
+      };
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+      this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          this.sfx.unlock();
+          if (this.screen === "title" || this.screen === "dead") {
+            this.begin();
+            return;
+          }
+          this.held = true;
+        }
+        if (e.code === "KeyR") this.begin();
+        if (e.code === "KeyM") this.sfx.muted = !this.sfx.muted;
+        if (e.shiftKey) {
+          this.shift = true;
+          if (this.held) this.invert = true;
+        }
+        const n = Number(e.key);
+        if (Number.isInteger(n) && n >= 1 && n <= 9) {
+          if (this.screen === "descend") this.take(n - 1);
+          else this.use(n - 1);
+        }
+      });
+      window.addEventListener("keyup", (e) => {
+        if (e.code === "Space") this.held = false;
+        if (!e.shiftKey) {
+          this.shift = false;
+          if (this.held) this.invert = false;
+        }
+      });
+    }
+    fit() {
+      const s = Math.min(window.innerWidth / (VIEW_W + 40), window.innerHeight / (VIEW_H + 96));
+      this.canvas.style.width = `${Math.floor(VIEW_W * s)}px`;
+      this.canvas.style.height = `${Math.floor(VIEW_H * s)}px`;
+    }
+    begin() {
+      this.seed = this.seed * 1664525 + 1013904223 >>> 0;
+      this.run = startRun(this.seed);
+      this.screen = "play";
+      this.sparks = [];
+      this.popups = [];
+      this.rings = [];
+      this.say("HOLD TO GRIP");
+    }
+    use(i) {
+      const c = this.run.cells[i];
+      if (!c) return;
+      const r = fireCell(this.run, i);
+      if (r === "cooling" || r === "no-grip") {
+        this.sfx.hurt();
+        return;
+      }
+      if (r === "passive") {
+        this.say("AN ANCHOR IS CARRIED, NOT FIRED");
+        return;
+      }
+    }
+    take(i) {
+      if (this.screen !== "descend") return;
+      if (i < 0 || i >= this.run.choices.length) return;
+      descend(this.run, i);
+      this.screen = "play";
+      this.hover = -1;
+    }
+    // ── loop ──────────────────────────────────────────────────────────────────
+    start() {
+      if (this.running) return;
+      this.running = true;
+      this.last = performance.now();
+      const frame = (now) => {
+        let dt = (now - this.last) / 1e3;
+        this.last = now;
+        if (dt > 0.05) dt = 0.05;
+        this.update(dt);
+        this.draw();
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    }
+    update(dt) {
+      this.t += dt;
+      const run = this.run;
+      if (this.screen === "title") {
+        this.aim.x = ARENA_W * (0.5 + 0.3 * Math.sin(this.t * 0.41));
+        this.aim.y = ARENA_H * (0.5 + 0.3 * Math.sin(this.t * 0.63 + 1.1));
+        step(run, { aim: this.aim, held: true, invert: Math.sin(this.t * 0.22) > 0.7 }, dt);
+        run.wave.stamina = STAMINA_MAX;
+        run.events.length = 0;
+        this.decay(dt);
+        return;
+      }
+      if (this.held && !this.wasHeld) this.sfx.gripOn();
+      if (this.invert !== this.wasInvert && this.held) {
+        this.sfx.invert(this.invert);
+        if (this.invert) this.teach("invert");
+      }
+      this.wasHeld = this.held;
+      this.wasInvert = this.invert;
+      step(run, { aim: this.aim, held: this.held, invert: this.invert }, dt);
+      this.drain(run);
+      this.decay(dt);
+      if (run.phase === "descend" && this.screen === "play") this.screen = "descend";
+      if (run.phase === "dead" && this.screen !== "dead") {
+        this.screen = "dead";
+        this.best = Math.max(this.best, run.score);
+        this.deepest = Math.max(this.deepest, run.depth);
+      }
+      for (const e of run.entities) {
+        if (e.faction !== "hostile") continue;
+        const near = Math.hypot(e.x - this.aim.x, e.y - this.aim.y) < 15e-5;
+        if (!near) continue;
+        if (e.species === "husk") this.teach("husk");
+        if (e.species === "mote") this.teach("mote");
+        if (e.species === "pulsar") this.teach("pulsar");
+      }
+    }
+    /** Turn the model's events into light and noise. */
+    drain(run) {
+      for (const ev of run.events) {
+        switch (ev.kind) {
+          case "hit":
+            this.flash = 1;
+            this.flashRed = true;
+            this.shake = 9;
+            this.sfx.hurt();
+            this.burst(ev.x, ev.y, 16, "255,77,109");
+            this.say(`INTEGRITY ${run.integrity}`);
+            break;
+          case "kill":
+            this.burst(ev.x, ev.y, 14, rgbFor(ev.species));
+            this.popups.push({ x: ev.x, y: ev.y, text: `+${ev.score}`, life: 0.9, colour: INK, big: false });
+            this.rings.push({ x: ev.x, y: ev.y, r: 6, max: 34, life: 0.4, rgb: rgbFor(ev.species) });
+            this.sfx.dissolve();
+            break;
+          case "merge":
+            this.burst(ev.x, ev.y, 7, NODE_RGB);
+            this.sfx.gripOn();
+            break;
+          case "refuse":
+            this.popups.push({
+              x: ev.x,
+              y: ev.y,
+              text: refusalText(ev.text),
+              life: 1.3,
+              colour: "#ff9c6d",
+              big: false
+            });
+            if (ev.text === "five-fold") this.teach("fivefold");
+            break;
+          case "crystal": {
+            this.flash = 0.55;
+            this.flashRed = false;
+            this.burst(ev.x, ev.y, 34, "255,201,74");
+            this.rings.push({ x: ev.x, y: ev.y, r: 8, max: 90, life: 0.7, rgb: "255,201,74" });
+            this.popups.push({ x: ev.x, y: ev.y, text: ev.group, life: 1.6, colour: GOLD, big: true });
+            this.sfx.capture(Math.min(5, run.cells.length));
+            this.say(`BUILT ${ev.group}`);
+            this.teach("crystal");
+            if (run.cells.length >= 2) this.teach("tension");
+            break;
+          }
+          case "thrust":
+            this.rings.push({ x: ev.x, y: ev.y, r: 10, max: px(ev.reach), life: 0.35, rgb: NODE_RGB });
+            this.shake = Math.max(this.shake, 4);
+            this.sfx.dissolve();
+            break;
+          case "pillar":
+            this.rings.push({ x: ev.x, y: ev.y, r: 4, max: 46, life: 0.5, rgb: "160,255,220" });
+            this.sfx.capture(1);
+            break;
+          case "spent":
+            this.flash = 1;
+            this.flashRed = true;
+            this.shake = 6;
+            this.sfx.spent();
+            this.say("SPENT");
+            this.teach("spent");
+            break;
+          case "flip":
+            this.rings.push({
+              x: ev.x,
+              y: ev.y,
+              r: 6,
+              max: 52,
+              life: 0.45,
+              rgb: ev.dense ? NODE_RGB : ANTI_RGB
+            });
+            this.sfx.invert(ev.dense);
+            break;
+          case "quota":
+            this.say("THE WAY DOWN IS OPEN");
+            this.sfx.capture(4);
+            break;
+          case "descend":
+            this.flash = 0.5;
+            this.flashRed = false;
+            this.say(isBossDepth(ev.depth) ? `DEPTH ${ev.depth}  \xB7  SOMETHING IS BREATHING` : `DEPTH ${ev.depth}`);
+            this.sfx.capture(3);
+            break;
+          case "death":
+            this.flash = 1;
+            this.flashRed = true;
+            this.shake = 14;
+            this.sfx.spent();
+            break;
+        }
+      }
+      run.events.length = 0;
+    }
+    decay(dt) {
+      for (const s of this.sparks) {
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.vx *= 1 - 2.6 * dt;
+        s.vy *= 1 - 2.6 * dt;
+        s.life -= dt;
+      }
+      this.sparks = this.sparks.filter((s) => s.life > 0);
+      for (const p of this.popups) {
+        p.y -= 24e-6 * dt;
+        p.life -= dt;
+      }
+      this.popups = this.popups.filter((p) => p.life > 0);
+      for (const r of this.rings) r.life -= dt;
+      this.rings = this.rings.filter((r) => r.life > 0);
+      if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2);
+      if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 22);
+      if (this.toastT > 0) this.toastT -= dt;
+      if (this.cardT > 0) {
+        this.cardT -= dt;
+        if (this.cardT <= 0) this.card = null;
+      }
+    }
+    burst(x, y, n, rgb) {
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2 + Math.random();
+        const s = (40 + Math.random() * 170) * 1e-6;
+        const life = 0.3 + Math.random() * 0.55;
+        this.sparks.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life, max: life, rgb });
+      }
+      this.shake = Math.max(this.shake, 2.5);
+    }
+    say(text) {
+      this.toast = text;
+      this.toastT = 1.8;
+    }
+    teach(id) {
+      if (this.seen.has(id)) return;
+      const l = LESSONS[id];
+      if (!l) return;
+      this.seen.add(id);
+      this.card = l;
+      this.cardT = 8;
+      this.sfx.lesson();
+    }
+    // ── draw ──────────────────────────────────────────────────────────────────
+    draw() {
+      const g2 = this.ctx;
+      g2.fillStyle = "#05070e";
+      g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      g2.save();
+      if (this.shake > 0) {
+        g2.translate((Math.random() * 2 - 1) * this.shake, (Math.random() * 2 - 1) * this.shake);
+      }
+      this.drawField();
+      this.drawPillars();
+      this.drawTrails();
+      this.drawEntities();
+      this.drawSparks();
+      this.drawRings();
+      this.drawCursor();
+      g2.restore();
+      g2.fillStyle = this.vignette;
+      g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      this.drawPopups();
+      if (this.screen === "title") this.drawTitle();
+      else {
+        this.drawHud();
+        if (this.screen === "descend") this.drawDescent();
+        if (this.screen === "dead") this.drawDead();
+      }
+      this.drawCard();
+      if (this.flash > 0) {
+        g2.fillStyle = this.flashRed ? `rgba(255,60,90,${(this.flash * 0.42).toFixed(3)})` : `rgba(200,240,255,${(this.flash * 0.2).toFixed(3)})`;
+        g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      }
+    }
+    /**
+     * The field.
+     *
+     * Both the pressure of crossed standing waves and the Gaussian focus envelope
+     * are separable, so the wash costs WASH_W + WASH_H cosines and exponentials
+     * rather than a grid of them. Computed into a small buffer and upscaled with
+     * smoothing on: it reads as haze in a volume rather than as a checkerboard,
+     * and costs one drawImage instead of two thousand fillRects.
+     */
+    drawField() {
+      const g2 = this.ctx;
+      const w = this.run.wave;
+      const k = Math.PI / w.pitch;
+      const lit = w.amplitude / w.maxAmplitude;
+      const phx = -w.phaseX / 2;
+      const phy = -w.phaseY / 2;
+      const f22 = 2 * w.focus * w.focus;
+      for (let i = 0; i < WASH_W; i++) {
+        const u = mx((i + 0.5) / WASH_W * VIEW_W);
+        this.cosX[i] = Math.cos(k * u + phx);
+        const d = u - w.aimX;
+        this.envX[i] = Math.exp(-(d * d) / f22);
+      }
+      for (let j = 0; j < WASH_H; j++) {
+        const u = mx((j + 0.5) / WASH_H * VIEW_H);
+        this.cosY[j] = Math.cos(k * u + phy);
+        const d = u - w.aimY;
+        this.envY[j] = Math.exp(-(d * d) / f22);
+      }
+      const data = this.wash.data;
+      const gain = 0.05 + lit * 0.4;
+      const cr = w.inverted ? 190 : 70;
+      const cg = w.inverted ? 90 : 150;
+      const cb = w.inverted ? 150 : 200;
+      let o = 0;
+      for (let j = 0; j < WASH_H; j++) {
+        const cy = this.cosY[j];
+        const ey = this.envY[j];
+        for (let i = 0; i < WASH_W; i++) {
+          const p = Math.abs(this.cosX[i] * cy);
+          const v = 0.022 + p * gain * this.envX[i] * ey;
+          data[o] = cr;
+          data[o + 1] = cg;
+          data[o + 2] = cb;
+          data[o + 3] = Math.min(1, v) * 255 | 0;
+          o += 4;
+        }
+      }
+      this.washCtx.putImageData(this.wash, 0, 0);
+      g2.imageSmoothingEnabled = true;
+      g2.drawImage(this.washCanvas, 0, 0, VIEW_W, VIEW_H);
+      const probe = { radius: 6e-6, rho: 1100, c: 1570 };
+      const anti = { radius: 6e-6, rho: 915, c: 1450 };
+      const lead = !w.inverted;
+      this.lattice(
+        trapsX(w, probe, ARENA_W),
+        trapsY(w, probe, ARENA_H),
+        NODE_RGB,
+        lead ? 0.2 + lit * 0.62 : 0.09 + lit * 0.24,
+        lead ? 2.1 + lit * 1.7 : 1.4 + lit * 0.7
+      );
+      this.lattice(
+        trapsX(w, anti, ARENA_W),
+        trapsY(w, anti, ARENA_H),
+        ANTI_RGB,
+        lead ? 0.09 + lit * 0.26 : 0.22 + lit * 0.64,
+        lead ? 1.4 + lit * 0.8 : 2.1 + lit * 1.8
+      );
+    }
+    lattice(xs, ys, rgb, alpha, r) {
+      const g2 = this.ctx;
+      const w = this.run.wave;
+      for (const x of xs) {
+        for (const y of ys) {
+          const e = envelopeAt(w, x, y);
+          const a = alpha * (0.2 + 0.8 * e);
+          if (a < 0.02) continue;
+          g2.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
+          g2.beginPath();
+          g2.arc(px(x), px(y), r * (0.6 + 0.4 * e), 0, Math.PI * 2);
+          g2.fill();
+        }
+      }
+    }
+    drawPillars() {
+      const g2 = this.ctx;
+      for (const p of this.run.pillars) {
+        const x = px(p.x), y = px(p.y);
+        const fade = Math.min(1, p.life / 2);
+        g2.strokeStyle = `rgba(160,255,220,${(0.3 * fade).toFixed(3)})`;
+        g2.lineWidth = 1;
+        g2.beginPath();
+        g2.arc(x, y, 70, 0, Math.PI * 2);
+        g2.stroke();
+        g2.fillStyle = `rgba(160,255,220,${(0.75 * fade).toFixed(3)})`;
+        for (let i = 0; i < 6; i++) {
+          const th = i * Math.PI / 3 + this.t * 0.4;
+          g2.beginPath();
+          g2.arc(x + Math.cos(th) * 7, y + Math.sin(th) * 7, 1.6, 0, Math.PI * 2);
+          g2.fill();
+        }
+      }
+    }
+    drawTrails() {
+      const g2 = this.ctx;
+      g2.lineCap = "round";
+      for (const e of this.run.entities) {
+        const n = e.trail.length / 2;
+        if (n < 3) continue;
+        const rgb = rgbOf(e);
+        const w = Math.max(1.2, px(particleOf(e).radius) * 0.55);
+        for (let i = 1; i < n; i++) {
+          const f = i / n;
+          g2.strokeStyle = `rgba(${rgb},${(f * 0.26).toFixed(3)})`;
+          g2.lineWidth = f * w;
+          g2.beginPath();
+          g2.moveTo(px(e.trail[(i - 1) * 2]), px(e.trail[(i - 1) * 2 + 1]));
+          g2.lineTo(px(e.trail[i * 2]), px(e.trail[i * 2 + 1]));
+          g2.stroke();
+        }
+      }
+    }
+    drawEntities() {
+      const g2 = this.ctx;
+      for (const e of this.run.entities) {
+        const p = particleOf(e);
+        const x = px(e.x), y = px(e.y);
+        const r = Math.max(2.4, px(p.radius));
+        const rgb = rgbOf(e);
+        const hot = e.held > 0 || e.flash > 0;
+        const rad = r * (hot ? 5.5 : 3.4);
+        const glow = g2.createRadialGradient(x, y, 0, x, y, rad);
+        glow.addColorStop(0, `rgba(${rgb},${hot ? 0.42 : 0.16})`);
+        glow.addColorStop(1, "rgba(0,0,0,0)");
+        g2.fillStyle = glow;
+        g2.beginPath();
+        g2.arc(x, y, rad, 0, Math.PI * 2);
+        g2.fill();
+        g2.fillStyle = `rgb(${rgb})`;
+        g2.beginPath();
+        g2.arc(x, y, r, 0, Math.PI * 2);
+        g2.fill();
+        g2.fillStyle = "rgba(255,255,255,0.45)";
+        g2.beginPath();
+        g2.arc(x - r * 0.3, y - r * 0.3, r * 0.3, 0, Math.PI * 2);
+        g2.fill();
+        if (e.faction === "hostile") this.drawHostileMark(e, x, y, r, rgb);
+        else this.drawClusterMark(e, x, y, r);
+        const needs = e.faction === "hostile" ? hostile(e.species).hold : 0;
+        if (needs > 0 && e.held > 0) {
+          const f = Math.min(1, e.held / needs);
+          g2.strokeStyle = `rgb(${rgb})`;
+          g2.lineWidth = 2.4;
+          g2.beginPath();
+          g2.arc(x, y, r + 8, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+          g2.stroke();
+        }
+      }
+    }
+    drawHostileMark(e, x, y, r, rgb) {
+      const g2 = this.ctx;
+      const h = hostile(e.species);
+      g2.strokeStyle = `rgba(${rgb},${e.flash > 0 ? 0.95 : 0.55})`;
+      g2.lineWidth = 1.4;
+      if (h.behaviour === "drift") {
+        g2.fillStyle = `rgba(${rgb},0.8)`;
+        g2.beginPath();
+        g2.arc(x, y, r + 1.2, 0, Math.PI * 2);
+        g2.fill();
+        return;
+      }
+      if (h.behaviour === "keep-away") {
+        const d = Math.hypot(e.x - this.aim.x, e.y - this.aim.y);
+        if (d < 22e-5 && this.screen === "play") {
+          g2.strokeStyle = `rgba(${rgb},${(0.15 + 0.2 * Math.sin(this.t * 14)).toFixed(3)})`;
+          g2.lineWidth = 1;
+          g2.beginPath();
+          g2.moveTo(x, y);
+          g2.lineTo(px(this.aim.x), px(this.aim.y));
+          g2.stroke();
+        }
+        g2.strokeStyle = `rgba(${rgb},0.7)`;
+        g2.beginPath();
+        g2.arc(x, y, r + 5, 0, Math.PI * 2);
+        g2.stroke();
+        return;
+      }
+      if (h.behaviour === "flip") {
+        const pulse = 1 + 0.12 * Math.sin(this.t * 6);
+        g2.lineWidth = 2;
+        g2.beginPath();
+        g2.arc(x, y, (r + 7) * pulse, 0, Math.PI * 2);
+        g2.stroke();
+        g2.lineWidth = 1;
+        g2.beginPath();
+        g2.arc(x, y, (r + 13) * pulse, 0, Math.PI * 2);
+        g2.stroke();
+        return;
+      }
+      const spokes = h.behaviour === "split" ? 3 : 6;
+      for (let i = 0; i < spokes; i++) {
+        const th = e.spin + i * Math.PI * 2 / spokes;
+        g2.beginPath();
+        g2.moveTo(x + Math.cos(th) * (r + 2), y + Math.sin(th) * (r + 2));
+        g2.lineTo(x + Math.cos(th) * (r + 7), y + Math.sin(th) * (r + 7));
+        g2.stroke();
+      }
+    }
+    /** A cluster that already generates a group, and only wants mass, gets a
+     *  gold pip per motif so the player can count it. */
+    drawClusterMark(e, x, y, r) {
+      if (e.parts.length < 2) return;
+      const g2 = this.ctx;
+      const n = Math.min(6, e.parts.length);
+      g2.fillStyle = GOLD;
+      for (let i = 0; i < n; i++) {
+        const th = i / n * Math.PI * 2 - Math.PI / 2;
+        g2.beginPath();
+        g2.arc(x + Math.cos(th) * (r + 5), y + Math.sin(th) * (r + 5), 1.5, 0, Math.PI * 2);
+        g2.fill();
+      }
+    }
+    drawSparks() {
+      const g2 = this.ctx;
+      for (const s of this.sparks) {
+        const f = s.life / s.max;
+        g2.fillStyle = `rgba(${s.rgb},${(f * 0.9).toFixed(3)})`;
+        g2.fillRect(px(s.x) - 1, px(s.y) - 1, 1 + f * 2, 1 + f * 2);
+      }
+    }
+    drawRings() {
+      const g2 = this.ctx;
+      for (const ring of this.rings) {
+        const f = 1 - ring.life / 0.7;
+        const r = ring.r + (ring.max - ring.r) * Math.min(1, f * 1.6);
+        g2.strokeStyle = `rgba(${ring.rgb},${Math.max(0, ring.life * 1.3).toFixed(3)})`;
+        g2.lineWidth = 2;
+        g2.beginPath();
+        g2.arc(px(ring.x), px(ring.y), r, 0, Math.PI * 2);
+        g2.stroke();
+      }
+    }
+    drawCursor() {
+      const g2 = this.ctx;
+      const w = this.run.wave;
+      const x = px(this.aim.x), y = px(this.aim.y);
+      const lit = w.amplitude / w.maxAmplitude;
+      const r = 12 + lit * 10;
+      const hurt = this.run.iframe > 0 && Math.sin(this.t * 30) > 0;
+      const rgb = w.spent || hurt ? "255,70,100" : w.inverted ? ANTI_RGB : NODE_RGB;
+      const glow = g2.createRadialGradient(x, y, 0, x, y, r * 3.4);
+      glow.addColorStop(0, `rgba(${rgb},${(0.1 + lit * 0.3).toFixed(3)})`);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      g2.fillStyle = glow;
+      g2.beginPath();
+      g2.arc(x, y, r * 3.4, 0, Math.PI * 2);
+      g2.fill();
+      g2.strokeStyle = `rgb(${rgb})`;
+      g2.lineWidth = 1.5 + lit * 1.3;
+      if (w.inverted) {
+        for (let i = 0; i < 4; i++) {
+          const a0 = i * Math.PI / 2 + this.t * 0.9;
+          g2.beginPath();
+          g2.arc(x, y, r, a0, a0 + 0.9);
+          g2.stroke();
+          g2.beginPath();
+          const b = a0 + 0.45;
+          g2.moveTo(x + Math.cos(b) * (r + 3), y + Math.sin(b) * (r + 3));
+          g2.lineTo(x + Math.cos(b) * (r + 9 + lit * 6), y + Math.sin(b) * (r + 9 + lit * 6));
+          g2.stroke();
+        }
+      } else {
+        g2.beginPath();
+        g2.arc(x, y, r, 0, Math.PI * 2);
+        g2.stroke();
+        g2.strokeStyle = `rgba(${rgb},${(0.22 + lit * 0.45).toFixed(3)})`;
+        g2.lineWidth = 1;
+        g2.beginPath();
+        g2.arc(x, y, r + 7 + lit * 11, 0, Math.PI * 2);
+        g2.stroke();
+      }
+      g2.fillStyle = "#e8fbff";
+      g2.beginPath();
+      g2.arc(x, y, 1.8, 0, Math.PI * 2);
+      g2.fill();
+    }
+    drawPopups() {
+      const g2 = this.ctx;
+      g2.textAlign = "center";
+      for (const p of this.popups) {
+        g2.globalAlpha = Math.min(1, p.life * 1.6);
+        g2.fillStyle = p.colour;
+        g2.font = `700 ${p.big ? 22 : 13}px ${MONO}`;
+        g2.fillText(p.text, px(p.x), px(p.y) - 16);
+      }
+      g2.globalAlpha = 1;
+      g2.textAlign = "left";
+    }
+    // ── hud ───────────────────────────────────────────────────────────────────
+    drawHud() {
+      const g2 = this.ctx;
+      const run = this.run;
+      const w = run.wave;
+      g2.textBaseline = "top";
+      for (let i = 0; i < MAX_INTEGRITY; i++) {
+        const on = i < run.integrity;
+        g2.fillStyle = on ? run.integrity === 1 ? RED : "#5ef0c0" : "rgba(255,255,255,0.09)";
+        g2.beginPath();
+        g2.arc(24 + i * 15, 22, on ? 5 : 3.5, 0, Math.PI * 2);
+        g2.fill();
+      }
+      g2.fillStyle = DIM;
+      g2.font = `600 9px ${MONO}`;
+      g2.fillText("INTEGRITY", 18, 34);
+      const sf = w.stamina / STAMINA_MAX;
+      bar(g2, 18, 52, 176, 7, sf, w.spent ? RED : sf < 0.3 ? "#ffa24a" : "#5ef0c0", "STAMINA");
+      const af = w.amplitude / w.maxAmplitude;
+      bar(
+        g2,
+        18,
+        76,
+        176,
+        7,
+        af,
+        w.inverted ? `rgb(${ANTI_RGB})` : `rgb(${NODE_RGB})`,
+        w.inverted ? "GRIP \xB7 ANTINODE \xB7 PUSH" : "GRIP \xB7 NODE \xB7 PULL"
+      );
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = FAINT2;
+      g2.fillText(`${(frequency(w) / 1e6).toFixed(1)} MHZ   ${(w.amplitude / 1e3).toFixed(0)} KPA`, 18, 100);
+      g2.textAlign = "center";
+      g2.fillStyle = INK;
+      g2.font = `700 13px ${MONO}`;
+      g2.fillText(`DEPTH ${run.depth}${isBossDepth(run.depth) ? "  \xB7  BOSS" : ""}`, VIEW_W / 2, 16);
+      const qf = Math.min(1, run.cleared / run.quota);
+      g2.fillStyle = "rgba(255,255,255,0.08)";
+      g2.fillRect(VIEW_W / 2 - 80, 34, 160, 3);
+      g2.fillStyle = qf >= 1 ? GOLD : `rgb(${NODE_RGB})`;
+      g2.fillRect(VIEW_W / 2 - 80, 34, 160 * qf, 3);
+      g2.fillStyle = DIM;
+      g2.font = `600 9px ${MONO}`;
+      g2.fillText(`${run.cleared} / ${run.quota} CLEARED`, VIEW_W / 2, 42);
+      g2.textAlign = "left";
+      g2.textAlign = "right";
+      g2.fillStyle = GOLD;
+      g2.font = `700 26px ${MONO}`;
+      g2.fillText(String(run.score), VIEW_W - 18, 14);
+      g2.fillStyle = DIM;
+      g2.font = `600 9px ${MONO}`;
+      g2.fillText("SCORE", VIEW_W - 18, 46);
+      g2.textAlign = "left";
+      this.drawRack();
+      this.drawReadout();
+      if (this.toastT > 0) {
+        g2.textAlign = "center";
+        g2.globalAlpha = Math.min(1, this.toastT / 0.6);
+        g2.fillStyle = w.spent ? RED : INK;
+        g2.font = `700 13px ${MONO}`;
+        g2.fillText(this.toast, VIEW_W / 2, 62);
+        g2.globalAlpha = 1;
+        g2.textAlign = "left";
+      }
+    }
+    /** Where a cell slot sits, so the rack is clickable as well as keyed. */
+    slotRect(i) {
+      return { x: VIEW_W - 18 - (i + 1) * 46 + 6, y: VIEW_H - 60, w: 40, h: 42 };
+    }
+    slotAt(sx, sy) {
+      for (let i = 0; i < this.run.cells.length; i++) {
+        const r = this.slotRect(i);
+        if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+      }
+      return -1;
+    }
+    /**
+     * The cell rack.
+     *
+     * Each slot shows the group symbol, its structure (the group order) and its
+     * freedom (how many independent piezoelectric components survive). Those two
+     * numbers are in exact tension by Neumann's principle, and the rack is where
+     * the player watches that happen: the strong cells have the long cooldowns.
+     */
+    drawRack() {
+      const g2 = this.ctx;
+      const run = this.run;
+      if (run.cells.length === 0) {
+        g2.textAlign = "right";
+        g2.fillStyle = FAINT2;
+        g2.font = `600 9px ${MONO}`;
+        g2.fillText("NO CELLS BUILT - MERGE MOTIFS WHILE GRIPPING", VIEW_W - 18, VIEW_H - 34);
+        g2.textAlign = "left";
+        return;
+      }
+      run.cells.forEach((c, i) => {
+        const r = this.slotRect(i);
+        const cool = run.cool[i];
+        const ready = cool <= 0 && c.ability !== "anchor";
+        const tint = c.ability === "thrust" ? NODE_RGB : c.ability === "weave" ? "160,255,220" : "255,201,74";
+        g2.fillStyle = "rgba(10,18,28,0.75)";
+        g2.fillRect(r.x, r.y, r.w, r.h);
+        g2.strokeStyle = `rgba(${tint},${ready ? 0.75 : 0.28})`;
+        g2.lineWidth = 1;
+        g2.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+        g2.textAlign = "center";
+        g2.fillStyle = `rgb(${tint})`;
+        g2.font = `700 12px ${MONO}`;
+        g2.fillText(c.group.hm, r.x + r.w / 2, r.y + 6);
+        g2.fillStyle = DIM;
+        g2.font = `600 8px ${MONO}`;
+        g2.fillText(`${c.structure}\xB7${c.freedom}`, r.x + r.w / 2, r.y + 21);
+        g2.fillStyle = FAINT2;
+        g2.fillText(
+          c.ability === "thrust" ? "PUSH" : c.ability === "weave" ? "WEAVE" : "HOLD",
+          r.x + r.w / 2,
+          r.y + 32
+        );
+        g2.textAlign = "left";
+        if (cool > 0 && Number.isFinite(cool)) {
+          const f = cool / cooldownOf(c);
+          g2.fillStyle = "rgba(5,7,14,0.66)";
+          g2.fillRect(r.x + 1, r.y + 1, r.w - 2, (r.h - 2) * f);
+        }
+        g2.fillStyle = FAINT2;
+        g2.font = `600 8px ${MONO}`;
+        g2.fillText(String(i + 1), r.x + 3, r.y + 3);
+      });
+    }
+    /** A live readout of whatever is nearest the hand. Every number in it is
+     *  computed by src/ for the actual body on screen, not written by hand. */
+    drawReadout() {
+      const g2 = this.ctx;
+      let near = null;
+      let bestR = 1e-4;
+      for (const e of this.run.entities) {
+        const r = Math.hypot(e.x - this.aim.x, e.y - this.aim.y);
+        if (r < bestR) {
+          bestR = r;
+          near = e;
+        }
+      }
+      if (!near) return;
+      const d = readoutFor(near);
+      const rgb = rgbOf(near);
+      const x = 18, y = VIEW_H - 92;
+      g2.fillStyle = "rgba(10,18,28,0.7)";
+      g2.fillRect(x, y, 226, 74);
+      g2.strokeStyle = `rgba(${rgb},0.35)`;
+      g2.lineWidth = 1;
+      g2.strokeRect(x + 0.5, y + 0.5, 225, 73);
+      g2.font = `700 11px ${MONO}`;
+      g2.fillStyle = `rgb(${rgb})`;
+      g2.fillText(d.label, x + 9, y + 8);
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = DIM;
+      g2.fillText(`PHI ${d.contrast >= 0 ? "+" : ""}${d.contrast.toFixed(3)}   ${d.goesTo}`, x + 9, y + 25);
+      g2.fillText(`RADIUS ${(d.radius * 1e6).toFixed(1)} UM`, x + 9, y + 38);
+      g2.fillStyle = d.authority >= 1 ? "#5ef0c0" : "#ffa24a";
+      g2.fillText(
+        d.authority >= 1 ? `FIELD ${d.authority.toFixed(0)}x` : `STREAMING ${(1 / d.authority).toFixed(0)}x`,
+        x + 132,
+        y + 38
+      );
+      g2.fillStyle = "#9fbdd0";
+      g2.fillText(d.hint, x + 9, y + 55);
+    }
+    // ── screens ───────────────────────────────────────────────────────────────
+    cardRect(i) {
+      return { x: 96 + i * 216, y: 208, w: 192, h: 200 };
+    }
+    cardAt(sx, sy) {
+      for (let i = 0; i < this.run.choices.length; i++) {
+        const r = this.cardRect(i);
+        if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+      }
+      return -1;
+    }
+    /**
+     * The way down.
+     *
+     * Each card is a motif pool, and what it unlocks is COMPUTED from the recipe
+     * table rather than written on the card — so the promise cannot drift from
+     * what the chemistry actually permits. Choosing a card is choosing which cell
+     * you are going to try to build next.
+     */
+    drawDescent() {
+      const g2 = this.ctx;
+      g2.fillStyle = "rgba(5,7,14,0.82)";
+      g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      g2.textAlign = "center";
+      g2.fillStyle = INK;
+      g2.font = `700 24px ${MONO}`;
+      g2.fillText("THE WAY DOWN", VIEW_W / 2, 128);
+      g2.fillStyle = DIM;
+      g2.font = `600 10px ${MONO}`;
+      g2.fillText("CHOOSE WHAT THE NEXT DEPTH IS MADE OF", VIEW_W / 2, 162);
+      this.run.choices.forEach((c, i) => {
+        const r = this.cardRect(i);
+        const on = this.hover === i;
+        g2.fillStyle = on ? "rgba(18,34,50,0.95)" : "rgba(11,18,32,0.9)";
+        g2.fillRect(r.x, r.y, r.w, r.h);
+        g2.strokeStyle = on ? `rgb(${NODE_RGB})` : "rgba(120,225,245,0.28)";
+        g2.lineWidth = on ? 2 : 1;
+        g2.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+        g2.fillStyle = FAINT2;
+        g2.font = `600 9px ${MONO}`;
+        g2.fillText(String(i + 1), r.x + r.w / 2, r.y + 12);
+        g2.fillStyle = `rgb(${NODE_RGB})`;
+        g2.font = `700 13px ${MONO}`;
+        g2.fillText(c.label, r.x + r.w / 2, r.y + 32);
+        g2.fillStyle = DIM;
+        g2.font = `600 9px ${MONO}`;
+        g2.fillText("STOCKS", r.x + r.w / 2, r.y + 62);
+        g2.fillStyle = INK;
+        g2.font = `600 11px ${MONO}`;
+        g2.fillText(c.pool.map(motifLabel).join("  +  "), r.x + r.w / 2, r.y + 76);
+        g2.fillStyle = DIM;
+        g2.font = `600 9px ${MONO}`;
+        g2.fillText("BUILDS", r.x + r.w / 2, r.y + 106);
+        g2.fillStyle = GOLD;
+        g2.font = `700 14px ${MONO}`;
+        const list = c.unlocks.length ? c.unlocks.join("   ") : "NOTHING";
+        g2.fillText(list, r.x + r.w / 2, r.y + 122);
+        g2.fillStyle = FAINT2;
+        g2.font = `600 8px ${MONO}`;
+        g2.fillText(c.unlocks.length ? "" : "FIVE-FOLD TILES NO LATTICE", r.x + r.w / 2, r.y + 146);
+      });
+      g2.fillStyle = DIM;
+      g2.font = `600 10px ${MONO}`;
+      g2.fillText(
+        "CLICK A CARD, OR PRESS ITS NUMBER   \xB7   +1 INTEGRITY ON DESCENT",
+        VIEW_W / 2,
+        444
+      );
+      g2.textAlign = "left";
+    }
+    drawDead() {
+      const g2 = this.ctx;
+      g2.fillStyle = "rgba(5,7,14,0.86)";
+      g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      g2.textAlign = "center";
+      g2.fillStyle = RED;
+      g2.font = `700 34px ${MONO}`;
+      g2.fillText("THE FIELD COLLAPSED", VIEW_W / 2, 176);
+      const run = this.run;
+      const rows = [
+        ["DEPTH REACHED", String(run.depth)],
+        ["SCORE", String(run.score)],
+        ["CELLS BUILT", run.cells.length ? run.cells.map((c) => c.group.hm).join("  ") : "NONE"],
+        ["STRUCTURE", String(run.cells.reduce((s, c) => s + c.structure, 0))],
+        ["FREEDOM", String(run.cells.reduce((s, c) => s + c.freedom, 0))]
+      ];
+      rows.forEach(([k, v], i) => {
+        const y = 242 + i * 26;
+        g2.textAlign = "right";
+        g2.fillStyle = DIM;
+        g2.font = `600 10px ${MONO}`;
+        g2.fillText(k, VIEW_W / 2 - 14, y + 3);
+        g2.textAlign = "left";
+        g2.fillStyle = i === 1 ? GOLD : INK;
+        g2.font = `700 13px ${MONO}`;
+        g2.fillText(v, VIEW_W / 2 + 14, y);
+      });
+      g2.textAlign = "center";
+      g2.fillStyle = DIM;
+      g2.font = `600 10px ${MONO}`;
+      g2.fillText(`BEST ${this.best}   \xB7   DEEPEST ${this.deepest}`, VIEW_W / 2, 400);
+      const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
+      g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+      g2.font = `700 14px ${MONO}`;
+      g2.fillText("CLICK TO DESCEND AGAIN", VIEW_W / 2, 448);
+      g2.textAlign = "left";
+    }
+    drawCard() {
+      if (!this.card) return;
+      const g2 = this.ctx;
+      const a = Math.min(1, this.cardT / 0.8) * Math.min(1, (8 - this.cardT) / 0.35);
+      const h = 76;
+      const y = VIEW_H - 176;
+      g2.globalAlpha = a;
+      g2.fillStyle = "rgba(8,16,26,0.93)";
+      g2.fillRect(258, y, 524, h);
+      g2.fillStyle = `rgb(${NODE_RGB})`;
+      g2.fillRect(258, y, 2, h);
+      g2.font = `700 11px ${MONO}`;
+      g2.fillStyle = `rgb(${NODE_RGB})`;
+      g2.fillText(this.card.title, 272, y + 12);
+      g2.font = `600 9.5px ${MONO}`;
+      g2.fillStyle = "#9fbdd0";
+      wrap(g2, this.card.body, 272, y + 31, 496, 13);
+      g2.globalAlpha = 1;
+    }
+    drawTitle() {
+      const g2 = this.ctx;
+      g2.textAlign = "center";
+      g2.fillStyle = "rgba(5,7,14,0.6)";
+      g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      g2.font = `700 52px ${MONO}`;
+      g2.fillStyle = INK;
+      g2.fillText("SONIC DRIFTER", VIEW_W / 2, 140);
+      g2.font = `600 12px ${MONO}`;
+      g2.fillStyle = `rgb(${NODE_RGB})`;
+      g2.fillText("YOU ARE THE FIELD", VIEW_W / 2, 206);
+      g2.fillStyle = DIM;
+      g2.font = `600 11px ${MONO}`;
+      const lines = [
+        "HOLD          GRIP. YOUR CURSOR IS A PRESSURE NODE.",
+        "SHIFT / RMB   THE SAME GRIP, ONE PHASE STEP OVER: AN ANTINODE.",
+        "1 - 9         FIRE A CELL YOU BUILT.",
+        "",
+        "COOL THINGS ANSWER TO YOUR NODES. WARM THINGS ANSWER TO YOUR ANTINODES.",
+        "HOLD A HOSTILE IN ITS OWN TRAP AND IT COMES APART.",
+        "",
+        "MERGE MOTIFS WHILE GRIPPING. FOUR OF THE RIGHT ONES CRYSTALLISE INTO A CELL,",
+        "AND CELLS ARE THE ONLY WAY YOU GET STRONGER.",
+        "",
+        "FOUR POINTS OF INTEGRITY. CLEAR A DEPTH TO GET ONE BACK."
+      ];
+      lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 244 + i * 17));
+      const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
+      g2.font = `700 14px ${MONO}`;
+      g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+      g2.fillText("CLICK TO BEGIN", VIEW_W / 2, 468);
+      if (this.best > 0) {
+        g2.fillStyle = DIM;
+        g2.font = `600 10px ${MONO}`;
+        g2.fillText(`BEST ${this.best}   \xB7   DEEPEST ${this.deepest}`, VIEW_W / 2, 496);
+      }
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = FAINT2;
+      g2.fillText(
+        `EVERY FORCE HERE IS THE GOR'KOV RADIATION POTENTIAL AT ${(frequency(this.run.wave) / 1e6).toFixed(0)} MHZ IN WATER`,
+        VIEW_W / 2,
+        VIEW_H - 28
+      );
+      g2.textAlign = "left";
+    }
+  };
+  var MOTIF_LABEL = {
+    a1: "MONOMER",
+    a2: "DIMER",
+    a3: "TRIMER",
+    a4: "TETRAMER",
+    a5: "PENTAMER",
+    a6: "HEXAMER",
+    g: "GIRDLE",
+    d: "DIAGONAL"
+  };
+  var motifLabel = (id) => MOTIF_LABEL[id] ?? id.toUpperCase();
+  var REFUSALS = {
+    "five-fold": "FIVE-FOLD",
+    "two-axes": "TWO AXES",
+    "no-axis": "NO AXIS",
+    "unknown": "NO GROUP"
+  };
+  var refusalText = (k) => REFUSALS[k] ?? "NO GROUP";
+  function rgbFor(species) {
+    const p = hostile(species).particle;
+    return contrastFactor(p, WATER) > 0 ? "150,220,255" : "255,90,130";
+  }
+  function bar(g2, x, y, w, h, f, colour, label) {
+    g2.fillStyle = "rgba(255,255,255,0.06)";
+    g2.fillRect(x, y, w, h);
+    g2.fillStyle = colour;
+    g2.fillRect(x, y, Math.max(0, Math.min(1, f)) * w, h);
+    g2.strokeStyle = "rgba(255,255,255,0.1)";
+    g2.lineWidth = 1;
+    g2.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    g2.fillStyle = DIM;
+    g2.font = `600 9px ${MONO}`;
+    g2.fillText(label, x, y + h + 4);
+  }
+  function wrap(g2, text, x, y, maxW, lh) {
+    let line = "";
+    let row = 0;
+    for (const word of text.split(" ")) {
+      const test = line ? `${line} ${word}` : word;
+      if (g2.measureText(test).width > maxW && line) {
+        g2.fillText(line, x, y + row * lh);
+        line = word;
+        row++;
+      } else {
+        line = test;
+      }
+    }
+    if (line) g2.fillText(line, x, y + row * lh);
+  }
+  var canvas = document.getElementById("game");
+  if (canvas) new Game(canvas).start();
+})();
+</script>

@@ -1,0 +1,898 @@
+// game/run.ts — an aeon, and the one after it.
+//
+// SETTLE, CROWN, REIGN, BIRTH. You gather, you build, you crown something out
+// of what you built, it turns on you, and its body is the next world.
+//
+// WHAT STAYS. A placed cell is a Structure and it does not go away. It projects
+// holding points along its own group's in-plane directions — six for a 622,
+// two for a 222 — and things collect at them whether or not you are there. Two
+// motifs that collect at the same point MERGE without you, so a structure you
+// left behind is quietly crafting while you are elsewhere, and you come back to
+// find a cluster ready. That is the whole reason to build: the world works for
+// you once you have made some of it.
+//
+// WHAT YOU CROWN. The throne takes cells. What you feed it is what it becomes —
+// its group is the most symmetric thing you gave it, and its volley pattern is
+// that group's symmetry seen from above, so a sixfold king throws six arms and
+// you live in the gaps between them. Feeding it more makes it harder AND makes
+// the world born from it richer. That trade is the only real decision here.
+//
+// HOW IT DIES. Your structures. Drive one and it charges, then discharges along
+// its own lobes and is consumed. You take the world apart to kill the thing you
+// crowned out of it, and what is left standing is what the next world inherits.
+//
+// No DOM. A pure function of (state, input, dt), so a bot can play whole aeons
+// headlessly and the tests can tell whether any of this is actually a game.
+
+import { beast } from "./beasts.js";
+import {
+  type Cell, assemble, cellFor, motif,
+} from "./lattice.js";
+import {
+  type Wave, advance, axisX, axisY, grip, localAmplitude, newWave, rng,
+  streamingSpeed,
+} from "./wave.js";
+import {
+  type Pilot, aimFor, beginDash, carry, concentrate, handed, newPilot,
+} from "./pilot.js";
+import {
+  type Sovereign, type Structure, type World,
+  cadence, emptyThrone, feed, firstWorld, holdPoints, sovereignInertia,
+  sovereignParticle, sovereignSpeed, structureFrom, volley, worldFrom,
+} from "./world.js";
+import { type Particle, WATER, contrastFactor } from "../src/gorkov.js";
+import { trapPositions } from "../src/fields.js";
+
+// ── the space ───────────────────────────────────────────────────────────────
+
+export const ARENA_W = 900e-6;
+export const ARENA_H = 660e-6;
+export const MAX_AMPLITUDE = 2.0e5;
+
+/** Focus must stay well under the trap pitch or your hand is not one trap. */
+export function focusFor(pitch: number): number { return pitch * 0.62; }
+
+/**
+ * The pressure a trap needs before it holds anything, Pa.
+ *
+ * Absolute, not a fraction of the envelope. What a body feels is the local
+ * amplitude, and a wide weak lattice must not hold things three hundred
+ * microns away merely because its envelope is flat out there. At cruise the
+ * drive reaches this nowhere, so letting go of the grip really does let go of
+ * everything — which is what makes gripping a decision.
+ */
+export const HOLD_PRESSURE = 1.3e5;
+/**
+ * How close to its trap a body has to be before your hand owns it.
+ *
+ * A quarter of the trap pitch, which is not a tolerance — it is the half-width
+ * of the well and the offset where the pull is at its strongest. Inside it the
+ * body is going one place and has no say in the matter, so that is what being
+ * caught means.
+ *
+ * It was nine microns flat, and that left a ten-micron ring where a hunter was
+ * deep inside your grip, on its way to your node, and still counted as free to
+ * bite you — because touching starts at twenty-two. Every run died in it. The
+ * old number was a snap tolerance from when the player was a cursor that could
+ * simply be somewhere else.
+ */
+export function captureRadius(pitch: number): number { return pitch / 4; }
+export const BIND_RADIUS = 24e-6;
+export const BIND_DWELL = 0.26;
+
+/**
+ * How many touches you survive, and the mercy after one.
+ *
+ * Four was the number when the player was a cursor that could be somewhere else
+ * the instant the mouse moved. A body cannot side-step: breaking contact means
+ * gripping and outrunning the thing's own trap, which costs stamina and takes
+ * about a second, so every mistake is longer and there have to be more of them
+ * in the budget. The knockback below is part of the same accounting — a hit has
+ * to buy back enough room to get the field up again, or the mercy simply ends
+ * with the same body still standing on you.
+ */
+export const MAX_INTEGRITY = 6;
+export const IFRAME = 1.8;
+/** How far a touch throws everything off you, m. */
+export const KNOCKBACK = 150e-6;
+export const AMBIENT = 1.0e-5;
+
+/** How close your hand must be to drive a structure, m. */
+export const DRIVE_RADIUS = 34e-6;
+/** Stamina returned for taking something apart. */
+export const KILL_REFUND = 22;
+
+// ── wildlife ────────────────────────────────────────────────────────────────
+
+export {
+  type Beast, type Behaviour, BEASTS, beast,
+} from "./beasts.js";
+
+// ── entities ────────────────────────────────────────────────────────────────
+
+export type Faction = "motif" | "beast";
+
+export interface Entity {
+  id: number;
+  faction: Faction;
+  species: string;
+  parts: string[];
+  x: number;
+  y: number;
+  ang: number;
+  held: number;
+  dwell: number;
+  partner: number;
+  flash: number;
+  spin: number;
+  trail: number[];
+}
+
+/** A volley arm in flight. */
+export interface Bolt {
+  x: number; y: number; vx: number; vy: number; life: number; born: number;
+}
+
+// ── the run ─────────────────────────────────────────────────────────────────
+
+export type Phase = "settle" | "reign" | "birth" | "dead";
+
+export type Ev =
+  | { kind: "hit"; x: number; y: number }
+  | { kind: "kill"; x: number; y: number; species: string; score: number }
+  | { kind: "merge"; x: number; y: number }
+  | { kind: "refuse"; x: number; y: number; text: string }
+  | { kind: "crystal"; x: number; y: number; group: string }
+  | { kind: "place"; x: number; y: number; group: string }
+  | { kind: "fed"; group: string }
+  | { kind: "crown"; group: string; mass: number }
+  | { kind: "discharge"; x: number; y: number; group: string; damage: number }
+  | { kind: "devour"; x: number; y: number }
+  | { kind: "volley"; x: number; y: number; arms: number }
+  | { kind: "sovereign-hit"; x: number; y: number }
+  | { kind: "birth"; aeon: number; name: string }
+  | { kind: "dash"; x: number; y: number }
+  | { kind: "spent" }
+  | { kind: "death" };
+
+export interface Run {
+  world: World;
+  wave: Wave;
+  /** You. A particle in the water, moved by nothing but the field. */
+  you: Pilot;
+  phase: Phase;
+  entities: Entity[];
+  structures: Structure[];
+  bolts: Bolt[];
+  throne: Sovereign;
+  /** Cells in hand, not yet placed or fed. */
+  cells: Cell[];
+  integrity: number;
+  iframe: number;
+  score: number;
+  built: number;
+  aeonsSurvived: number;
+  t: number;
+  spawnIn: number;
+  events: Ev[];
+  /** Where the lattice is currently pointed — a quarter pitch off your body,
+   *  in the direction you are driving. Derived, never set from outside. */
+  aim: { x: number; y: number };
+  rand: () => number;
+  nextId: number;
+}
+
+export function startRun(seed = 1): Run {
+  const world = firstWorld();
+  const run: Run = {
+    world,
+    wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
+    you: newPilot(ARENA_W * 0.3, ARENA_H * 0.3),
+    phase: "settle",
+    entities: [],
+    structures: [],
+    bolts: [],
+    throne: emptyThrone(ARENA_W / 2, ARENA_H / 2),
+    cells: [],
+    integrity: MAX_INTEGRITY,
+    iframe: 0,
+    score: 0,
+    built: 0,
+    aeonsSurvived: 0,
+    t: 0,
+    spawnIn: 3,
+    events: [],
+    aim: { x: ARENA_W * 0.3, y: ARENA_H * 0.3 },
+    rand: rng(seed),
+    nextId: 0,
+  };
+  for (let i = 0; i < 14; i++) run.entities.push(newMotif(run, true));
+  return run;
+}
+
+// ── bodies ──────────────────────────────────────────────────────────────────
+
+/**
+ * A cluster is one particle.
+ *
+ * Volumes add; density and sound speed average by volume. A dimer is strongly
+ * node-seeking and a girdle strongly antinode-seeking, so the 222 made of them
+ * has a contrast near zero and barely answers the field at all. Building
+ * something makes it harder to carry, and nobody wrote that rule.
+ */
+export function clusterParticle(parts: readonly string[]): Particle {
+  let v = 0, mr = 0, mc = 0;
+  for (const id of parts) {
+    const p = motif(id).particle;
+    const vi = p.radius ** 3;
+    v += vi; mr += p.rho * vi; mc += p.c * vi;
+  }
+  if (v === 0) return { radius: 1e-6, rho: WATER.rho, c: WATER.c };
+  return { radius: Math.cbrt(v), rho: mr / v, c: mc / v };
+}
+
+export function particleOf(e: Entity): Particle {
+  return e.faction === "motif" ? clusterParticle(e.parts) : beast(e.species).particle;
+}
+
+export function labelOf(e: Entity): string {
+  if (e.faction === "beast") return beast(e.species).label;
+  const a = assemble(e.parts);
+  if (e.parts.length === 1) return motif(e.parts[0]).label;
+  return a.group ? `${a.group}  x${a.mass}` : `CLUSTER x${a.mass}`;
+}
+
+// ── spawning ────────────────────────────────────────────────────────────────
+
+function edge(run: Run): { x: number; y: number } {
+  if (run.rand() < 0.5) {
+    return { x: run.rand() < 0.5 ? 4e-6 : ARENA_W - 4e-6, y: run.rand() * ARENA_H };
+  }
+  return { x: run.rand() * ARENA_W, y: run.rand() < 0.5 ? 4e-6 : ARENA_H - 4e-6 };
+}
+
+function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity {
+  return {
+    id: run.nextId++, faction, species: "", parts: [],
+    x: at.x, y: at.y, ang: run.rand() * Math.PI * 2,
+    held: 0, dwell: 0, partner: -1, flash: 0, spin: run.rand() * 6.28, trail: [],
+  };
+}
+
+export function newMotif(run: Run, anywhere = false): Entity {
+  const at = anywhere
+    ? { x: 0.08 * ARENA_W + run.rand() * 0.84 * ARENA_W, y: 0.08 * ARENA_H + run.rand() * 0.84 * ARENA_H }
+    : edge(run);
+  const e = blank(run, "motif", at);
+  e.parts = [run.world.pool[Math.floor(run.rand() * run.world.pool.length)]];
+  return e;
+}
+
+export function newBeast(run: Run, species: string, at?: { x: number; y: number }): Entity {
+  const e = blank(run, "beast", at ?? edge(run));
+  e.species = species;
+  return e;
+}
+
+/**
+ * Seconds between arrivals.
+ *
+ * Settling is the phase you are meant to BUILD in, so the water is nearly
+ * empty: a beast now and then, something to watch for, not a siege. All the
+ * pressure belongs to the reign, where it is a thing you crowned rather than
+ * weather. A headless bot that tried to lay out a world under the old rate died
+ * mid-construction on every seed and never crowned anything at all.
+ */
+export function spawnGap(run: Run): number {
+  const base = run.phase === "reign" ? 3.2 : 9.0;
+  return Math.max(1.3, base - run.world.aeon * 0.3);
+}
+
+// ── stepping ────────────────────────────────────────────────────────────────
+
+/**
+ * A frame of intent, and nothing more.
+ *
+ * `move` is a stick: a direction with a magnitude in 0..1, which becomes the
+ * offset of the trap from your body. It is not a velocity — there is no way to
+ * ask this game to move you, only to ask it where to put the node.
+ */
+export interface Input {
+  move: { x: number; y: number };
+  grip: boolean;
+  /** Edge-triggered: true on the frame the burst was asked for. */
+  dash: boolean;
+}
+
+export function step(run: Run, input: Input, dt: number): void {
+  run.t += dt;
+  const w = run.wave;
+  const you = run.you;
+  const alive = run.phase !== "dead" && run.phase !== "birth";
+
+  // You are a body before you are a player. The drive is set, the trap is put
+  // where the stick asked, and then the water moves you along with everything
+  // else standing in it.
+  const wasSpent = w.spent;
+  grip(w, input.grip && alive, dt);
+  if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
+
+  if (alive && input.dash && beginDash(you, w, input.move.x, input.move.y)) {
+    run.events.push({ kind: "dash", x: you.x, y: you.y });
+  }
+  concentrate(you, w, input.grip && alive && !w.spent, dt);
+  const trap = alive
+    ? aimFor(you, w, input.move.x, input.move.y)
+    : aimFor(you, w, 0, 0);
+  run.aim.x = trap.x;
+  run.aim.y = trap.y;
+  carry(you, w, dt, run.world.current, ARENA_W, ARENA_H);
+
+  if (run.iframe > 0) run.iframe -= dt;
+  if (!alive) { drift(run, dt); return; }
+
+  // arrivals
+  run.spawnIn -= dt;
+  if (run.spawnIn <= 0) {
+    run.spawnIn = spawnGap(run) * (0.7 + run.rand() * 0.6);
+    const live = run.entities.filter((e) => e.faction === "beast").length;
+    const cap = run.phase === "reign"
+      ? 4 + Math.floor(run.world.aeon / 2)
+      : 1 + Math.floor(run.world.aeon / 3);
+    if (live < cap) {
+      const table = run.world.wildlife;
+      run.entities.push(newBeast(run, table[Math.floor(run.rand() * table.length)]));
+    }
+  }
+  const motifs = run.entities.filter((e) => e.faction === "motif").length;
+  if (motifs < 14) run.entities.push(newMotif(run));
+
+  drift(run, dt);
+  settle(run, dt);
+  mergePass(run, dt);
+  crystallise(run);
+  driveStructures(run, dt);
+  if (run.phase === "reign") reign(run, dt);
+  contact(run, dt);
+}
+
+// ── motion ──────────────────────────────────────────────────────────────────
+
+function drift(run: Run, dt: number): void {
+  const w = run.wave;
+  const uStream = streamingSpeed(w.amplitude);
+
+  for (const e of run.entities) {
+    const p = particleOf(e);
+    // The radiation part is stiff and is integrated as such; everything below
+    // is a slow drift laid over the top of it.
+    const moved = advance(w, e.x, e.y, p, dt);
+    let dx = 0, dy = 0;
+
+    if (uStream > 0) {
+      e.ang += (run.rand() * 2 - 1) * 5 * dt;
+      dx += uStream * Math.cos(e.ang);
+      dy += uStream * Math.sin(e.ang);
+    }
+
+    const ca = (Math.PI * e.x) / ARENA_W;
+    const cb = (Math.PI * e.y) / ARENA_H;
+    dx += run.world.current * Math.sin(ca) * Math.cos(cb);
+    dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
+
+    if (e.faction === "beast" && run.phase !== "birth") {
+      const b = beast(e.species);
+      if (b.behaviour !== "drift") {
+        const hx = run.you.x - e.x, hy = run.you.y - e.y;
+        const r = Math.hypot(hx, hy) || 1e-12;
+        dx += (hx / r) * b.speed;
+        dy += (hy / r) * b.speed;
+      }
+    }
+
+    // What you built pulls on what answers to it, whether or not you are here.
+    if (contrastFactor(p, run.world.medium) > 0) {
+      for (const s of run.structures) {
+        for (const [hx, hy] of holdPoints(s)) {
+          const qx = hx - e.x, qy = hy - e.y;
+          const r = Math.hypot(qx, qy);
+          if (r > 1e-9 && r < s.reach * 1.1) {
+            const pull = (s.ruin ? 2.2e-5 : 4.4e-5) * (1 - r / (s.reach * 1.1));
+            dx += (qx / r) * pull;
+            dy += (qy / r) * pull;
+          }
+        }
+      }
+    }
+
+    e.x = moved.x + dx * dt;
+    e.y = moved.y + dy * dt;
+    e.spin += dt * 1.5;
+
+    const rad = p.radius;
+    if (e.x < rad) { e.x = rad; e.ang = Math.PI - e.ang; }
+    if (e.x > ARENA_W - rad) { e.x = ARENA_W - rad; e.ang = Math.PI - e.ang; }
+    if (e.y < rad) { e.y = rad; e.ang = -e.ang; }
+    if (e.y > ARENA_H - rad) { e.y = ARENA_H - rad; e.ang = -e.ang; }
+
+    e.trail.push(e.x, e.y);
+    while (e.trail.length > 18) e.trail.shift();
+    if (e.flash > 0) e.flash -= dt;
+  }
+}
+
+// ── being held ──────────────────────────────────────────────────────────────
+
+function settle(run: Run, dt: number): void {
+  const w = run.wave;
+  const dead: Entity[] = [];
+
+  for (const e of run.entities) {
+    const p = particleOf(e);
+    if (localAmplitude(w, e.x, e.y) < HOLD_PRESSURE) { e.held = 0; continue; }
+
+    const nx = nearest(trapPositions(axisX(w), p, ARENA_W), e.x);
+    const ny = nearest(trapPositions(axisY(w), p, ARENA_H), e.y);
+    if (nx === null || ny === null) { e.held = 0; continue; }
+
+    if (Math.hypot(nx - e.x, ny - e.y) < captureRadius(w.pitch) + p.radius * 0.5) {
+      e.held += dt;
+      if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
+    } else {
+      e.held = 0;
+    }
+  }
+  for (const e of dead) kill(run, e);
+}
+
+export function kill(run: Run, e: Entity): void {
+  const b = beast(e.species);
+  run.entities = run.entities.filter((x) => x !== e);
+  run.score += b.score;
+  // Killing pays for itself: grip is the only offence and the only defence, so
+  // running dry has to be recoverable by fighting rather than only by waiting.
+  run.wave.stamina = Math.min(100, run.wave.stamina + KILL_REFUND);
+  if (run.wave.stamina > 25) run.wave.spent = false;
+  run.events.push({ kind: "kill", x: e.x, y: e.y, species: e.species, score: b.score });
+
+  if (b.behaviour === "split") {
+    for (let i = 0; i < 2; i++) {
+      run.entities.push(newBeast(run, "mote", {
+        x: e.x + (run.rand() * 2 - 1) * 20e-6,
+        y: e.y + (run.rand() * 2 - 1) * 20e-6,
+      }));
+    }
+  }
+}
+
+// ── merging, and what your buildings do while you are away ──────────────────
+
+/** True if this point is inside some structure's holding field. */
+function underStructure(run: Run, x: number, y: number): boolean {
+  for (const s of run.structures) {
+    for (const [hx, hy] of holdPoints(s)) {
+      if (Math.hypot(hx - x, hy - y) < s.reach * 0.55) return true;
+    }
+  }
+  return false;
+}
+
+function mergePass(run: Run, dt: number): void {
+  const ms = run.entities.filter((e) => e.faction === "motif");
+  const gripping = handed(run.you);
+  const gone = new Set<number>();
+
+  for (let i = 0; i < ms.length; i++) {
+    const a = ms[i];
+    if (gone.has(a.id)) continue;
+    let best: Entity | null = null;
+    let bestR = BIND_RADIUS;
+    for (let j = i + 1; j < ms.length; j++) {
+      const b = ms[j];
+      if (gone.has(b.id)) continue;
+      const r = Math.hypot(a.x - b.x, a.y - b.y);
+      if (r < bestR) { bestR = r; best = b; }
+    }
+    if (!best) { a.dwell = 0; a.partner = -1; continue; }
+
+    // A structure holds them together as well as your hand does. This is why
+    // building is worth anything: what you left standing keeps working.
+    const bound = gripping || underStructure(run, a.x, a.y);
+    if (!bound) { a.dwell = 0; a.partner = -1; continue; }
+
+    const asm = assemble([...a.parts, ...best.parts]);
+    if (!asm.group && !asm.partial) {
+      if (a.flash <= 0) {
+        a.flash = 0.45; best.flash = 0.45;
+        run.events.push({
+          kind: "refuse", x: (a.x + best.x) / 2, y: (a.y + best.y) / 2,
+          text: asm.refusal ?? "unknown",
+        });
+      }
+      const dx = a.x - best.x, dy = a.y - best.y, r = Math.hypot(dx, dy) || 1e-9;
+      a.x += (dx / r) * 7e-6; a.y += (dy / r) * 7e-6;
+      best.x -= (dx / r) * 7e-6; best.y -= (dy / r) * 7e-6;
+      a.dwell = 0; a.partner = -1;
+      continue;
+    }
+
+    if (a.partner === best.id) a.dwell += dt;
+    else { a.partner = best.id; a.dwell = dt; }
+
+    if (a.dwell >= BIND_DWELL) {
+      a.parts = [...a.parts, ...best.parts];
+      a.x = (a.x + best.x) / 2; a.y = (a.y + best.y) / 2;
+      a.dwell = 0; a.partner = -1; a.flash = 0.4;
+      gone.add(best.id);
+      run.events.push({ kind: "merge", x: a.x, y: a.y });
+    }
+  }
+  if (gone.size) run.entities = run.entities.filter((e) => !gone.has(e.id));
+}
+
+function crystallise(run: Run): void {
+  const keep: Entity[] = [];
+  for (const e of run.entities) {
+    if (e.faction !== "motif") { keep.push(e); continue; }
+    const asm = assemble(e.parts);
+    if (asm.crystallises && asm.group) {
+      run.cells.push(cellFor(asm.group));
+      run.built++;
+      run.score += 6;
+      run.wave.stamina = 100;
+      run.wave.spent = false;
+      run.events.push({ kind: "crystal", x: e.x, y: e.y, group: asm.group });
+    } else {
+      keep.push(e);
+    }
+  }
+  run.entities = keep;
+}
+
+// ── building ────────────────────────────────────────────────────────────────
+
+export const THRONE_RADIUS = 30e-6;
+
+export function onThrone(run: Run, x: number, y: number): boolean {
+  return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
+}
+
+export type PlaceResult = "placed" | "fed" | "none" | "too-close" | "wrong-phase";
+
+/**
+ * Spend a cell: onto the ground as a structure, or into the throne.
+ *
+ * The same gesture does both, and which one it is depends only on where you are
+ * standing. Feeding is irreversible and it is the decision the game is about —
+ * a fed cell is gone from your hand, makes the king harder, and makes the world
+ * born out of it richer.
+ */
+export function placeCell(run: Run, index: number): PlaceResult {
+  if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
+  const c = run.cells[index];
+  if (!c) return "none";
+
+  // Feeding is a settling decision only. Once it is awake the bargain is
+  // closed — but you can still BUILD during the reign, and you will have to:
+  // it eats what you made, so the fight is a race between what it can devour
+  // and what you can put up while it does.
+  if (run.phase === "settle" && onThrone(run, run.you.x, run.you.y)) {
+    feed(run.throne, c);
+    run.cells.splice(index, 1);
+    run.events.push({ kind: "fed", group: c.group.hm });
+    return "fed";
+  }
+
+  if (run.phase === "reign" && onThrone(run, run.you.x, run.you.y)) return "too-close";
+  for (const s of run.structures) {
+    if (Math.hypot(s.x - run.you.x, s.y - run.you.y) < s.reach * 0.9) return "too-close";
+  }
+  const s = structureFrom(run.nextId++, c.group.hm, run.you.x, run.you.y);
+  run.structures.push(s);
+  run.cells.splice(index, 1);
+  run.score += s.strength * 2;
+  run.events.push({ kind: "place", x: s.x, y: s.y, group: s.hm });
+  return "placed";
+}
+
+export type CrownResult = "crowned" | "nothing-fed" | "wrong-phase";
+
+/** Wake what you made. */
+export function crown(run: Run): CrownResult {
+  if (run.phase !== "settle") return "wrong-phase";
+  if (run.throne.fed.length === 0) return "nothing-fed";
+  run.throne.awake = true;
+  run.phase = "reign";
+  run.spawnIn = 2;
+  run.events.push({ kind: "crown", group: run.throne.hm, mass: run.throne.mass });
+  return "crowned";
+}
+
+/** How long a structure takes to charge, seconds. Bigger takes longer. */
+export function chargeTime(s: Structure): number {
+  return 0.55 + s.strength * 0.075;
+}
+
+/**
+ * Drive whatever structure your hand is on.
+ *
+ * Only while a king is awake — otherwise every pass over your own buildings
+ * while gathering would burn them down. A full charge discharges along the
+ * structure's own lobe directions and the structure is consumed.
+ */
+function driveStructures(run: Run, dt: number): void {
+  if (run.phase !== "reign") {
+    for (const s of run.structures) s.charge = Math.max(0, s.charge - dt * 0.6);
+    return;
+  }
+  const driving = handed(run.you);
+  const spent: Structure[] = [];
+
+  for (const s of run.structures) {
+    const near = Math.hypot(s.x - run.you.x, s.y - run.you.y) < DRIVE_RADIUS;
+    if (driving && near) {
+      s.charge += dt / chargeTime(s);
+      if (s.charge >= 1) spent.push(s);
+    } else {
+      s.charge = Math.max(0, s.charge - dt * 0.35);
+    }
+  }
+  for (const s of spent) discharge(run, s);
+}
+
+/** Half-angle of a discharge lobe, radians. */
+const LOBE_ARC = 0.55;
+/** Damage per group-order, per arm that finds the king. */
+export const DISCHARGE_GAIN = 8;
+
+/**
+ * A structure spends itself.
+ *
+ * It fires along the in-plane directions of its own group, so where you built
+ * decides what you can hit: a two-lobed 222 is a line and has to be lined up,
+ * a sixfold 622 covers the compass and barely has to be aimed. Damage is the
+ * group order per arm that finds the king.
+ */
+export function discharge(run: Run, s: Structure): number {
+  run.structures = run.structures.filter((x) => x !== s);
+  const k = run.throne;
+  let damage = 0;
+
+  if (k.awake && k.hp > 0) {
+    const toKing = Math.atan2(k.y - s.y, k.x - s.x);
+    const range = s.reach * 7;
+    if (Math.hypot(k.x - s.x, k.y - s.y) < range) {
+      for (const [dx, dy] of s.lobes) {
+        const a = Math.atan2(dy, dx);
+        let d = Math.abs(a - toKing);
+        while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
+        if (d < LOBE_ARC) damage += s.strength * DISCHARGE_GAIN;
+      }
+    }
+  }
+
+  // it also scours the beasts standing in its arms
+  const reach = s.reach * 4;
+  for (const e of [...run.entities]) {
+    if (e.faction !== "beast") continue;
+    const r = Math.hypot(e.x - s.x, e.y - s.y);
+    if (r > reach) continue;
+    const a = Math.atan2(e.y - s.y, e.x - s.x);
+    for (const [dx, dy] of s.lobes) {
+      let d = Math.abs(Math.atan2(dy, dx) - a);
+      while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
+      if (d < LOBE_ARC) { kill(run, e); break; }
+    }
+  }
+
+  if (damage > 0) {
+    k.hp = Math.max(0, k.hp - damage);
+    run.events.push({ kind: "sovereign-hit", x: k.x, y: k.y });
+  }
+  run.events.push({ kind: "discharge", x: s.x, y: s.y, group: s.hm, damage });
+  if (k.awake && k.hp <= 0) birth(run);
+  return damage;
+}
+
+// ── the reign ───────────────────────────────────────────────────────────────
+
+const BOLT_SPEED = 2.4e-4;
+const BOLT_LIFE = 3.4;
+
+function reign(run: Run, dt: number): void {
+  const k = run.throne;
+  k.spin += dt * 0.55;
+
+  // it drags itself toward you
+  const hx = run.you.x - k.x, hy = run.you.y - k.y;
+  const r = Math.hypot(hx, hy) || 1e-12;
+  const sp = sovereignSpeed(k);
+  let dx = (hx / r) * sp;
+  let dy = (hy / r) * sp;
+
+  // And the field acts on it, because it is a body in water like anything else
+  // — unless you fed it something with no handle on it.
+  //
+  // Inertia is applied as a SHORTER STEP rather than a scaled velocity. They
+  // are the same number in the limit, but a king is nineteen microns across and
+  // its drift is stiff enough to ring at sixty frames a second, so it has to go
+  // through the same substepping every other body does or it vibrates in place
+  // instead of being drawn in.
+  if (!k.anchored) {
+    const moved = advance(run.wave, k.x, k.y, sovereignParticle(k), dt / sovereignInertia(k));
+    dx += (moved.x - k.x) / dt;
+    dy += (moved.y - k.y) / dt;
+  }
+  k.x = Math.max(30e-6, Math.min(ARENA_W - 30e-6, k.x + dx * dt));
+  k.y = Math.max(30e-6, Math.min(ARENA_H - 30e-6, k.y + dy * dt));
+
+  // it eats what you built
+  if (run.structures.length > 0 && run.rand() < dt * 0.075) {
+    let victim = run.structures[0];
+    let vr = Infinity;
+    for (const s of run.structures) {
+      const d = Math.hypot(s.x - k.x, s.y - k.y);
+      if (d < vr) { vr = d; victim = s; }
+    }
+    if (vr < 150e-6) {
+      run.structures = run.structures.filter((s) => s !== victim);
+      k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
+      run.events.push({ kind: "devour", x: victim.x, y: victim.y });
+    }
+  }
+
+  // volleys, in the shape of its own group
+  k.beat -= dt;
+  if (k.beat <= 0) {
+    k.beat = cadence(k);
+    const arms = volley(k);
+    for (const [dx, dy] of arms) {
+      run.bolts.push({
+        x: k.x, y: k.y, vx: dx * BOLT_SPEED, vy: dy * BOLT_SPEED,
+        life: BOLT_LIFE, born: run.t,
+      });
+    }
+    run.events.push({ kind: "volley", x: k.x, y: k.y, arms: arms.length });
+  }
+
+  for (const b of run.bolts) {
+    b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+  }
+  run.bolts = run.bolts.filter(
+    (b) => b.life > 0 && b.x > -20e-6 && b.x < ARENA_W + 20e-6
+      && b.y > -20e-6 && b.y < ARENA_H + 20e-6);
+}
+
+// ── being hit ───────────────────────────────────────────────────────────────
+
+const TOUCH = 17e-6;
+const BOLT_TOUCH = 13e-6;
+
+function contact(run: Run, dt: number): void {
+  const w = run.wave;
+  let bite = 0;
+  let drain = 0;
+
+  for (const e of run.entities) {
+    if (e.faction !== "beast") continue;
+    if (e.held > 0) continue;   // a body you have hold of is not free to reach you
+    const b = beast(e.species);
+    if (Math.hypot(e.x - run.aim.x, e.y - run.aim.y) < TOUCH + particleOf(e).radius) {
+      e.flash = 0.3;
+      if (b.damage > 0) bite += b.damage;
+      else drain += b.drain;
+    }
+  }
+
+  for (const b of run.bolts) {
+    if (Math.hypot(b.x - run.aim.x, b.y - run.aim.y) < BOLT_TOUCH) { bite += 1; b.life = 0; }
+  }
+  run.bolts = run.bolts.filter((b) => b.life > 0);
+
+  if (drain > 0) {
+    w.stamina = Math.max(0, w.stamina - drain * dt);
+    if (w.stamina <= 0) w.spent = true;
+  }
+
+  // The burst really is untouchable: you are crossing at four times cruise
+  // speed and the thing reaching for you is not.
+  if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0) {
+    run.integrity -= 1;
+    run.iframe = IFRAME;
+    run.events.push({ kind: "hit", x: run.aim.x, y: run.aim.y });
+    for (const e of run.entities) {
+      if (e.faction !== "beast") continue;
+      const dx = e.x - run.aim.x, dy = e.y - run.aim.y;
+      const r = Math.hypot(dx, dy);
+      if (r < 140e-6 && r > 1e-9) {
+        e.x += (dx / r) * KNOCKBACK; e.y += (dy / r) * KNOCKBACK; e.held = 0;
+      }
+    }
+    if (run.integrity <= 0) {
+      run.integrity = 0;
+      run.phase = "dead";
+      run.events.push({ kind: "death" });
+    }
+  }
+}
+
+// ── birth ───────────────────────────────────────────────────────────────────
+
+/**
+ * The king is down, and the next world is its body.
+ *
+ * Everything about the new place comes out of what you fed it, so the world you
+ * are about to live in is one you assembled two phases ago without knowing it.
+ * Some of what you built survives as ruins — weaker, half taken, but standing.
+ */
+export function birth(run: Run): void {
+  const k = run.throne;
+  const next = worldFrom(k, run.world.aeon + 1);
+  run.phase = "birth";
+  run.aeonsSurvived++;
+  run.score += 40 + k.mass * 8;
+  run.events.push({ kind: "birth", aeon: next.aeon, name: next.name });
+  run.world = next;
+}
+
+/** Step into the world that was just born. */
+export function enterWorld(run: Run): void {
+  if (run.phase !== "birth") return;
+  const w = run.world;
+
+  run.wave = newWave(w.pitch, MAX_AMPLITUDE, focusFor(w.pitch), w.medium);
+  run.wave.stamina = 100;
+
+  // What survives is what you did not spend, weakened into ruins.
+  const keep = Math.round(run.structures.length * w.inheritance);
+  run.structures = run.structures.slice(0, keep).map((s) => ({
+    ...s, ruin: true, charge: 0, strength: Math.max(1, Math.round(s.strength / 2)),
+  }));
+
+  run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
+  run.bolts = [];
+  run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
+  for (let i = 0; i < 12; i++) run.entities.push(newMotif(run, true));
+  run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
+  run.spawnIn = 4;
+  run.phase = "settle";
+}
+
+// ── readouts ────────────────────────────────────────────────────────────────
+
+export interface Readout {
+  label: string;
+  radius: number;
+  contrast: number;
+  goesTo: "NODE" | "ANTINODE";
+  authority: number;
+  hint: string;
+}
+
+export function readoutFor(run: Run, e: Entity): Readout {
+  const p = particleOf(e);
+  const phi = contrastFactor(p, run.world.medium);
+  const isBeast = e.faction === "beast";
+  const asm = isBeast ? null : assemble(e.parts);
+  return {
+    label: labelOf(e),
+    radius: p.radius,
+    contrast: phi,
+    goesTo: phi > 0 ? "NODE" : "ANTINODE",
+    authority: (p.radius / 1.5e-6) ** 2,
+    hint: isBeast
+      ? beast(e.species).behaviour === "drift"
+        ? "TOO SMALL TO HOLD"
+        : phi > 0 ? "YOUR NODE REELS IT IN" : "HOLD IT IN AN ANTINODE"
+      : asm && asm.group
+        ? `${asm.group} AT ${asm.mass}/4`
+        : asm && asm.partial ? "NEEDS AN AXIS" : "WILL NOT BIND",
+  };
+}
+
+function nearest(list: number[], v: number): number | null {
+  if (list.length === 0) return null;
+  let best = list[0];
+  for (const u of list) if (Math.abs(u - v) < Math.abs(best - v)) best = u;
+  return best;
+}
