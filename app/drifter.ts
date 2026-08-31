@@ -19,6 +19,7 @@
 import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
+  STRIKE_RANGE, VOLLEY_WIND,
   beast, crown, enterWorld, particleOf, placeCell, readoutFor,
   startRun, step,
 } from "../game/run.js";
@@ -73,6 +74,12 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME "
       + "LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING "
       + "A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS.",
+  },
+  coil: {
+    id: "coil", title: "IT IS TELLING YOU",
+    body: "A HUNTER STOPS AND GATHERS BEFORE IT COMMITS, AND WHEN IT GOES IT GOES WHERE IT "
+      + "WAS POINTING - NOT WHERE YOU ARE NOW. BURST OFF THE LINE, OR CLOSE YOUR HAND ON IT: "
+      + "A BODY IN YOUR GRIP CANNOT STRIKE AT ALL.",
   },
   burst: {
     id: "burst", title: "PEAK RATING, NOT CONTINUOUS",
@@ -433,6 +440,17 @@ export class Game {
           this.flash = 1; this.flashRed = false; this.shake = 14;
           this.sfx.capture(5);
           break;
+        case "coil":
+          this.sfx.coil();
+          this.teach("coil");
+          break;
+        case "strike":
+          this.sfx.strike();
+          this.burst(ev.x, ev.y, 5, "255,240,120");
+          break;
+        case "aiming":
+          this.sfx.aiming();
+          break;
         case "dash":
           this.teach("burst");
           this.sfx.dash();
@@ -736,6 +754,36 @@ export class Game {
             g.stroke();
           }
         }
+        // The coil. A ring collapsing onto it counts the wind-up down, and the
+        // line says where it is going — it commits to a direction when it
+        // fires, so the line is the truth and stepping off it is the answer.
+        if (e.wind > 0) {
+          const f = 1 - e.wind / b.wind;
+          g.strokeStyle = `rgba(255,240,120,${(0.35 + f * 0.6).toFixed(3)})`;
+          g.lineWidth = 1.6 + f * 1.6;
+          g.beginPath(); g.arc(x, y, r + 4 + (1 - f) * 22, 0, Math.PI * 2); g.stroke();
+
+          const you = this.run.you;
+          const ax = you.x - e.x, ay = you.y - e.y;
+          const ar = Math.hypot(ax, ay) || 1e-12;
+          const reach = px(STRIKE_RANGE * 0.8) * f;
+          g.strokeStyle = `rgba(255,240,120,${(0.14 + f * 0.4).toFixed(3)})`;
+          g.lineWidth = 1;
+          g.setLineDash([4, 4]);
+          g.beginPath();
+          g.moveTo(x, y);
+          g.lineTo(x + (ax / ar) * reach, y + (ay / ar) * reach);
+          g.stroke();
+          g.setLineDash([]);
+        }
+        if (e.strike > 0) {
+          g.strokeStyle = "rgba(255,255,255,0.8)";
+          g.lineWidth = 2.5;
+          g.beginPath();
+          g.moveTo(x - e.sx * 16, y - e.sy * 16);
+          g.lineTo(x, y);
+          g.stroke();
+        }
         if (e.held > 0) {
           const f = Math.min(1, e.held / b.hold);
           g.strokeStyle = `rgb(${rgb})`;
@@ -772,6 +820,28 @@ export class Game {
     glow.addColorStop(1, "rgba(0,0,0,0)");
     g.fillStyle = glow;
     g.beginPath(); g.arc(x, y, r * 4, 0, Math.PI * 2); g.fill();
+
+    // The wind-up. Its spin stops while it gathers, so what is drawn here is
+    // exactly what it throws — the arms grow out to their real reach and you
+    // stand in the gaps between them.
+    const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
+    if (wind > 0) {
+      const arms = volley(k);
+      g.lineWidth = 1 + wind * 2.6;
+      for (const [dx, dy] of arms) {
+        const grad = g.createLinearGradient(x, y, x + dx * 260 * wind, y + dy * 260 * wind);
+        grad.addColorStop(0, `rgba(255,120,150,${(0.5 * wind).toFixed(3)})`);
+        grad.addColorStop(1, "rgba(255,120,150,0)");
+        g.strokeStyle = grad;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(x + dx * 260 * wind, y + dy * 260 * wind);
+        g.stroke();
+      }
+      g.strokeStyle = `rgba(255,120,150,${(0.25 + wind * 0.5).toFixed(3)})`;
+      g.lineWidth = 2;
+      g.beginPath(); g.arc(x, y, r + 6 + (1 - wind) * 26, 0, Math.PI * 2); g.stroke();
+    }
 
     // its body carries its own group's arms, turning
     g.strokeStyle = `rgba(${rgb},0.85)`;

@@ -30,6 +30,21 @@ export interface Beast {
   damage: number;
   drain: number;
   score: number;
+  /**
+   * The coil, the strike, and how much faster it swims during it.
+   *
+   * A hunter that only walks at you is not something you can be good at
+   * avoiding — it is weather, and the only answer to it is to have gripped
+   * earlier. The wind-up is the whole difference: it stops, it gathers, and for
+   * that fifth of a second the strike it is about to make is a fact you can
+   * read off the screen and step out of. Getting hit becomes something you did.
+   *
+   * A body in your hand cannot do any of it, which is the other half: the grip
+   * is not just damage, it is the thing that takes the strike away.
+   */
+  wind: number;
+  strike: number;
+  surge: number;
 }
 
 const LIPID = { rho: 915, c: 1450 };
@@ -50,18 +65,27 @@ export const BEASTS: Readonly<Record<string, Beast>> = {
   vesicle: {
     id: "vesicle", label: "VESICLE", particle: { radius: 5.5e-6, ...LIPID },
     hold: 1.05, speed: 5.0e-5, behaviour: "hunt", damage: 1, drain: 0, score: 2,
+    wind: 0.42, strike: 0.3, surge: 5,
   },
   mote: {
     id: "mote", label: "MOTE", particle: { radius: 0.9e-6, ...FAINT },
     hold: 0.9, speed: 0, behaviour: "drift", damage: 0, drain: 24, score: 1,
+    // Too small for any lattice to hold and too small to aim: it drifts, and
+    // that is the whole of it.
+    wind: 0, strike: 0, surge: 0,
   },
   husk: {
     id: "husk", label: "HUSK", particle: { radius: 12e-6, ...FLESH },
     hold: 2.1, speed: 6.0e-5, behaviour: "hunt", damage: 1, drain: 0, score: 4,
+    // Heavy: it takes a long moment to gather, and it commits hard.
+    wind: 0.62, strike: 0.34, surge: 4.5,
   },
   splitter: {
     id: "splitter", label: "SPLITTER", particle: { radius: 6.5e-6, ...LIPID },
     hold: 0.95, speed: 7.0e-5, behaviour: "split", damage: 1, drain: 0, score: 3,
+    // Twitchy. Barely warns you, and crosses the gap before you have finished
+    // reading it.
+    wind: 0.26, strike: 0.22, surge: 6.5,
   },
 };
 

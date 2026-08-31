@@ -430,6 +430,23 @@ So gripping fences the water off and lets you move at 700 µm/s; releasing drops
 the lattice and everything that was standing off comes in while you get your
 stamina back. Running out is how this kills you.
 
+### Everything tells you first
+
+A hunter that only walks at you is weather, and the only answer to weather is to
+have gripped earlier. So a hunter closes, **stops**, and gathers itself — a
+quarter to two-thirds of a second depending on what it is — and then goes along
+the direction it had *when it committed*, not the one you are at now. That last
+clause is the mechanic: a strike is dodged by not being there any more, which is
+what the burst is for. A body in your grip cannot coil or strike at all, so the
+hand is not only damage, it is the thing that takes the strike away. In a
+six-seed bot run about half of all coils never became strikes, because the grip
+closed on them first.
+
+The sovereign does the same and its telegraph is load-bearing: its volleys turn
+so the gaps cannot be camped, but **the spin stops while it winds up**. A
+telegraph that is still rotating is a rumour — the arms you were shown have to
+be the arms it throws, and that is asserted.
+
 ### The colour language is still the physics
 
 Nothing in the update loop special-cases attraction or repulsion. Every body on
@@ -552,7 +569,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                190 tests: what the modules above are actually claiming
+test/                201 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

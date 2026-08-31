@@ -4,12 +4,12 @@ import { test } from "node:test";
 import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
-  placeCell, readoutFor, startRun, step,
+  VOLLEY_WIND, placeCell, readoutFor, startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
 import { cellFor } from "../game/lattice.js";
 import { lobes } from "../game/shape.js";
-import { structureFrom } from "../game/world.js";
+import { structureFrom, volley } from "../game/world.js";
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
 
 const DT = 1 / 60;
@@ -61,6 +61,7 @@ function seedMotif(run: Run, parts: string[], x: number, y: number): Entity {
   const e: Entity = {
     id: run.nextId++, faction: "motif", species: "", parts,
     x, y, ang: 0, held: 0, dwell: 0, partner: -1, flash: 0, spin: 0, trail: [],
+    wind: 0, strike: 0, sx: 0, sy: 0, cool: 0,
   };
   run.entities.push(e);
   return e;
@@ -92,6 +93,114 @@ test("a body you have hold of is not free to reach you", () => {
   assert.equal(run.integrity, MAX_INTEGRITY - 1, "three at once is one hit");
   step(run, IDLE, DT);
   assert.equal(run.integrity, MAX_INTEGRITY - 1, "mercy holds");
+});
+
+// ── it tells you before it does it ──────────────────────────────────────────
+
+test("a hunter gathers itself before it commits, and stands still to do it", () => {
+  const run = startRun(3);
+  run.entities = [];
+  stand(run, CENTRE.x, CENTRE.y);
+  const v = seedBeast(run, "vesicle", CENTRE.x + 70e-6, CENTRE.y);
+  const x0 = v.x;
+
+  step(run, IDLE, DT);
+  assert.ok(v.wind > 0, "inside strike range it should coil");
+  assert.ok(run.events.some((e) => e.kind === "coil"), "and say so");
+
+  // While it gathers it does not CLOSE. Its own swimming stops; the water is
+  // still the water, and here the water is pushing it out — it shares your sign
+  // and it is seventy microns off your node, so the nearest trap it answers to
+  // is the next one out, not the one you are standing in.
+  const before = Math.hypot(v.x - run.you.x, v.y - run.you.y);
+  for (let i = 0; i < 6; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  const after = Math.hypot(v.x - run.you.x, v.y - run.you.y);
+  assert.ok(after >= before - 1e-9,
+    `a gathering body does not close (${(before * 1e6).toFixed(1)} -> ${(after * 1e6).toFixed(1)} um)`);
+  assert.ok(v.x > x0 - 1e-9, "and it certainly does not swim at you");
+
+  for (let i = 0; i < 200 && v.wind > 0; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  assert.ok(v.strike > 0, "then it goes");
+});
+
+test("a strike goes where it was pointed, not where you went", () => {
+  // The whole reason stepping out of one works. It locks its direction at the
+  // moment it commits, so the line drawn during the coil is the line it takes.
+  const run = startRun(5);
+  run.entities = [];
+  stand(run, CENTRE.x, CENTRE.y);
+  const v = seedBeast(run, "vesicle", CENTRE.x + 70e-6, CENTRE.y);
+
+  for (let i = 0; i < 200 && v.strike === 0; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  assert.ok(v.strike > 0, "it should have committed by now");
+  assert.ok(v.sx < -0.9 && Math.abs(v.sy) < 0.3,
+    `it committed at where you were (${v.sx.toFixed(2)}, ${v.sy.toFixed(2)})`);
+
+  // Now leave. It is already going, and it goes past.
+  stand(run, CENTRE.x, CENTRE.y - 200e-6);
+  const y0 = v.y;
+  for (let i = 0; i < 200 && v.strike > 0; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  assert.ok(Math.abs(v.y - y0) < 8e-6, "a strike does not steer");
+  assert.ok(v.x < CENTRE.x, "and it overshoots where you were");
+});
+
+test("a body in your hand cannot strike at all", () => {
+  const run = startRun(7);
+  run.entities = [];
+  stand(run, CENTRE.x, CENTRE.y);
+  const v = seedBeast(run, "vesicle", CENTRE.x + 70e-6, CENTRE.y);
+  run.wave.amplitude = run.wave.maxAmplitude;
+  run.you.grip = 1;
+
+  step(run, IDLE, DT);
+  assert.ok(v.wind > 0, "it starts to gather");
+
+  // Close on it. Being caught is not a damage state — it is the removal of
+  // everything the thing was about to do.
+  v.held = 0.2;
+  step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+  assert.equal(v.wind, 0, "the coil is gone");
+  assert.equal(v.strike, 0);
+});
+
+test("the king's arms stop turning while it is winding up", () => {
+  // A telegraph that is still rotating is a rumour. What is drawn during the
+  // wind has to be what gets thrown.
+  const run = startRun(11);
+  grant(run, ["622"]);
+  stand(run, run.throne.x, run.throne.y);
+  placeCell(run, 0);
+  crown(run);
+  stand(run, run.throne.x + 220e-6, run.throne.y);
+
+  const dirs = () => volley(run.throne).map(([x, y]) => `${x.toFixed(6)},${y.toFixed(6)}`);
+
+  // Up to the edge of the warning window. Bounded and kept alive: the beat only
+  // advances while it is reigning, so a death here would stop the clock.
+  let announced = false;
+  for (let i = 0; i < 900 && run.throne.beat > VOLLEY_WIND; i++) {
+    run.integrity = MAX_INTEGRITY;
+    step(run, IDLE, DT);
+    announced ||= run.events.some((e) => e.kind === "aiming");
+    run.events.length = 0;
+  }
+  assert.ok(run.throne.beat <= VOLLEY_WIND, "it should reach the warning window");
+  assert.ok(announced, "and announce it");
+  const shown = dirs();
+
+  // Now step until it actually throws, and compare against the arms it was
+  // holding on the frame it let go — NOT afterwards, because the beat resets and
+  // the spin starts again the moment the volley is away.
+  let thrown: string[] = [];
+  for (let i = 0; i < 900 && thrown.length === 0; i++) {
+    run.integrity = MAX_INTEGRITY;
+    const holding = dirs();
+    step(run, IDLE, DT);
+    if (run.events.some((e) => e.kind === "volley")) thrown = holding;
+    run.events.length = 0;
+  }
+  assert.ok(thrown.length > 0, "it should throw");
+  assert.deepEqual(thrown, shown, "the arms it showed are the arms it throws");
 });
 
 // ── what stays, and what it does while you are away ─────────────────────────

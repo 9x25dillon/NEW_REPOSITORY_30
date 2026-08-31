@@ -126,6 +126,16 @@ export interface Entity {
   flash: number;
   spin: number;
   trail: number[];
+  /** Seconds of coil left before it commits. */
+  wind: number;
+  /** Seconds of strike left. */
+  strike: number;
+  /** The direction it committed to. A strike does not steer, which is the
+   *  entire reason stepping out of one works. */
+  sx: number;
+  sy: number;
+  /** Seconds before it may gather again. */
+  cool: number;
 }
 
 /** A volley arm in flight. */
@@ -152,6 +162,9 @@ export type Ev =
   | { kind: "sovereign-hit"; x: number; y: number }
   | { kind: "birth"; aeon: number; name: string }
   | { kind: "dash"; x: number; y: number }
+  | { kind: "coil"; x: number; y: number; species: string }
+  | { kind: "strike"; x: number; y: number; species: string }
+  | { kind: "aiming"; x: number; y: number; arms: number }
   | { kind: "spent" }
   | { kind: "death" };
 
@@ -256,6 +269,7 @@ function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity
     id: run.nextId++, faction, species: "", parts: [],
     x: at.x, y: at.y, ang: run.rand() * Math.PI * 2,
     held: 0, dwell: 0, partner: -1, flash: 0, spin: run.rand() * 6.28, trail: [],
+    wind: 0, strike: 0, sx: 0, sy: 0, cool: 0,
   };
 }
 
@@ -381,13 +395,9 @@ function drift(run: Run, dt: number): void {
     dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
 
     if (e.faction === "beast" && run.phase !== "birth") {
-      const b = beast(e.species);
-      if (b.behaviour !== "drift") {
-        const hx = run.you.x - e.x, hy = run.you.y - e.y;
-        const r = Math.hypot(hx, hy) || 1e-12;
-        dx += (hx / r) * b.speed;
-        dy += (hy / r) * b.speed;
-      }
+      const swim = hunt(run, e, dt);
+      dx += swim.x;
+      dy += swim.y;
     }
 
     // What you built pulls on what answers to it, whether or not you are here.
@@ -419,6 +429,63 @@ function drift(run: Run, dt: number): void {
     while (e.trail.length > 18) e.trail.shift();
     if (e.flash > 0) e.flash -= dt;
   }
+}
+
+/** How near you have to be before a hunter gathers itself. */
+export const STRIKE_RANGE = 120e-6;
+/** And how long it must wait before doing it again. */
+export const STRIKE_COOL = 1.5;
+
+/**
+ * A hunter's own swimming, which is the only part of it that is not physics.
+ *
+ * It walks at you until it is close enough to be worth committing, then it
+ * STOPS and gathers, and then it goes — along the direction it had when it
+ * committed, not the one you are at now. That last clause is the whole
+ * mechanic: a strike is dodged by not being there any more, and a burst gets
+ * you two hundred microns in seven frames.
+ *
+ * A body you have hold of does none of it. Being caught is not a damage state,
+ * it is the removal of everything the thing was about to do.
+ */
+function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
+  const b = beast(e.species);
+  if (b.behaviour === "drift") return { x: 0, y: 0 };
+
+  if (e.held > 0) {
+    e.wind = 0;
+    e.strike = 0;
+    return { x: 0, y: 0 };
+  }
+
+  if (e.strike > 0) {
+    e.strike = Math.max(0, e.strike - dt);
+    return { x: e.sx * b.speed * b.surge, y: e.sy * b.speed * b.surge };
+  }
+
+  const hx = run.you.x - e.x, hy = run.you.y - e.y;
+  const r = Math.hypot(hx, hy) || 1e-12;
+
+  if (e.wind > 0) {
+    e.wind = Math.max(0, e.wind - dt);
+    if (e.wind === 0) {
+      e.strike = b.strike;
+      e.sx = hx / r;
+      e.sy = hy / r;
+      e.cool = STRIKE_COOL;
+      run.events.push({ kind: "strike", x: e.x, y: e.y, species: e.species });
+    }
+    return { x: 0, y: 0 };   // it gathers, and while it gathers it is standing still
+  }
+
+  if (e.cool > 0) e.cool = Math.max(0, e.cool - dt);
+  else if (b.wind > 0 && r < STRIKE_RANGE) {
+    e.wind = b.wind;
+    run.events.push({ kind: "coil", x: e.x, y: e.y, species: e.species });
+    return { x: 0, y: 0 };
+  }
+
+  return { x: (hx / r) * b.speed, y: (hy / r) * b.speed };
 }
 
 // ── being held ──────────────────────────────────────────────────────────────
@@ -699,14 +766,22 @@ export function discharge(run: Run, s: Structure): number {
 const BOLT_SPEED = 2.4e-4;
 const BOLT_LIFE = 3.4;
 
+/** How long the king's arms are visible before they are thrown. */
+export const VOLLEY_WIND = 0.55;
+
 function reign(run: Run, dt: number): void {
   const k = run.throne;
-  k.spin += dt * 0.55;
 
-  // it drags itself toward you
+  // Its volleys turn, so the gaps cannot be camped — but the spin STOPS while
+  // it is winding up. A telegraph that is still rotating is not a telegraph, it
+  // is a rumour: the arms you were shown have to be the arms it throws.
+  const winding = k.beat <= VOLLEY_WIND;
+  if (!winding) k.spin += dt * 0.55;
+
+  // it drags itself toward you, and plants itself to throw
   const hx = run.you.x - k.x, hy = run.you.y - k.y;
   const r = Math.hypot(hx, hy) || 1e-12;
-  const sp = sovereignSpeed(k);
+  const sp = sovereignSpeed(k) * (winding ? 0.2 : 1);
   let dx = (hx / r) * sp;
   let dy = (hy / r) * sp;
 
@@ -742,6 +817,9 @@ function reign(run: Run, dt: number): void {
   }
 
   // volleys, in the shape of its own group
+  if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
+    run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
+  }
   k.beat -= dt;
   if (k.beat <= 0) {
     k.beat = cadence(k);

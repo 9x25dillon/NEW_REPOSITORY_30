@@ -119,7 +119,10 @@
       behaviour: "hunt",
       damage: 1,
       drain: 0,
-      score: 2
+      score: 2,
+      wind: 0.42,
+      strike: 0.3,
+      surge: 5
     },
     mote: {
       id: "mote",
@@ -130,7 +133,12 @@
       behaviour: "drift",
       damage: 0,
       drain: 24,
-      score: 1
+      score: 1,
+      // Too small for any lattice to hold and too small to aim: it drifts, and
+      // that is the whole of it.
+      wind: 0,
+      strike: 0,
+      surge: 0
     },
     husk: {
       id: "husk",
@@ -141,7 +149,11 @@
       behaviour: "hunt",
       damage: 1,
       drain: 0,
-      score: 4
+      score: 4,
+      // Heavy: it takes a long moment to gather, and it commits hard.
+      wind: 0.62,
+      strike: 0.34,
+      surge: 4.5
     },
     splitter: {
       id: "splitter",
@@ -152,7 +164,12 @@
       behaviour: "split",
       damage: 1,
       drain: 0,
-      score: 3
+      score: 3,
+      // Twitchy. Barely warns you, and crosses the gap before you have finished
+      // reading it.
+      wind: 0.26,
+      strike: 0.22,
+      surge: 6.5
     }
   };
   function beast(id) {
@@ -1171,7 +1188,12 @@
       partner: -1,
       flash: 0,
       spin: run.rand() * 6.28,
-      trail: []
+      trail: [],
+      wind: 0,
+      strike: 0,
+      sx: 0,
+      sy: 0,
+      cool: 0
     };
   }
   function newMotif(run, anywhere = false) {
@@ -1247,13 +1269,9 @@
       dx += run.world.current * Math.sin(ca) * Math.cos(cb);
       dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
       if (e.faction === "beast" && run.phase !== "birth") {
-        const b = beast(e.species);
-        if (b.behaviour !== "drift") {
-          const hx = run.you.x - e.x, hy = run.you.y - e.y;
-          const r = Math.hypot(hx, hy) || 1e-12;
-          dx += hx / r * b.speed;
-          dy += hy / r * b.speed;
-        }
+        const swim = hunt(run, e, dt);
+        dx += swim.x;
+        dy += swim.y;
       }
       if (contrastFactor(p, run.world.medium) > 0) {
         for (const s of run.structures) {
@@ -1292,6 +1310,41 @@
       while (e.trail.length > 18) e.trail.shift();
       if (e.flash > 0) e.flash -= dt;
     }
+  }
+  var STRIKE_RANGE = 12e-5;
+  var STRIKE_COOL = 1.5;
+  function hunt(run, e, dt) {
+    const b = beast(e.species);
+    if (b.behaviour === "drift") return { x: 0, y: 0 };
+    if (e.held > 0) {
+      e.wind = 0;
+      e.strike = 0;
+      return { x: 0, y: 0 };
+    }
+    if (e.strike > 0) {
+      e.strike = Math.max(0, e.strike - dt);
+      return { x: e.sx * b.speed * b.surge, y: e.sy * b.speed * b.surge };
+    }
+    const hx = run.you.x - e.x, hy = run.you.y - e.y;
+    const r = Math.hypot(hx, hy) || 1e-12;
+    if (e.wind > 0) {
+      e.wind = Math.max(0, e.wind - dt);
+      if (e.wind === 0) {
+        e.strike = b.strike;
+        e.sx = hx / r;
+        e.sy = hy / r;
+        e.cool = STRIKE_COOL;
+        run.events.push({ kind: "strike", x: e.x, y: e.y, species: e.species });
+      }
+      return { x: 0, y: 0 };
+    }
+    if (e.cool > 0) e.cool = Math.max(0, e.cool - dt);
+    else if (b.wind > 0 && r < STRIKE_RANGE) {
+      e.wind = b.wind;
+      run.events.push({ kind: "coil", x: e.x, y: e.y, species: e.species });
+      return { x: 0, y: 0 };
+    }
+    return { x: hx / r * b.speed, y: hy / r * b.speed };
   }
   function settle(run, dt) {
     const w = run.wave;
@@ -1528,12 +1581,14 @@
   }
   var BOLT_SPEED = 24e-5;
   var BOLT_LIFE = 3.4;
+  var VOLLEY_WIND = 0.55;
   function reign(run, dt) {
     const k = run.throne;
-    k.spin += dt * 0.55;
+    const winding = k.beat <= VOLLEY_WIND;
+    if (!winding) k.spin += dt * 0.55;
     const hx = run.you.x - k.x, hy = run.you.y - k.y;
     const r = Math.hypot(hx, hy) || 1e-12;
-    const sp = sovereignSpeed(k);
+    const sp = sovereignSpeed(k) * (winding ? 0.2 : 1);
     let dx = hx / r * sp;
     let dy = hy / r * sp;
     if (!k.anchored) {
@@ -1558,6 +1613,9 @@
         k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
         run.events.push({ kind: "devour", x: victim.x, y: victim.y });
       }
+    }
+    if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
+      run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
     }
     k.beat -= dt;
     if (k.beat <= 0) {
@@ -1911,6 +1969,19 @@
     tick() {
       this.tone(880, 0.025, "square", 0.015);
     }
+    /** A hunter gathering itself. A rising pair, so it reads as a question. */
+    coil() {
+      this.tone(300, 0.16, "triangle", 0.022, 470);
+    }
+    /** And committing to it. */
+    strike() {
+      this.tone(700, 0.07, "sawtooth", 0.03, 240);
+      this.noise(0.05, 0.02);
+    }
+    /** The king planting itself to throw. Low, and it does not resolve. */
+    aiming() {
+      this.tone(96, 0.45, "sawtooth", 0.03, 128);
+    }
     hurt() {
       this.noise(0.09, 0.05);
       this.tone(120, 0.1, "sawtooth", 0.035, 60);
@@ -1951,6 +2022,11 @@
       id: "sign",
       title: "IT SHARES YOUR SIGN",
       body: "BOTH LATTICES ARE ONE FIELD A QUARTER WAVELENGTH APART, AND YOUR OWN CONTRAST PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS."
+    },
+    coil: {
+      id: "coil",
+      title: "IT IS TELLING YOU",
+      body: "A HUNTER STOPS AND GATHERS BEFORE IT COMMITS, AND WHEN IT GOES IT GOES WHERE IT WAS POINTING - NOT WHERE YOU ARE NOW. BURST OFF THE LINE, OR CLOSE YOUR HAND ON IT: A BODY IN YOUR GRIP CANNOT STRIKE AT ALL."
     },
     burst: {
       id: "burst",
@@ -2305,6 +2381,17 @@
             this.shake = 14;
             this.sfx.capture(5);
             break;
+          case "coil":
+            this.sfx.coil();
+            this.teach("coil");
+            break;
+          case "strike":
+            this.sfx.strike();
+            this.burst(ev.x, ev.y, 5, "255,240,120");
+            break;
+          case "aiming":
+            this.sfx.aiming();
+            break;
           case "dash":
             this.teach("burst");
             this.sfx.dash();
@@ -2622,6 +2709,34 @@
               g2.stroke();
             }
           }
+          if (e.wind > 0) {
+            const f = 1 - e.wind / b.wind;
+            g2.strokeStyle = `rgba(255,240,120,${(0.35 + f * 0.6).toFixed(3)})`;
+            g2.lineWidth = 1.6 + f * 1.6;
+            g2.beginPath();
+            g2.arc(x, y, r + 4 + (1 - f) * 22, 0, Math.PI * 2);
+            g2.stroke();
+            const you = this.run.you;
+            const ax = you.x - e.x, ay = you.y - e.y;
+            const ar = Math.hypot(ax, ay) || 1e-12;
+            const reach = px(STRIKE_RANGE * 0.8) * f;
+            g2.strokeStyle = `rgba(255,240,120,${(0.14 + f * 0.4).toFixed(3)})`;
+            g2.lineWidth = 1;
+            g2.setLineDash([4, 4]);
+            g2.beginPath();
+            g2.moveTo(x, y);
+            g2.lineTo(x + ax / ar * reach, y + ay / ar * reach);
+            g2.stroke();
+            g2.setLineDash([]);
+          }
+          if (e.strike > 0) {
+            g2.strokeStyle = "rgba(255,255,255,0.8)";
+            g2.lineWidth = 2.5;
+            g2.beginPath();
+            g2.moveTo(x - e.sx * 16, y - e.sy * 16);
+            g2.lineTo(x, y);
+            g2.stroke();
+          }
           if (e.held > 0) {
             const f = Math.min(1, e.held / b.hold);
             g2.strokeStyle = `rgb(${rgb})`;
@@ -2657,6 +2772,26 @@
       g2.beginPath();
       g2.arc(x, y, r * 4, 0, Math.PI * 2);
       g2.fill();
+      const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
+      if (wind > 0) {
+        const arms = volley(k);
+        g2.lineWidth = 1 + wind * 2.6;
+        for (const [dx, dy] of arms) {
+          const grad = g2.createLinearGradient(x, y, x + dx * 260 * wind, y + dy * 260 * wind);
+          grad.addColorStop(0, `rgba(255,120,150,${(0.5 * wind).toFixed(3)})`);
+          grad.addColorStop(1, "rgba(255,120,150,0)");
+          g2.strokeStyle = grad;
+          g2.beginPath();
+          g2.moveTo(x, y);
+          g2.lineTo(x + dx * 260 * wind, y + dy * 260 * wind);
+          g2.stroke();
+        }
+        g2.strokeStyle = `rgba(255,120,150,${(0.25 + wind * 0.5).toFixed(3)})`;
+        g2.lineWidth = 2;
+        g2.beginPath();
+        g2.arc(x, y, r + 6 + (1 - wind) * 26, 0, Math.PI * 2);
+        g2.stroke();
+      }
       g2.strokeStyle = `rgba(${rgb},0.85)`;
       g2.lineWidth = 2.4;
       for (const [dx, dy] of volley(k)) {

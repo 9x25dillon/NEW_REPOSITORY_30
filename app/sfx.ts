@@ -104,6 +104,22 @@ export class Sfx {
   /** Stepping through the rack. As small as it can be and still be heard. */
   tick(): void { this.tone(880, 0.025, "square", 0.015); }
 
+  /** A hunter gathering itself. A rising pair, so it reads as a question. */
+  coil(): void {
+    this.tone(300, 0.16, "triangle", 0.022, 470);
+  }
+
+  /** And committing to it. */
+  strike(): void {
+    this.tone(700, 0.07, "sawtooth", 0.03, 240);
+    this.noise(0.05, 0.02);
+  }
+
+  /** The king planting itself to throw. Low, and it does not resolve. */
+  aiming(): void {
+    this.tone(96, 0.45, "sawtooth", 0.03, 128);
+  }
+
   hurt(): void { this.noise(0.09, 0.05); this.tone(120, 0.1, "sawtooth", 0.035, 60); }
 
   spent(): void { this.tone(300, 0.5, "sawtooth", 0.05, 55); this.noise(0.3, 0.035); }
