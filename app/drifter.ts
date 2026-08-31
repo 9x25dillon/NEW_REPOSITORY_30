@@ -19,7 +19,7 @@
 import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
-  LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn,
+  LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
   beast, crown, enterWorld, particleOf, placeCell, readoutFor,
   startRun, step,
 } from "../game/run.js";
@@ -74,6 +74,13 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME "
       + "LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING "
       + "A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS.",
+  },
+  hand: {
+    id: "hand", title: "EVERYTHING HERE DIES BY BEING HELD",
+    body: "IT IS TOO BIG FOR ONE TRAP - THIRTY-EIGHT MICRONS ACROSS AGAINST A FORTY-FOUR "
+      + "MICRON LATTICE - SO NO WELL CLOSES ON IT. BUT THE DRIVE IS STILL WORKING ON IT, AND "
+      + "IT COMES APART. SLOWLY, AND ONLY IF YOU LEFT IT A HANDLE TO BE HELD BY: FEED THE "
+      + "THRONE A 432 AND THIS DOES NOTHING AT ALL.",
   },
   aim: {
     id: "aim", title: "YOU CANNOT AIM A BUILDING",
@@ -447,6 +454,10 @@ export class Game {
         case "birth":
           this.flash = 1; this.flashRed = false; this.shake = 14;
           this.sfx.capture(5);
+          break;
+        case "wearing":
+          this.teach("hand");
+          this.burst(ev.x, ev.y, 2, "255,255,255");
           break;
         case "coil":
           this.sfx.coil();
@@ -859,6 +870,20 @@ export class Game {
     glow.addColorStop(1, "rgba(0,0,0,0)");
     g.fillStyle = glow;
     g.beginPath(); g.arc(x, y, r * 4, 0, Math.PI * 2); g.fill();
+
+    // Your bare hand on it. The same condition the damage is applied under, so
+    // what is drawn is never a flattering account of what is happening.
+    if (wearing(this.run)) {
+      const beat = 0.6 + 0.4 * Math.sin(this.t * 22);
+      g.strokeStyle = `rgba(255,255,255,${(0.3 * beat).toFixed(3)})`;
+      g.lineWidth = 3;
+      g.beginPath(); g.arc(x, y, r + 4, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = `rgba(255,255,255,${(0.5 * beat).toFixed(2)})`;
+      g.font = `700 8px ${MONO}`;
+      g.textAlign = "center";
+      g.fillText("YOUR HAND IS ON IT", x, y + r + 16);
+      g.textAlign = "left";
+    }
 
     // The wind-up. Its spin stops while it gathers, so what is drawn here is
     // exactly what it throws — the arms grow out to their real reach and you

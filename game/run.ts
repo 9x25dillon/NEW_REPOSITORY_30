@@ -160,6 +160,7 @@ export type Ev =
   | { kind: "devour"; x: number; y: number }
   | { kind: "volley"; x: number; y: number; arms: number }
   | { kind: "sovereign-hit"; x: number; y: number }
+  | { kind: "wearing"; x: number; y: number }
   | { kind: "birth"; aeon: number; name: string }
   | { kind: "dash"; x: number; y: number }
   | { kind: "coil"; x: number; y: number; species: string }
@@ -490,24 +491,31 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
 
 // ── being held ──────────────────────────────────────────────────────────────
 
+/**
+ * Is this body caught?
+ *
+ * Two conditions and they are different questions. The drive where it stands
+ * has to be strong enough to own it at all, and it has to be inside the well
+ * that leads to one of ITS OWN traps — nodes or antinodes according to the sign
+ * of its contrast, which trapPositions already knows. Nothing here asks what
+ * the body is, which is why the sovereign can be put through it.
+ */
+export function capturedAt(w: Wave, x: number, y: number, p: Particle): boolean {
+  if (localAmplitude(w, x, y) < HOLD_PRESSURE) return false;
+  const nx = nearest(trapPositions(axisX(w), p, ARENA_W), x);
+  const ny = nearest(trapPositions(axisY(w), p, ARENA_H), y);
+  if (nx === null || ny === null) return false;
+  return Math.hypot(nx - x, ny - y) < captureRadius(w.pitch) + p.radius * 0.5;
+}
+
 function settle(run: Run, dt: number): void {
   const w = run.wave;
   const dead: Entity[] = [];
 
   for (const e of run.entities) {
-    const p = particleOf(e);
-    if (localAmplitude(w, e.x, e.y) < HOLD_PRESSURE) { e.held = 0; continue; }
-
-    const nx = nearest(trapPositions(axisX(w), p, ARENA_W), e.x);
-    const ny = nearest(trapPositions(axisY(w), p, ARENA_H), e.y);
-    if (nx === null || ny === null) { e.held = 0; continue; }
-
-    if (Math.hypot(nx - e.x, ny - e.y) < captureRadius(w.pitch) + p.radius * 0.5) {
-      e.held += dt;
-      if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
-    } else {
-      e.held = 0;
-    }
+    if (!capturedAt(w, e.x, e.y, particleOf(e))) { e.held = 0; continue; }
+    e.held += dt;
+    if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
   }
   for (const e of dead) kill(run, e);
 }
@@ -803,6 +811,58 @@ const BOLT_LIFE = 3.4;
 /** How long the king's arms are visible before they are thrown. */
 export const VOLLEY_WIND = 0.55;
 
+/**
+ * Damage a second from holding the king in your bare hand.
+ *
+ * EVERYTHING IN THIS GAME DIES BY BEING HELD. That is the one rule the whole
+ * bestiary runs on, and the sovereign was outside it for no better reason than
+ * not being an Entity — which left a state with no path out of it at all: your
+ * buildings are the only thing that hurt it, it EATS your buildings, and a
+ * player who ran out was not in a hard fight, they were in an unwinnable one
+ * while still alive. That is a worse thing to ship than a difficult boss.
+ *
+ * IT IS NOT TESTED THE WAY A VESICLE IS, AND THE REASON IS ITS SIZE. Being
+ * caught means sitting inside one well, and a sovereign does not fit in one: it
+ * is thirty-eight microns across against a node-to-antinode distance of
+ * forty-four, so it spans very nearly the whole lattice and no single trap can
+ * close on it. Put it through run.capturedAt and it is held three per cent of
+ * the time by a player doing everything right, which is not a mechanic, it is a
+ * coincidence. What can be said about a body bigger than the field's own
+ * structure is only that the drive is working on it — so that is what is asked:
+ * is it inside your concentrated hand at all.
+ *
+ * It is a poor way to kill something. It is done from inside the reach of its
+ * own volley with nothing between you, and against anything but the smallest
+ * king it is far slower than one building. A last resort that reads as one.
+ *
+ * HOW FAST IT IS, IS NEUMANN'S PRINCIPLE AGAIN. Two a second for each
+ * independent piezoelectric component the king's own group is allowed — which
+ * is the number of distinct ways a field can drive that symmetry at all. Order
+ * and freedom pull against each other exactly, so a 222 has three components
+ * and wears at six a second, a 622 has one and wears at two, and a 432 has none
+ * and does not wear at all.
+ *
+ * The richer the thing you crowned, the less your hand can do to it. So the
+ * trade the whole game is about survives its own last resort, and `anchored`
+ * stops being an exception — it is this formula at zero. Nothing was balanced
+ * to make either of those true.
+ */
+export const WEAR_PER_COMPONENT = 2;
+
+/** Damage a second your hand does to this king, and it may well be none. */
+export function wearRate(k: Sovereign): number {
+  if (k.hm === "") return 0;
+  return WEAR_PER_COMPONENT * cellFor(k.hm).freedom;
+}
+
+/** Is your hand on it right now? One source of truth, because the surface has
+ *  to draw exactly the condition the damage is applied under. */
+export function wearing(run: Run): boolean {
+  const k = run.throne;
+  return run.phase === "reign" && k.awake && k.hp > 0 && wearRate(k) > 0
+    && localAmplitude(run.wave, k.x, k.y) >= HOLD_PRESSURE;
+}
+
 function reign(run: Run, dt: number): void {
   const k = run.throne;
 
@@ -834,6 +894,15 @@ function reign(run: Run, dt: number): void {
   }
   k.x = Math.max(30e-6, Math.min(ARENA_W - 30e-6, k.x + dx * dt));
   k.y = Math.max(30e-6, Math.min(ARENA_H - 30e-6, k.y + dy * dt));
+
+  // YOUR HAND, WHICH IS THE LAST THING YOU HAVE. Worked on by the drive like
+  // anything else in the water, it comes apart — slowly, and only if you gave
+  // it a handle to be held by.
+  if (wearing(run)) {
+    k.hp = Math.max(0, k.hp - wearRate(k) * dt);
+    if (run.rand() < dt * 6) run.events.push({ kind: "wearing", x: k.x, y: k.y });
+    if (k.hp <= 0) { birth(run); return; }
+  }
 
   // it eats what you built
   if (run.structures.length > 0 && run.rand() < dt * 0.075) {

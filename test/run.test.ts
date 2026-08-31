@@ -4,12 +4,13 @@ import { test } from "node:test";
 import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
-  LOBE_RANGE, VOLLEY_WIND, bearsOn, placeCell, readoutFor, startRun, step,
+  LOBE_RANGE, VOLLEY_WIND, bearsOn, placeCell, readoutFor, wearRate,
+  startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
 import { cellFor } from "../game/lattice.js";
 import { lobes } from "../game/shape.js";
-import { structureFrom, volley } from "../game/world.js";
+import { cadence, emptyThrone, feed, structureFrom, volley } from "../game/world.js";
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
 
 const DT = 1 / 60;
@@ -419,6 +420,62 @@ test("the guns cannot turn, so the king is what you aim", () => {
   assert.ok(discharge(run, gun) > 0, "and then the gun connects");
 });
 
+test("with nothing left to fire, your bare hand still kills it — unless it has no handle", () => {
+  // There must be no live state with no path out of it. Discharging a building
+  // was the ONLY thing that took a king's health, and a king eats buildings, so
+  // a player who ran out was not in a hard fight, they were in an unwinnable one
+  // while still alive.
+  const wear = (fed: string): Run => {
+    const run = startRun(43);
+    grant(run, [fed]);
+    stand(run, run.throne.x, run.throne.y);
+    placeCell(run, 0);
+    crown(run);
+    run.structures = [];      // everything you built is gone
+    run.entities = [];
+    run.bolts = [];
+
+    const k = run.throne;
+    for (let i = 0; i < 60 * 40 && k.hp > 0; i++) {
+      run.integrity = MAX_INTEGRITY;   // measuring the wear, not the survival
+      run.bolts.length = 0;
+      step(run, seek(run, k.x, k.y, true), DT);
+      run.events.length = 0;
+    }
+    return run;
+  };
+
+  const loose = wear("222");
+  assert.equal(loose.throne.hp, 0, "a king with a handle comes apart in your hand");
+  assert.ok(loose.aeonsSurvived === 1, "and that is a real kill: the next world is born");
+
+  // Neumann's principle, spent a second time. Order 24 and not one independent
+  // piezoelectric component: the field could not push it, and it cannot hold it
+  // either. Feeding the throne a 432 takes your last resort away with it.
+  const anchored = wear("432");
+  assert.ok(anchored.throne.anchored);
+  assert.equal(anchored.throne.hp, anchored.throne.maxHp, "no handle, no purchase, no damage");
+});
+
+test("the hand is far worse than a building, which is why you build", () => {
+  const run = startRun(45);
+  grant(run, ["222"]);
+  stand(run, run.throne.x, run.throne.y);
+  placeCell(run, 0);
+  crown(run);
+
+  const gun = structureFrom(901, "222", run.throne.x - 120e-6, run.throne.y);
+  run.structures = [gun];
+  const instant = discharge(run, gun);
+  assert.ok(instant > 0);
+
+  // Seconds of holding it, for what one building did in a frame.
+  const rate = wearRate(run.throne);
+  assert.ok(rate > 0);
+  assert.ok(instant / rate > 4,
+    `a discharge should be worth several seconds of hand (${(instant / rate).toFixed(1)}s)`);
+});
+
 // ── birth ───────────────────────────────────────────────────────────────────
 
 test("killing it births the world it was made of", () => {
@@ -588,7 +645,11 @@ function makeBot(feedTarget = 2): (r: Run) => Input {
       }
       if (ready) return seek(run, ready.x, ready.y, true);
 
-      // Nothing does. The guns cannot turn, so move the target: a sovereign is
+      // Nothing left to fire. Close on it and hold: it is a bad way to kill
+      // something and it is the only one you have.
+      if (run.structures.length === 0) return seek(run, k.x, k.y, true);
+
+      // Nothing bears yet. The guns cannot turn, so move the target: a sovereign is
       // dense and you are lipid, so it answers to the other lattice and your own
       // node shoves it — about eight times faster than it walks. Stand on the
       // far side of it from where you want it and lean.
@@ -634,27 +695,51 @@ function playRun(seed: number, seconds: number, feedTarget = 2): Run {
 
 const SEEDS = [17, 42, 88, 5, 101, 7];
 
-test("a bot can settle a world, crown it, kill it — and pay for feeding it more", () => {
-  // The test that says whether any of this is a game, and the one place the
-  // central decision is checked by playing rather than by arithmetic. The same
-  // policy, the same seeds, the same seven hundred seconds; the only difference
-  // is how many cells it gives away before it wakes the thing.
-  //
-  // Six seeds and not three, because one run is a story and three is an
-  // anecdote: the modest policy closes the cycle on half of them and the greedy
-  // one on none, and a three-seed sample could not tell those apart.
-  let modest = 0;
+test("a bot can settle a world, crown it, and kill what it crowned", () => {
+  let aeons = 0;
   for (const seed of SEEDS) {
     const run = playRun(seed, 700, 1);
-    modest += run.aeonsSurvived;
+    aeons += run.aeonsSurvived;
     assert.ok(run.built > 0, `seed ${seed} built no cells`);
   }
-  assert.ok(modest >= 2, `the cycle must close (${modest} aeons over ${SEEDS.length} runs)`);
+  assert.ok(aeons >= 2, `the cycle must close (${aeons} aeons over ${SEEDS.length} runs)`);
+});
 
-  let greedy = 0;
-  for (const seed of SEEDS) greedy += playRun(seed, 700, 2).aeonsSurvived;
-  assert.ok(modest > greedy,
-    `a richer king should cost you (${modest} aeons on one helping, ${greedy} on two)`);
+test("what you feed the throne changes what it is, in every direction at once", () => {
+  // This used to be asserted by PLAYING it — same policy, same seeds, one
+  // helping against two — and the gap it reported was noise. Measured properly,
+  // as reigns won out of reigns entered over ten seeds, one helping wins 58 per
+  // cent and two wins 60. There is no gradient there to find.
+  //
+  // The reason is worth keeping: the first water's pool is a dimer and a girdle,
+  // and a dimer plus a girdle is a 222 and nothing else, so at the first aeon a
+  // second helping can only ever be MORE OF THE SAME CELL. It buys mass, which
+  // buys health and a slightly quicker beat, and that is genuinely not much.
+  //
+  // What the trade actually turns on is SYMMETRY, not quantity, and every part
+  // of that is exact and belongs here rather than in a bot run.
+  const kings = [["222"], ["422", "222"], ["622", "422", "222"]].map((fed) => {
+    const k = emptyThrone(0, 0);
+    for (const hm of fed) feed(k, cellFor(hm));
+    return k;
+  });
+
+  for (let i = 1; i < kings.length; i++) {
+    const lo = kings[i - 1];
+    const hi = kings[i];
+    assert.ok(hi.maxHp > lo.maxHp, `${hi.hm} should be bigger than ${lo.hm}`);
+    assert.ok(cadence(hi) < cadence(lo), `${hi.hm} should throw more often`);
+    assert.ok(volley(hi).length >= volley(lo).length, `${hi.hm} should cover more of the compass`);
+    // And Neumann's principle takes your last resort away as it goes: order and
+    // freedom pull against each other, so the more symmetric the thing you
+    // crowned, the fewer ways a field has of driving it at all.
+    assert.ok(wearRate(hi) <= wearRate(lo),
+      `${hi.hm} should be harder in the hand than ${lo.hm}`);
+  }
+
+  assert.equal(volley(kings[2]).length, 6, "a sixfold king throws six arms");
+  assert.ok(wearRate(kings[0]) > wearRate(kings[2]) * 2,
+    "and a 222 comes apart in your hand far faster than a 622");
 });
 
 test("the worlds it makes are not the same world", () => {

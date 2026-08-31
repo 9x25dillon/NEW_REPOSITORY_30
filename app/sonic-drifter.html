@@ -1346,27 +1346,23 @@
     }
     return { x: hx / r * b.speed, y: hy / r * b.speed };
   }
+  function capturedAt(w, x, y, p) {
+    if (localAmplitude(w, x, y) < HOLD_PRESSURE) return false;
+    const nx = nearest(trapPositions(axisX(w), p, ARENA_W), x);
+    const ny = nearest(trapPositions(axisY(w), p, ARENA_H), y);
+    if (nx === null || ny === null) return false;
+    return Math.hypot(nx - x, ny - y) < captureRadius(w.pitch) + p.radius * 0.5;
+  }
   function settle(run, dt) {
     const w = run.wave;
     const dead = [];
     for (const e of run.entities) {
-      const p = particleOf(e);
-      if (localAmplitude(w, e.x, e.y) < HOLD_PRESSURE) {
+      if (!capturedAt(w, e.x, e.y, particleOf(e))) {
         e.held = 0;
         continue;
       }
-      const nx = nearest(trapPositions(axisX(w), p, ARENA_W), e.x);
-      const ny = nearest(trapPositions(axisY(w), p, ARENA_H), e.y);
-      if (nx === null || ny === null) {
-        e.held = 0;
-        continue;
-      }
-      if (Math.hypot(nx - e.x, ny - e.y) < captureRadius(w.pitch) + p.radius * 0.5) {
-        e.held += dt;
-        if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
-      } else {
-        e.held = 0;
-      }
+      e.held += dt;
+      if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
     }
     for (const e of dead) kill(run, e);
   }
@@ -1595,6 +1591,15 @@
   var BOLT_SPEED = 24e-5;
   var BOLT_LIFE = 3.4;
   var VOLLEY_WIND = 0.55;
+  var WEAR_PER_COMPONENT = 2;
+  function wearRate(k) {
+    if (k.hm === "") return 0;
+    return WEAR_PER_COMPONENT * cellFor(k.hm).freedom;
+  }
+  function wearing(run) {
+    const k = run.throne;
+    return run.phase === "reign" && k.awake && k.hp > 0 && wearRate(k) > 0 && localAmplitude(run.wave, k.x, k.y) >= HOLD_PRESSURE;
+  }
   function reign(run, dt) {
     const k = run.throne;
     const winding = k.beat <= VOLLEY_WIND;
@@ -1611,6 +1616,14 @@
     }
     k.x = Math.max(3e-5, Math.min(ARENA_W - 3e-5, k.x + dx * dt));
     k.y = Math.max(3e-5, Math.min(ARENA_H - 3e-5, k.y + dy * dt));
+    if (wearing(run)) {
+      k.hp = Math.max(0, k.hp - wearRate(k) * dt);
+      if (run.rand() < dt * 6) run.events.push({ kind: "wearing", x: k.x, y: k.y });
+      if (k.hp <= 0) {
+        birth(run);
+        return;
+      }
+    }
     if (run.structures.length > 0 && run.rand() < dt * 0.075) {
       let victim = run.structures[0];
       let vr = Infinity;
@@ -2036,6 +2049,11 @@
       title: "IT SHARES YOUR SIGN",
       body: "BOTH LATTICES ARE ONE FIELD A QUARTER WAVELENGTH APART, AND YOUR OWN CONTRAST PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS."
     },
+    hand: {
+      id: "hand",
+      title: "EVERYTHING HERE DIES BY BEING HELD",
+      body: "IT IS TOO BIG FOR ONE TRAP - THIRTY-EIGHT MICRONS ACROSS AGAINST A FORTY-FOUR MICRON LATTICE - SO NO WELL CLOSES ON IT. BUT THE DRIVE IS STILL WORKING ON IT, AND IT COMES APART. SLOWLY, AND ONLY IF YOU LEFT IT A HANDLE TO BE HELD BY: FEED THE THRONE A 432 AND THIS DOES NOTHING AT ALL."
+    },
     aim: {
       id: "aim",
       title: "YOU CANNOT AIM A BUILDING",
@@ -2399,6 +2417,10 @@
             this.flashRed = false;
             this.shake = 14;
             this.sfx.capture(5);
+            break;
+          case "wearing":
+            this.teach("hand");
+            this.burst(ev.x, ev.y, 2, "255,255,255");
             break;
           case "coil":
             this.sfx.coil();
@@ -2817,6 +2839,19 @@
       g2.beginPath();
       g2.arc(x, y, r * 4, 0, Math.PI * 2);
       g2.fill();
+      if (wearing(this.run)) {
+        const beat = 0.6 + 0.4 * Math.sin(this.t * 22);
+        g2.strokeStyle = `rgba(255,255,255,${(0.3 * beat).toFixed(3)})`;
+        g2.lineWidth = 3;
+        g2.beginPath();
+        g2.arc(x, y, r + 4, 0, Math.PI * 2);
+        g2.stroke();
+        g2.fillStyle = `rgba(255,255,255,${(0.5 * beat).toFixed(2)})`;
+        g2.font = `700 8px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillText("YOUR HAND IS ON IT", x, y + r + 16);
+        g2.textAlign = "left";
+      }
       const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
       if (wind > 0) {
         const arms = volley(k);

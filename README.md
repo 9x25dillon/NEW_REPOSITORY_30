@@ -480,6 +480,25 @@ its own lobes and is consumed. **Its body is the next world:** the medium, the
 lattice pitch, what is dissolved in the water and what lives in it are all
 derived from what you fed it.
 
+**Nothing is unwinnable while you are alive.** Discharging a building was the
+only thing that took a king's health, and a king *eats buildings* — so a player
+who ran out was not in a hard fight, they were in an unwinnable one. Everything
+here dies by being held, and the sovereign was outside that rule only because it
+is not an `Entity`. It is not held the way a vesicle is, though, and the reason
+is its size: it is 38 µm across against a 44 µm node-to-antinode distance, so it
+spans very nearly the whole lattice and no single well can close on it. Put it
+through the ordinary capture test and it is caught 3% of the time by a player
+doing everything right, which is a coincidence, not a mechanic. What can be said
+about a body bigger than the field's own structure is only that the drive is
+working on it, and that is what is asked.
+
+**How fast is Neumann's principle again.** Two damage a second for every
+independent piezoelectric component the king's own group is allowed: a 222 wears
+at six, a 622 at two, and a 432 at nothing at all. So the richer the thing you
+crowned, the less your bare hand can do to it, and `anchored` stops being a
+special case — it is that formula at zero. Nothing was balanced to make either
+of those true.
+
 **The reign has one verb and it is not the trigger.** A structure fires along
 its own group's directions and they were fixed when you placed it — a 222 shows
 two lobes and nothing will ever change that, so whether a building bears on the
@@ -534,9 +553,22 @@ the corpse. Writing it that way found things no unit test would have:
   0.0005, one per cent of normal speed, and grip multiplies zero. Every
   reachable world is now checked against that.
 
-The same test also checks the one decision the game is about, by playing it: the
-same policy over six seeds closes the cycle three times on one helping and never
-on two. **A richer king really is a harder fight.**
+The same test used to check the game's central trade by *playing* it — one
+helping against two, same policy, same seeds — and reported a gap. That gap was
+noise. Measured properly, as reigns won out of reigns entered over ten seeds,
+one helping wins 58% and two wins 60%, and **there is no gradient there to
+find.** The reason is worth keeping: the first water's pool is a dimer and a
+girdle, a dimer plus a girdle is a 222 and nothing else, so at the first aeon a
+second helping can only be *more of the same cell*. It buys mass, mass buys
+health and a slightly quicker beat, and that is not much.
+
+What the trade actually turns on is **symmetry, not quantity**, and every part
+of that is exact rather than statistical: a more symmetric king has more health,
+a faster cadence, more arms, and — because order and freedom pull against each
+other — fewer ways for a field to drive it, so it comes apart in your hand more
+slowly. That is asserted directly. Whether it beats a particular player is not
+something ten seeds of one bot can settle, and the test no longer pretends
+otherwise.
 
 The physics is not pasted into the page. `app/build-drifter.mjs` bundles
 `app/drifter.ts → game/pilot.ts → game/wave.ts → src/fields.ts → src/gorkov.ts`,
@@ -584,7 +616,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                202 tests: what the modules above are actually claiming
+test/                205 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
