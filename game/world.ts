@@ -50,6 +50,9 @@ export interface Structure {
    * can do and a heap of separate buildings cannot.
    */
   serves: number[];
+  /** Progress toward its body's next step, m. Kept on the cell because a body
+   *  is recomputed from scratch whenever anything is built. */
+  gait: number;
   id: number;
   /** The group of the cell that was placed. */
   hm: string;
@@ -77,7 +80,7 @@ export function structureFrom(
   id: number, hm: string, x: number, y: number, layer = 0,
 ): Structure {
   return {
-    id, hm, x, y, layer, serves: [layer],
+    id, hm, x, y, layer, serves: [layer], gait: 0,
     lobes: lobes(hm),
     reach: reachOf(hm),
     strength: pointGroup(hm).order,

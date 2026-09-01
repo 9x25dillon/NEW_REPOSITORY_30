@@ -31,7 +31,7 @@ import {
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
 import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
-import { autonomous, limbsOf, snap, symbolOf } from "../game/body.js";
+import { autonomous, limbsOf, snap, symbolOf, walkSpeed } from "../game/body.js";
 import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
@@ -79,6 +79,13 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME "
       + "LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING "
       + "A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS.",
+  },
+  walk: {
+    id: "walk", title: "IT IS FOLLOWING YOU",
+    body: "A SWEPT LATTICE CARRIES WHAT IS SITTING IN IT, BUT ONLY WHILE THE TRAP CAN OUT-PULL "
+      + "THE DRAG - PAST THAT A CELL FALLS OUT OF ITS NODE AND IS LEFT BEHIND. SO THE BODY "
+      + "WALKS AT THE PACE OF ITS FURTHEST CELL, ALONG THE DIRECTIONS ITS OWN GROUP HAS, AND "
+      + "ONLY WHILE YOU ARE NEAR ENOUGH FOR THE DRIVE TO REACH ALL OF IT.",
   },
   bound: {
     id: "bound", title: "IT IS HELD BY A DISPERSION RELATION",
@@ -655,6 +662,11 @@ export class Game {
           this.sfx.capture(6);
           this.say("IT IS OUT");
           break;
+        case "step":
+          this.teach("walk");
+          this.sfx.tick();
+          this.ring(ev.x, ev.y, 4, 26, 0.28, JADE);
+          break;
         case "coil":
           this.sfx.coil();
           this.teach("coil");
@@ -1021,6 +1033,7 @@ export class Game {
 
       // What it is, in the vocabulary the rest of the repository speaks.
       const sym = symbolOf(body);
+      const run = this.run;
       if (sym) {
         g.textAlign = "center";
         g.font = `700 11px ${MONO}`;
@@ -1034,7 +1047,7 @@ export class Game {
           `${sym.pointGroup}  ·  ${body.cells.length} CELLS`
           + `${limbs.length ? `  ·  ${limbs.length - legs} LIMBS` : ""}`
           + `${legs ? `  ·  ${legs} LEGS` : ""}`
-          + `${live ? "  ·  IT WORKS ALONE" : ""}`,
+          + `${live ? `  ·  ${walkSpeed(body, run.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
           px(body.x), px(body.y - body.extent) - 5);
         g.textAlign = "left";
       }

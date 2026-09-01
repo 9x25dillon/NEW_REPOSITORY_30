@@ -478,6 +478,36 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### And it walks
+
+`src/trajectory.ts` has said this since it was written and nothing had ever
+asked: a swept standing wave carries a body along with it only while the trap
+can out-pull the drag, and **past that "the cell falls out of its node and is
+left behind — the standard failure of an acoustic conveyor, and it fails
+silently, looking like a cell that simply did not move."**
+
+So an organism walks by having the lattice swept under it, one site at a time,
+and `maxSweepSpeed` is the pace. A sweep is not a grip — sliding the lattice is
+a phase ramp across the whole device, not a concentrated spot — but the drive is
+still apodised, so a cell far from you feels very little of it:
+
+```
+a cell under your hand    7500-15000 um/s     instant
+200 um out                  168- 335 um/s     a walk
+280 um out                    4-   9 um/s     a crawl
+380 um out                         0          left behind
+```
+
+**The slowest cell sets the pace**, because a body that leaves part of itself
+behind is not walking, it is coming apart. That single rule gives the whole
+behaviour without anything being tuned: an organism only moves while you are
+near enough for the drive to reach all of it, a sprawling one is slower than a
+compact one, and a step where *any* cell has nowhere to land — the arena edge,
+the throne, another body — is refused entirely rather than half taken.
+
+It walks along the directions its own group has, like everything else here. A
+222 body walks east and west. A 622 walks six ways.
+
 ### Appendages, and what a leg is for
 
 A body can only grow where its own symmetry has a direction. `shape.lobes()` is
@@ -793,7 +823,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                247 tests: what the modules above are actually claiming
+test/                252 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

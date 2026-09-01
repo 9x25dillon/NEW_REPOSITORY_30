@@ -25,7 +25,9 @@
 // headlessly and the tests can tell whether any of this is actually a game.
 
 import { beast } from "./beasts.js";
-import { type Body, bodiesOf, reaches, snap } from "./body.js";
+import {
+  type Body, autonomous, bodiesOf, gaitDirection, reaches, snap, walkSpeed,
+} from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
@@ -173,6 +175,7 @@ export type Ev =
   | { kind: "birth"; aeon: number; name: string }
   | { kind: "tuned"; caught: boolean }
   | { kind: "retune"; mode: number; layer: number }
+  | { kind: "step"; x: number; y: number; cells: number }
   | { kind: "freed"; x: number; y: number }
   | { kind: "dash"; x: number; y: number }
   | { kind: "coil"; x: number; y: number; species: string }
@@ -402,6 +405,7 @@ export function step(run: Run, input: Input, dt: number): void {
   if (motifs < run.world.density) run.entities.push(newMotif(run));
 
   release(run, dt);
+  walkBodies(run, dt);
   drift(run, dt);
   settle(run, dt);
   mergePass(run, dt);
@@ -715,6 +719,79 @@ function crystallise(run: Run): void {
  */
 export function latticePitch(run: Run): number {
   return run.spacing ? (run.spacing.lo + run.spacing.hi) / 2 : run.world.pitch * 1.3;
+}
+
+/**
+ * Recompute what is joined to what, without asking about dispersion.
+ *
+ * A body that WALKS keeps its spacing, so its band structure is unchanged and
+ * there is no reason to spend sixty milliseconds finding that out again. Only a
+ * change of shape needs the full retune.
+ */
+export function reshape(run: Run): void {
+  const pitch = latticePitch(run);
+  run.bodies = bodiesOf(run.structures, pitch);
+  for (const b of run.bodies) {
+    const zs = reaches(b, pitch);
+    for (const c of b.cells) c.serves = zs;
+  }
+}
+
+/**
+ * Organisms walking.
+ *
+ * A body big enough to work on its own follows you, one lattice site at a time,
+ * along a direction its own symmetry has. It moves by having the lattice swept
+ * under it, so its pace is set by trajectory.maxSweepSpeed at the drive its
+ * furthest cell can actually feel — which means it only walks while you are
+ * standing among it, and a big organism is slower than a small one because the
+ * far end of a big one is always in weak field.
+ *
+ * A step is refused rather than half-taken. Every cell must have somewhere to
+ * land: inside the arena, not on another body, not on the throne. A body that
+ * cannot put all of itself down does not move, because a body that leaves part
+ * of itself behind is not walking.
+ */
+function walkBodies(run: Run, dt: number): void {
+  const pitch = latticePitch(run);
+  let moved = false;
+
+  for (const body of run.bodies) {
+    if (!autonomous(body)) continue;
+
+    const v = walkSpeed(body, run.wave);
+    if (!(v > 0)) continue;
+
+    const lead = body.cells[0];
+    lead.gait += v * dt;
+    if (lead.gait < pitch) continue;
+    lead.gait = 0;
+
+    const dir = gaitDirection(body, run.you.x, run.you.y);
+    if (!dir) continue;
+    if (Math.hypot(run.you.x - body.x, run.you.y - body.y) < pitch) continue;
+
+    const dx = Math.round(dir[0]) * pitch;
+    const dy = Math.round(dir[1]) * pitch;
+    if (dx === 0 && dy === 0) continue;
+
+    const mine = new Set(body.cells);
+    const ok = body.cells.every((c) => {
+      const nx = c.x + dx, ny = c.y + dy;
+      if (nx < 0 || nx > ARENA_W || ny < 0 || ny > ARENA_H) return false;
+      if (onThrone(run, nx, ny)) return false;
+      return !run.structures.some(
+        (o) => !mine.has(o) && o.layer === c.layer
+          && Math.hypot(o.x - nx, o.y - ny) < pitch * 0.5);
+    });
+    if (!ok) continue;
+
+    for (const c of body.cells) { c.x += dx; c.y += dy; }
+    run.events.push({ kind: "step", x: body.x + dx, y: body.y + dy, cells: body.cells.length });
+    moved = true;
+  }
+
+  if (moved) reshape(run);
 }
 
 export function retune(run: Run): void {

@@ -28,8 +28,12 @@
 // were only ever two problems because the placements were freehand.
 
 import { type Structure } from "./world.js";
+import { SKELETON } from "./bound.js";
 import { cellFor } from "./lattice.js";
 import { lobes } from "./shape.js";
+import { type Wave, axisX } from "./wave.js";
+import { type Particle } from "../src/gorkov.js";
+import { maxSweepSpeed } from "../src/trajectory.js";
 import { pointGroup } from "../src/pointgroups.js";
 import { type SpaceGroup, groupsOfPointGroup } from "../src/sohncke.js";
 
@@ -228,6 +232,94 @@ export function reaches(body: Body, pitch: number): number[] {
   const out = new Set(body.cells.map((c) => c.layer));
   for (const l of limbsOf(body, pitch)) for (const z of l.layers) out.add(z);
   return [...out].sort();
+}
+
+/**
+ * The body of one cell, as the water sees it: a silica frustule.
+ *
+ * What the drag acts on when the lattice is swept, which is a different
+ * question from what its symmetry is.
+ */
+export function cellParticle(s: Structure): Particle {
+  return { radius: s.reach * 0.5, ...SKELETON };
+}
+
+/** You do not sweep at the slipping point. Half of it is a walk. */
+export const GAIT_MARGIN = 0.5;
+
+/**
+ * The aperture a SWEEP is driven through, in trap pitches.
+ *
+ * A sweep is not a grip. Gripping concentrates the drive into one trap and is
+ * apodised hard to do it; sliding the lattice is a phase ramp across the whole
+ * device, and there is no reason for it to be narrow. Computed at the hand's
+ * own focus, a body could only walk while every cell of it sat inside a hundred
+ * microns of the player — so leading one from in front, which is the only way
+ * to lead anything, put its far end in dead field and froze it.
+ *
+ * Wide enough to walk an organism you are standing in front of, and still not
+ * infinite: a sprawling thing several hundred microns across genuinely does
+ * have an end the drive cannot reach, and that end is why it stays where it is.
+ */
+export const WALK_FOCUS = 3.6;
+
+/**
+ * How fast the whole body can be walked, m/s.
+ *
+ * A swept lattice carries a cell only while the trap can out-pull the drag on
+ * it — past that "the cell falls out of its node and is left behind", which
+ * trajectory.maxSweepSpeed has said since it was written and nothing has ever
+ * asked. Sweeping is a device-wide act, but the drive is apodised, so a cell far
+ * from your hand feels very little of it and can barely be dragged at all:
+ *
+ *     under your hand      7500 um/s        instant
+ *     200 um out            168 um/s        a walk
+ *     280 um out              4 um/s        a crawl
+ *     380 um out                0           left behind
+ *
+ * THE SLOWEST CELL SETS THE PACE, because a body that leaves part of itself
+ * behind is not walking, it is coming apart. So an organism only moves while
+ * you are standing among it, and a big one is slower than a small one — not
+ * because size was given a penalty, but because the far end of a big one is
+ * always in weak field.
+ */
+export function walkSpeed(
+  body: Body, wave: Wave,
+): number {
+  const focus = wave.pitch * WALK_FOCUS;
+  let slowest = Infinity;
+  for (const c of body.cells) {
+    const dx = c.x - wave.aimX;
+    const dy = c.y - wave.aimY;
+    const amp = wave.amplitude * Math.exp(-(dx * dx + dy * dy) / (2 * focus * focus));
+    if (amp <= 0) return 0;
+    const v = maxSweepSpeed(axisX(wave, amp), cellParticle(c));
+    if (v < slowest) slowest = v;
+  }
+  return Number.isFinite(slowest) ? slowest * GAIT_MARGIN : 0;
+}
+
+/**
+ * Which way a body may step.
+ *
+ * Along the directions its own symmetry has, and no others — the same rule that
+ * decides where it may grow a limb and where a building may fire. A 222 walks
+ * east and west. Nothing walks diagonally unless its group says diagonals
+ * exist.
+ */
+export function gaitDirection(body: Body, tx: number, ty: number): [number, number] | null {
+  const dx = tx - body.x;
+  const dy = ty - body.y;
+  const r = Math.hypot(dx, dy);
+  if (r < 1e-9) return null;
+
+  let best: [number, number] | null = null;
+  let bestDot = -Infinity;
+  for (const [lx, ly] of lobes(body.hm)) {
+    const dot = (lx * dx + ly * dy) / r;
+    if (dot > bestDot) { bestDot = dot; best = [lx, ly]; }
+  }
+  return bestDot > 0.2 ? best : null;
 }
 
 /** The largest thing you have made, or nothing. */
