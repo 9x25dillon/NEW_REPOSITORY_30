@@ -20,8 +20,8 @@ import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
-  beast, crown, dischargesToKill, enterWorld, feedThrone, particleOf, placeCell,
-  readoutFor,
+  beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
+  particleOf, placeCell, readoutFor,
   startRun, step,
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
@@ -31,6 +31,7 @@ import {
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
 import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
+import { autonomous, snap, symbolOf } from "../game/body.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
@@ -366,7 +367,8 @@ export class Game {
     const run = this.run;
     if (!run.cells[i]) return;
     const r = placeCell(run, i);
-    if (r === "too-close") this.say("TOO CLOSE TO SOMETHING ELSE");
+    if (r === "too-close") this.say("NOT THERE");
+    if (r === "occupied") this.say("THAT SITE IS TAKEN");
     if (r === "wrong-phase") this.say("NOT NOW");
   }
 
@@ -641,6 +643,8 @@ export class Game {
     }
     this.drawField();
     this.drawLattice();
+    this.drawSites();
+    this.drawBodies();
     this.drawStructures();
     this.drawBound();
     this.drawThrone();
@@ -804,6 +808,106 @@ export class Game {
     g.textAlign = "center";
     g.fillText("PUT THE NEXT ONE HERE", hx, hy - px(band.hi) - 5);
     g.textAlign = "left";
+  }
+
+  /**
+   * The lattice, and the thing you are making on it.
+   *
+   * A crystal is a lattice plus a motif, so the lattice is drawn: faint sites
+   * around you, and a bright one where the next cell will actually land. It
+   * used to go down wherever you were standing, which is why what people built
+   * was a heap.
+   */
+  private drawSites(): void {
+    const run = this.run;
+    if (run.cells.length === 0 || run.phase === "dead") return;
+    const g = this.ctx;
+    const pitch = latticePitch(run);
+    const p = px(pitch);
+    const here = snap(run.you.x, run.you.y, pitch);
+
+    g.fillStyle = "rgba(120,225,245,0.13)";
+    for (let i = -2; i <= 2; i++) {
+      for (let j = -2; j <= 2; j++) {
+        const sx = px(here.x + i * pitch), sy = px(here.y + j * pitch);
+        if (sx < 0 || sy < 0 || sx > VIEW_W || sy > VIEW_H) continue;
+        g.beginPath(); g.arc(sx, sy, 1.6, 0, Math.PI * 2); g.fill();
+      }
+    }
+
+    // where it lands
+    const taken = run.structures.some(
+      (s) => Math.hypot(s.x - here.x, s.y - here.y) < pitch * 0.5);
+    const hx = px(here.x), hy = px(here.y);
+    g.strokeStyle = taken ? "rgba(255,80,110,0.6)" : `rgba(${JADE},0.75)`;
+    g.lineWidth = 1.4;
+    g.setLineDash([4, 4]);
+    g.beginPath(); g.arc(hx, hy, p * 0.34, 0, Math.PI * 2); g.stroke();
+    g.setLineDash([]);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Array<[number, number]>) {
+      g.beginPath();
+      g.moveTo(hx + dx * p * 0.34, hy + dy * p * 0.34);
+      g.lineTo(hx + dx * p * 0.44, hy + dy * p * 0.44);
+      g.stroke();
+    }
+  }
+
+  /**
+   * A body: the cells that are joined, drawn as one thing.
+   *
+   * Two passes of the same path — a wide soft stroke that makes the silhouette
+   * and a thin bright one that edges it — so adjacent cells read as connected
+   * tissue rather than as separate objects that happen to be near each other.
+   */
+  private drawBodies(): void {
+    const run = this.run;
+    if (run.bodies.length === 0) return;
+    const g = this.ctx;
+    const pitch = latticePitch(run);
+    const near = pitch * 1.5;
+
+    for (const body of run.bodies) {
+      if (body.cells.length < 2) continue;
+      const live = autonomous(body);
+
+      const path = new Path2D();
+      for (const a of body.cells) {
+        path.addPath(new Path2D(`M ${px(a.x)} ${px(a.y)} l 0.01 0`));
+        for (const b of body.cells) {
+          if (b === a) continue;
+          if (Math.hypot(b.x - a.x, b.y - a.y) > near) continue;
+          const seg = new Path2D();
+          seg.moveTo(px(a.x), px(a.y));
+          seg.lineTo(px(b.x), px(b.y));
+          path.addPath(seg);
+        }
+      }
+
+      g.lineCap = "round";
+      g.lineJoin = "round";
+      g.strokeStyle = live ? `rgba(${JADE},0.16)` : "rgba(120,225,245,0.09)";
+      g.lineWidth = px(pitch) * 0.62;
+      g.stroke(path);
+      g.strokeStyle = live ? `rgba(${JADE},0.5)` : "rgba(120,225,245,0.26)";
+      g.lineWidth = 1.6;
+      g.stroke(path);
+      g.lineCap = "butt";
+
+      // What it is, in the vocabulary the rest of the repository speaks.
+      const sym = symbolOf(body);
+      if (sym) {
+        g.textAlign = "center";
+        g.font = `700 11px ${MONO}`;
+        g.fillStyle = live ? `rgb(${JADE})` : "rgba(160,220,240,0.7)";
+        g.fillText(sym.symbol, px(body.x), px(body.y - body.extent) - 16);
+        g.font = `600 8px ${MONO}`;
+        g.fillStyle = FAINT;
+        g.fillText(
+          `${sym.pointGroup}  ·  ${body.cells.length} CELLS${live ? "  ·  IT WORKS ALONE" : ""}`,
+          px(body.x), px(body.y - body.extent) - 5);
+        g.textAlign = "left";
+      }
+    }
   }
 
   private drawStructures(): void {
@@ -1626,7 +1730,14 @@ export class Game {
     const rows: Array<[string, string]> = [
       ["LASTED", `${run.t.toFixed(0)} SECONDS  ·  AEON ${run.world.aeon}`],
       ["GATHERED", `${n("merge")} MERGES INTO ${run.built} CELLS`],
-      ["BUILT", `${n("place")} STRUCTURES, ${run.structures.length} STILL STANDING`],
+      ["BUILT", `${n("place")} CELLS PLACED, ${run.structures.length} STANDING`],
+      ["YOUR BODY", (() => {
+        const b = run.bodies[0];
+        if (!b) return "NEVER JOINED ANYTHING UP";
+        const sym = symbolOf(b);
+        return `${b.cells.length} CELLS${sym ? `  ·  ${sym.symbol}` : ""}`
+          + `${autonomous(b) ? "  ·  IT WORKED ALONE" : ""}`;
+      })()],
       ["THE BOUND FIELD", run.bound.free ? "FREED" : n("tuned") > 0 ? "CAUGHT, THEN LOST" : "NEVER CAUGHT"],
       ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, ${n("hit:touched")} DRIFTED INTO`],
       ["SCORE", String(run.score)],
@@ -1755,6 +1866,9 @@ export class Game {
     if (run.structures.length < 2 && n("place") < 2) {
       return "TWO BUILDINGS IS THE FEWEST THAT IS A CRYSTAL. THE FIELD NEEDS ONE";
     }
+    if (run.bodies.length > 1 && !run.bodies.some((b) => b.cells.length >= 3)) {
+      return "YOUR CELLS ARE SCATTERED. PUT THEM ON ADJACENT SITES AND THEY BECOME ONE";
+    }
     if (!run.bound.free && n("tuned") === 0) {
       return `THE GAP NEVER CAUGHT IT - ${advice(run.crystal, run.gap, run.bound.omega)}`;
     }
@@ -1794,6 +1908,11 @@ export class Game {
       `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
       `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}`
         + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`,
+      `bodies: ${run.bodies.length}`
+        + `${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells`
+          + ` ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}`
+          + `${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}`
+        + `  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
       `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}`
         + `  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}`
         + `  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,

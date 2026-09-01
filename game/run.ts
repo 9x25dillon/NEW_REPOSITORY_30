@@ -25,6 +25,7 @@
 // headlessly and the tests can tell whether any of this is actually a game.
 
 import { beast } from "./beasts.js";
+import { type Body, bodiesOf, snap } from "./body.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
 } from "./bound.js";
@@ -195,6 +196,9 @@ export interface Run {
    * costs about half a second and the answer cannot change inside a world.
    */
   spacing: { lo: number; hi: number } | null;
+  /** What your buildings have joined into. Recomputed with the dispersion,
+   *  because they are the same event: a body IS the crystal. */
+  bodies: Body[];
   phase: Phase;
   entities: Entity[];
   structures: Structure[];
@@ -227,6 +231,7 @@ export function startRun(seed = 1): Run {
     crystal: null,
     gap: null,
     spacing: null,
+    bodies: [],
     phase: "settle",
     entities: [],
     structures: [],
@@ -686,10 +691,23 @@ function crystallise(run: Run): void {
  * plane-wave expansion is sixty milliseconds, which is nothing on the frame you
  * place a building and impossible sixty times a second.
  */
+/**
+ * The lattice everything you build sits on, m.
+ *
+ * It is the spacing this water's bound field needs, so a properly made body and
+ * a freed field stop being two problems. They were only ever two because the
+ * placements were freehand and the player had to hit a twenty-micron band by
+ * hand, twenty-six times, while being hunted.
+ */
+export function latticePitch(run: Run): number {
+  return run.spacing ? (run.spacing.lo + run.spacing.hi) / 2 : run.world.pitch * 1.3;
+}
+
 export function retune(run: Run): void {
   const was = catches(run.gap, run.bound.omega);
   run.crystal = crystalOf(run.structures, run.world.medium);
   run.gap = gapOf(run.crystal);
+  run.bodies = bodiesOf(run.structures, latticePitch(run));
   const now = catches(run.gap, run.bound.omega);
   if (now !== was) run.events.push({ kind: "tuned", caught: now });
 }
@@ -700,7 +718,7 @@ export function onThrone(run: Run, x: number, y: number): boolean {
   return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
 }
 
-export type PlaceResult = "placed" | "none" | "too-close" | "wrong-phase";
+export type PlaceResult = "placed" | "none" | "too-close" | "occupied" | "wrong-phase";
 export type FeedResult = "fed" | "none" | "off-throne" | "wrong-phase";
 
 /**
@@ -753,10 +771,15 @@ export function placeCell(run: Run, index: number): PlaceResult {
   if (!c) return "none";
 
   if (onThrone(run, run.you.x, run.you.y)) return "too-close";
+
+  // ON THE LATTICE, not where you were standing. A crystal is a lattice and a
+  // motif; freehand placements are a heap.
+  const at = snap(run.you.x, run.you.y, latticePitch(run));
+  if (at.x < 0 || at.x > ARENA_W || at.y < 0 || at.y > ARENA_H) return "too-close";
   for (const s of run.structures) {
-    if (Math.hypot(s.x - run.you.x, s.y - run.you.y) < s.reach * 0.9) return "too-close";
+    if (Math.hypot(s.x - at.x, s.y - at.y) < latticePitch(run) * 0.5) return "occupied";
   }
-  const s = structureFrom(run.nextId++, c.group.hm, run.you.x, run.you.y);
+  const s = structureFrom(run.nextId++, c.group.hm, at.x, at.y);
   run.structures.push(s);
   run.cells.splice(index, 1);
   run.score += s.strength * 2;

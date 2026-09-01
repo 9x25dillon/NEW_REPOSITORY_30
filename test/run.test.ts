@@ -5,12 +5,13 @@ import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
-  placeCell, readoutFor, wearRate,
+  latticePitch, placeCell, readoutFor, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
 import { assemble, cellFor, motif } from "../game/lattice.js";
 import { lobes } from "../game/shape.js";
+import { snap } from "../game/body.js";
 import { cadence, emptyThrone, feed, structureFrom, volley } from "../game/world.js";
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
 
@@ -261,7 +262,11 @@ test("a structure gathers and merges without you touching it", () => {
   assert.deepEqual(merged[0].parts, ["a2", "a2"]);
 });
 
-test("placing puts a cell on the ground and it stays", () => {
+test("placing puts a cell on a lattice site and it stays", () => {
+  // It lands on the lattice, not where you were standing. A crystal is a
+  // lattice plus a motif; freehand placements are a heap, and nothing can be
+  // asked of a heap — not which cells are joined, not what symmetry it has, and
+  // not what its band structure does, which the bound field depends on.
   const run = startRun(7);
   grant(run, ["222"]);
   stand(run, 200e-6, 200e-6);
@@ -270,8 +275,20 @@ test("placing puts a cell on the ground and it stays", () => {
   assert.equal(run.structures.length, 1);
   assert.equal(run.structures[0].hm, "222");
 
+  const pitch = latticePitch(run);
+  const site = snap(200e-6, 200e-6, pitch);
+  assert.ok(Math.abs(run.structures[0].x - site.x) < 1e-9, "on the site, not on you");
+  assert.ok(Math.abs(run.structures[0].y - site.y) < 1e-9);
+
+  // The same site cannot take two.
   grant(run, ["222"]);
-  assert.equal(placeCell(run, 0), "too-close", "buildings do not overlap");
+  assert.equal(placeCell(run, 0), "occupied");
+
+  // One step over, it can — and the two are one body.
+  stand(run, site.x + pitch, site.y);
+  assert.equal(placeCell(run, 0), "placed");
+  assert.equal(run.bodies.length, 1, "adjacent cells are one thing");
+  assert.equal(run.bodies[0].cells.length, 2);
 });
 
 test("feeding the throne is its own verb, and cannot happen by accident", () => {

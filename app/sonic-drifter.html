@@ -178,295 +178,6 @@
     return b;
   }
 
-  // src/linalg.ts
-  function zeros(n, m = n) {
-    return Array.from({ length: n }, () => new Array(m).fill(0));
-  }
-  function identity(n) {
-    const I = zeros(n);
-    for (let i = 0; i < n; i++) I[i][i] = 1;
-    return I;
-  }
-  function symmetricEigen(input, maxSweeps = 100) {
-    const n = input.length;
-    const a = input.map((r) => [...r]);
-    const v = identity(n);
-    let scale = 0;
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) scale += a[i][j] * a[i][j];
-    scale = Math.sqrt(scale);
-    const tol = (scale || 1) * 1e-14;
-    let sweeps = 0;
-    for (; sweeps < maxSweeps; sweeps++) {
-      let off = 0;
-      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i][j] * a[i][j];
-      if (Math.sqrt(off) <= tol) break;
-      for (let p = 0; p < n - 1; p++) {
-        for (let q = p + 1; q < n; q++) {
-          if (Math.abs(a[p][q]) <= tol / n) continue;
-          const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
-          const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
-          const c = 1 / Math.sqrt(t * t + 1);
-          const s = t * c;
-          for (let k = 0; k < n; k++) {
-            const akp = a[k][p];
-            const akq = a[k][q];
-            a[k][p] = c * akp - s * akq;
-            a[k][q] = s * akp + c * akq;
-          }
-          for (let k = 0; k < n; k++) {
-            const apk = a[p][k];
-            const aqk = a[q][k];
-            a[p][k] = c * apk - s * aqk;
-            a[q][k] = s * apk + c * aqk;
-          }
-          for (let k = 0; k < n; k++) {
-            const vkp = v[k][p];
-            const vkq = v[k][q];
-            v[k][p] = c * vkp - s * vkq;
-            v[k][q] = s * vkp + c * vkq;
-          }
-        }
-      }
-    }
-    const pairs = Array.from({ length: n }, (_, i) => ({ value: a[i][i], col: i })).sort((x, y) => x.value - y.value);
-    const values = pairs.map((p) => p.value);
-    const vectors = zeros(n);
-    pairs.forEach((p, k) => {
-      for (let i = 0; i < n; i++) vectors[i][k] = v[i][p.col];
-    });
-    return { values, vectors, sweeps };
-  }
-  function cholesky(B2) {
-    const n = B2.length;
-    const L = zeros(n);
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j <= i; j++) {
-        let sum = B2[i][j];
-        for (let k = 0; k < j; k++) sum -= L[i][k] * L[j][k];
-        if (i === j) {
-          if (sum <= 0) {
-            throw new Error(
-              `matrix is not positive definite at row ${i} (pivot ${sum}) \u2014 the plane-wave truncation may have produced a negative effective density`
-            );
-          }
-          L[i][i] = Math.sqrt(sum);
-        } else {
-          L[i][j] = sum / L[j][j];
-        }
-      }
-    }
-    return L;
-  }
-  function forwardSolve(L, b) {
-    const n = L.length;
-    const y = new Array(n).fill(0);
-    for (let i = 0; i < n; i++) {
-      let s = b[i];
-      for (let k = 0; k < i; k++) s -= L[i][k] * y[k];
-      y[i] = s / L[i][i];
-    }
-    return y;
-  }
-  function generalizedSymmetricEigen(A2, B2) {
-    const n = A2.length;
-    const L = cholesky(B2);
-    const Y2 = zeros(n);
-    for (let c = 0; c < n; c++) {
-      const col = forwardSolve(L, A2.map((r) => r[c]));
-      for (let i = 0; i < n; i++) Y2[i][c] = col[i];
-    }
-    const C = zeros(n);
-    for (let c = 0; c < n; c++) {
-      const col = forwardSolve(L, Y2[c]);
-      for (let i = 0; i < n; i++) C[i][c] = col[i];
-    }
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const m = (C[i][j] + C[j][i]) / 2;
-        C[i][j] = m;
-        C[j][i] = m;
-      }
-    }
-    const reduced = symmetricEigen(C);
-    const vectors = zeros(n);
-    for (let k = 0; k < n; k++) {
-      const y = reduced.vectors.map((r) => r[k]);
-      const x = backSolveTranspose(L, y);
-      let norm = 0;
-      for (const v of x) norm += v * v;
-      norm = Math.sqrt(norm) || 1;
-      for (let i = 0; i < n; i++) vectors[i][k] = x[i] / norm;
-    }
-    return { values: reduced.values, vectors, sweeps: reduced.sweeps };
-  }
-  function backSolveTranspose(L, y) {
-    const n = L.length;
-    const x = new Array(n).fill(0);
-    for (let i = n - 1; i >= 0; i--) {
-      let s = y[i];
-      for (let k = i + 1; k < n; k++) s -= L[k][i] * x[k];
-      x[i] = s / L[i][i];
-    }
-    return x;
-  }
-
-  // src/bands.ts
-  function besselJ1(x) {
-    const ax = Math.abs(x);
-    let y;
-    if (ax < 3) {
-      const t2 = x / 3;
-      const t22 = t2 * t2;
-      y = x * (0.5 - 0.56249985 * t22 + 0.21093573 * t22 ** 2 - 0.03954289 * t22 ** 3 + 443319e-8 * t22 ** 4 - 31761e-8 * t22 ** 5 + 1109e-8 * t22 ** 6);
-      return y;
-    }
-    const t = 3 / ax;
-    const f12 = 0.79788456 + 156e-8 * t + 0.01659667 * t ** 2 + 17105e-8 * t ** 3 - 249511e-8 * t ** 4 + 113653e-8 * t ** 5 - 20033e-8 * t ** 6;
-    const th = ax - 2.35619449 + 0.12499612 * t + 565e-7 * t ** 2 - 637879e-8 * t ** 3 + 74348e-8 * t ** 4 + 79824e-8 * t ** 5 - 29166e-8 * t ** 6;
-    y = f12 * Math.cos(th) / Math.sqrt(ax);
-    return x < 0 ? -y : y;
-  }
-  function reciprocalVectors(a, order) {
-    const g2 = 2 * Math.PI / a;
-    const out = [];
-    for (let n = -order; n <= order; n++) {
-      for (let m = -order; m <= order; m++) out.push([n * g2, m * g2]);
-    }
-    return out;
-  }
-  function fourierCoefficient(crystal, inner, outer, gx, gy) {
-    const f = crystal.fill;
-    const delta = inner - outer;
-    const gMag = Math.hypot(gx, gy);
-    if (gMag < 1e-12) return outer + delta * f;
-    if (crystal.geometry === "circle") {
-      const R = Math.sqrt(f * crystal.a * crystal.a / Math.PI);
-      const u2 = gMag * R;
-      return delta * f * (2 * besselJ1(u2) / u2);
-    }
-    if (Math.abs(gy) > 1e-12) return 0;
-    const n = gx * crystal.a / (2 * Math.PI);
-    const u = Math.PI * n * f;
-    return delta * f * (Math.sin(u) / u);
-  }
-  function bandsAt(crystal, kx, ky, order = 3, count = 6) {
-    const Gs = reciprocalVectors(crystal.a, order);
-    const n = Gs.length;
-    const etaIn = 1 / crystal.inclusion.rho;
-    const etaOut = 1 / crystal.matrix.rho;
-    const kapIn = 1 / (crystal.inclusion.rho * crystal.inclusion.c ** 2);
-    const kapOut = 1 / (crystal.matrix.rho * crystal.matrix.c ** 2);
-    const A2 = zeros(n);
-    const B2 = zeros(n);
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        const dx = Gs[i][0] - Gs[j][0];
-        const dy = Gs[i][1] - Gs[j][1];
-        const dot = (kx + Gs[i][0]) * (kx + Gs[j][0]) + (ky + Gs[i][1]) * (ky + Gs[j][1]);
-        A2[i][j] = fourierCoefficient(crystal, etaIn, etaOut, dx, dy) * dot;
-        B2[i][j] = fourierCoefficient(crystal, kapIn, kapOut, dx, dy);
-      }
-    }
-    const { values } = generalizedSymmetricEigen(A2, B2);
-    return values.slice(0, count).map((v) => Math.sqrt(Math.max(v, 0)));
-  }
-  function completeGap(crystal, band, order = 3, samples = 12) {
-    const g2 = Math.PI / crystal.a;
-    let maxLower = -Infinity;
-    let minUpper = Infinity;
-    for (let i = 0; i <= samples; i++) {
-      for (let j = 0; j <= i; j++) {
-        const w = bandsAt(crystal, i / samples * g2, j / samples * g2, order, band + 2);
-        maxLower = Math.max(maxLower, w[band - 1]);
-        minUpper = Math.min(minUpper, w[band]);
-      }
-    }
-    return minUpper > maxLower ? { lo: maxLower, hi: minUpper } : null;
-  }
-
-  // game/bound.ts
-  var SKELETON = { rho: 2650, c: 5960 };
-  var SKELETON_REACH = 1.15;
-  var MAX_FILL = 0.62;
-  var GAP_ORDER = 2;
-  var GAP_SAMPLES = 4;
-  var RELEASE_TIME = 3;
-  function boundFrequency(pitch, medium) {
-    return 2 * Math.PI * medium.c / (2 * pitch);
-  }
-  function newBound(pitch, medium, x, y) {
-    return { omega: boundFrequency(pitch, medium), x, y, free: false, held: 0 };
-  }
-  function crystalOf(structures, medium) {
-    if (structures.length < 2) return null;
-    let total = 0;
-    let radius = 0;
-    for (const s of structures) {
-      let nearest2 = Infinity;
-      for (const t of structures) {
-        if (t === s) continue;
-        const d = Math.hypot(t.x - s.x, t.y - s.y);
-        if (d < nearest2) nearest2 = d;
-      }
-      total += nearest2;
-      radius += s.reach * SKELETON_REACH;
-    }
-    const a = total / structures.length;
-    const r = radius / structures.length;
-    if (!(a > 0)) return null;
-    return {
-      a,
-      geometry: "circle",
-      fill: Math.min(MAX_FILL, Math.PI * r * r / (a * a)),
-      inclusion: SKELETON,
-      matrix: medium
-    };
-  }
-  function gapOf(crystal) {
-    if (!crystal) return null;
-    try {
-      return completeGap(crystal, 1, GAP_ORDER, GAP_SAMPLES);
-    } catch {
-      return null;
-    }
-  }
-  function catches(gap, omega) {
-    return gap !== null && omega > gap.lo && omega < gap.hi;
-  }
-  function detune(gap, omega) {
-    if (!gap) return 1;
-    if (omega > gap.lo && omega < gap.hi) return 0;
-    const edge2 = omega <= gap.lo ? gap.lo : gap.hi;
-    return Math.min(1, Math.abs(omega - edge2) / omega);
-  }
-  function workableSpacing(omega, medium, reach) {
-    const r = reach * SKELETON_REACH;
-    let lo = Infinity;
-    let hi = 0;
-    for (let a = 6e-5; a <= 22e-5; a += 1e-5) {
-      const gap = gapOf({
-        a,
-        geometry: "circle",
-        fill: Math.min(MAX_FILL, Math.PI * r * r / (a * a)),
-        inclusion: SKELETON,
-        matrix: medium
-      });
-      if (catches(gap, omega)) {
-        lo = Math.min(lo, a);
-        hi = Math.max(hi, a);
-      }
-    }
-    return hi > 0 ? { lo: lo - 5e-6, hi: hi + 5e-6 } : null;
-  }
-  function advice(crystal, gap, omega) {
-    if (!crystal) return "BUILD. TWO IS NOT A CRYSTAL";
-    if (!gap) {
-      return crystal.fill < 0.45 ? "NO GAP AT ALL - BUILD MORE, AND CLOSER TOGETHER" : "NO GAP AT ALL - THE SPACING IS TOO UNEVEN";
-    }
-    if (omega > gap.lo && omega < gap.hi) return "THE GAP HAS IT - KEEP IT STANDING";
-    return omega > gap.hi ? "TOO FAR APART - BUILD THEM CLOSER" : "TOO CLOSE TOGETHER - SPREAD THEM OUT";
-  }
-
   // src/pointgroups.ts
   var POINT_GROUPS = [
     ["1", "C1", "triclinic", 1, 1, false, 0],
@@ -901,6 +612,349 @@
       out.push({ group: r.group, needs: missing[0] ?? null });
     }
     return out.sort((a, b) => pointGroup(a.group).order - pointGroup(b.group).order);
+  }
+
+  // game/body.ts
+  var ORIGIN = { x: 0, y: 0 };
+  function snap(x, y, pitch) {
+    return {
+      x: ORIGIN.x + Math.round((x - ORIGIN.x) / pitch) * pitch,
+      y: ORIGIN.y + Math.round((y - ORIGIN.y) / pitch) * pitch
+    };
+  }
+  function bodiesOf(structures, pitch) {
+    const left = new Set(structures);
+    const out = [];
+    const near = pitch * 1.5;
+    while (left.size > 0) {
+      const seed = left.values().next().value;
+      left.delete(seed);
+      const cells = [seed];
+      for (let i = 0; i < cells.length; i++) {
+        for (const s of [...left]) {
+          const d = Math.hypot(s.x - cells[i].x, s.y - cells[i].y);
+          if (d <= near) {
+            left.delete(s);
+            cells.push(s);
+          }
+        }
+      }
+      let hm = cells[0].hm;
+      let mass = 0;
+      let cx = 0;
+      let cy = 0;
+      for (const c of cells) {
+        mass += cellFor(c.hm).structure;
+        cx += c.x;
+        cy += c.y;
+        if (pointGroup(c.hm).order > pointGroup(hm).order) hm = c.hm;
+      }
+      cx /= cells.length;
+      cy /= cells.length;
+      let extent = 0;
+      for (const c of cells) extent = Math.max(extent, Math.hypot(c.x - cx, c.y - cy));
+      out.push({ cells, hm, mass, x: cx, y: cy, extent });
+    }
+    return out.sort((a, b) => b.mass - a.mass);
+  }
+  function symbolOf(body) {
+    if (body.cells.length < 3) return null;
+    const all = groupsOfPointGroup(body.hm);
+    if (all.length === 0) return null;
+    return all.find((g2) => g2.lattice === "P" && g2.screws.length === 0) ?? all[0];
+  }
+  var AUTONOMY = 6;
+  function autonomous(body) {
+    return body.cells.length >= AUTONOMY;
+  }
+
+  // src/linalg.ts
+  function zeros(n, m = n) {
+    return Array.from({ length: n }, () => new Array(m).fill(0));
+  }
+  function identity(n) {
+    const I = zeros(n);
+    for (let i = 0; i < n; i++) I[i][i] = 1;
+    return I;
+  }
+  function symmetricEigen(input, maxSweeps = 100) {
+    const n = input.length;
+    const a = input.map((r) => [...r]);
+    const v = identity(n);
+    let scale = 0;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) scale += a[i][j] * a[i][j];
+    scale = Math.sqrt(scale);
+    const tol = (scale || 1) * 1e-14;
+    let sweeps = 0;
+    for (; sweeps < maxSweeps; sweeps++) {
+      let off = 0;
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i][j] * a[i][j];
+      if (Math.sqrt(off) <= tol) break;
+      for (let p = 0; p < n - 1; p++) {
+        for (let q = p + 1; q < n; q++) {
+          if (Math.abs(a[p][q]) <= tol / n) continue;
+          const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+          const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+          const c = 1 / Math.sqrt(t * t + 1);
+          const s = t * c;
+          for (let k = 0; k < n; k++) {
+            const akp = a[k][p];
+            const akq = a[k][q];
+            a[k][p] = c * akp - s * akq;
+            a[k][q] = s * akp + c * akq;
+          }
+          for (let k = 0; k < n; k++) {
+            const apk = a[p][k];
+            const aqk = a[q][k];
+            a[p][k] = c * apk - s * aqk;
+            a[q][k] = s * apk + c * aqk;
+          }
+          for (let k = 0; k < n; k++) {
+            const vkp = v[k][p];
+            const vkq = v[k][q];
+            v[k][p] = c * vkp - s * vkq;
+            v[k][q] = s * vkp + c * vkq;
+          }
+        }
+      }
+    }
+    const pairs = Array.from({ length: n }, (_, i) => ({ value: a[i][i], col: i })).sort((x, y) => x.value - y.value);
+    const values = pairs.map((p) => p.value);
+    const vectors = zeros(n);
+    pairs.forEach((p, k) => {
+      for (let i = 0; i < n; i++) vectors[i][k] = v[i][p.col];
+    });
+    return { values, vectors, sweeps };
+  }
+  function cholesky(B2) {
+    const n = B2.length;
+    const L = zeros(n);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j <= i; j++) {
+        let sum = B2[i][j];
+        for (let k = 0; k < j; k++) sum -= L[i][k] * L[j][k];
+        if (i === j) {
+          if (sum <= 0) {
+            throw new Error(
+              `matrix is not positive definite at row ${i} (pivot ${sum}) \u2014 the plane-wave truncation may have produced a negative effective density`
+            );
+          }
+          L[i][i] = Math.sqrt(sum);
+        } else {
+          L[i][j] = sum / L[j][j];
+        }
+      }
+    }
+    return L;
+  }
+  function forwardSolve(L, b) {
+    const n = L.length;
+    const y = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      let s = b[i];
+      for (let k = 0; k < i; k++) s -= L[i][k] * y[k];
+      y[i] = s / L[i][i];
+    }
+    return y;
+  }
+  function generalizedSymmetricEigen(A2, B2) {
+    const n = A2.length;
+    const L = cholesky(B2);
+    const Y2 = zeros(n);
+    for (let c = 0; c < n; c++) {
+      const col = forwardSolve(L, A2.map((r) => r[c]));
+      for (let i = 0; i < n; i++) Y2[i][c] = col[i];
+    }
+    const C = zeros(n);
+    for (let c = 0; c < n; c++) {
+      const col = forwardSolve(L, Y2[c]);
+      for (let i = 0; i < n; i++) C[i][c] = col[i];
+    }
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const m = (C[i][j] + C[j][i]) / 2;
+        C[i][j] = m;
+        C[j][i] = m;
+      }
+    }
+    const reduced = symmetricEigen(C);
+    const vectors = zeros(n);
+    for (let k = 0; k < n; k++) {
+      const y = reduced.vectors.map((r) => r[k]);
+      const x = backSolveTranspose(L, y);
+      let norm = 0;
+      for (const v of x) norm += v * v;
+      norm = Math.sqrt(norm) || 1;
+      for (let i = 0; i < n; i++) vectors[i][k] = x[i] / norm;
+    }
+    return { values: reduced.values, vectors, sweeps: reduced.sweeps };
+  }
+  function backSolveTranspose(L, y) {
+    const n = L.length;
+    const x = new Array(n).fill(0);
+    for (let i = n - 1; i >= 0; i--) {
+      let s = y[i];
+      for (let k = i + 1; k < n; k++) s -= L[k][i] * x[k];
+      x[i] = s / L[i][i];
+    }
+    return x;
+  }
+
+  // src/bands.ts
+  function besselJ1(x) {
+    const ax = Math.abs(x);
+    let y;
+    if (ax < 3) {
+      const t2 = x / 3;
+      const t22 = t2 * t2;
+      y = x * (0.5 - 0.56249985 * t22 + 0.21093573 * t22 ** 2 - 0.03954289 * t22 ** 3 + 443319e-8 * t22 ** 4 - 31761e-8 * t22 ** 5 + 1109e-8 * t22 ** 6);
+      return y;
+    }
+    const t = 3 / ax;
+    const f12 = 0.79788456 + 156e-8 * t + 0.01659667 * t ** 2 + 17105e-8 * t ** 3 - 249511e-8 * t ** 4 + 113653e-8 * t ** 5 - 20033e-8 * t ** 6;
+    const th = ax - 2.35619449 + 0.12499612 * t + 565e-7 * t ** 2 - 637879e-8 * t ** 3 + 74348e-8 * t ** 4 + 79824e-8 * t ** 5 - 29166e-8 * t ** 6;
+    y = f12 * Math.cos(th) / Math.sqrt(ax);
+    return x < 0 ? -y : y;
+  }
+  function reciprocalVectors(a, order) {
+    const g2 = 2 * Math.PI / a;
+    const out = [];
+    for (let n = -order; n <= order; n++) {
+      for (let m = -order; m <= order; m++) out.push([n * g2, m * g2]);
+    }
+    return out;
+  }
+  function fourierCoefficient(crystal, inner, outer, gx, gy) {
+    const f = crystal.fill;
+    const delta = inner - outer;
+    const gMag = Math.hypot(gx, gy);
+    if (gMag < 1e-12) return outer + delta * f;
+    if (crystal.geometry === "circle") {
+      const R = Math.sqrt(f * crystal.a * crystal.a / Math.PI);
+      const u2 = gMag * R;
+      return delta * f * (2 * besselJ1(u2) / u2);
+    }
+    if (Math.abs(gy) > 1e-12) return 0;
+    const n = gx * crystal.a / (2 * Math.PI);
+    const u = Math.PI * n * f;
+    return delta * f * (Math.sin(u) / u);
+  }
+  function bandsAt(crystal, kx, ky, order = 3, count = 6) {
+    const Gs = reciprocalVectors(crystal.a, order);
+    const n = Gs.length;
+    const etaIn = 1 / crystal.inclusion.rho;
+    const etaOut = 1 / crystal.matrix.rho;
+    const kapIn = 1 / (crystal.inclusion.rho * crystal.inclusion.c ** 2);
+    const kapOut = 1 / (crystal.matrix.rho * crystal.matrix.c ** 2);
+    const A2 = zeros(n);
+    const B2 = zeros(n);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const dx = Gs[i][0] - Gs[j][0];
+        const dy = Gs[i][1] - Gs[j][1];
+        const dot = (kx + Gs[i][0]) * (kx + Gs[j][0]) + (ky + Gs[i][1]) * (ky + Gs[j][1]);
+        A2[i][j] = fourierCoefficient(crystal, etaIn, etaOut, dx, dy) * dot;
+        B2[i][j] = fourierCoefficient(crystal, kapIn, kapOut, dx, dy);
+      }
+    }
+    const { values } = generalizedSymmetricEigen(A2, B2);
+    return values.slice(0, count).map((v) => Math.sqrt(Math.max(v, 0)));
+  }
+  function completeGap(crystal, band, order = 3, samples = 12) {
+    const g2 = Math.PI / crystal.a;
+    let maxLower = -Infinity;
+    let minUpper = Infinity;
+    for (let i = 0; i <= samples; i++) {
+      for (let j = 0; j <= i; j++) {
+        const w = bandsAt(crystal, i / samples * g2, j / samples * g2, order, band + 2);
+        maxLower = Math.max(maxLower, w[band - 1]);
+        minUpper = Math.min(minUpper, w[band]);
+      }
+    }
+    return minUpper > maxLower ? { lo: maxLower, hi: minUpper } : null;
+  }
+
+  // game/bound.ts
+  var SKELETON = { rho: 2650, c: 5960 };
+  var SKELETON_REACH = 1.15;
+  var MAX_FILL = 0.62;
+  var GAP_ORDER = 2;
+  var GAP_SAMPLES = 4;
+  var RELEASE_TIME = 3;
+  function boundFrequency(pitch, medium) {
+    return 2 * Math.PI * medium.c / (2 * pitch);
+  }
+  function newBound(pitch, medium, x, y) {
+    return { omega: boundFrequency(pitch, medium), x, y, free: false, held: 0 };
+  }
+  function crystalOf(structures, medium) {
+    if (structures.length < 2) return null;
+    let total = 0;
+    let radius = 0;
+    for (const s of structures) {
+      let nearest2 = Infinity;
+      for (const t of structures) {
+        if (t === s) continue;
+        const d = Math.hypot(t.x - s.x, t.y - s.y);
+        if (d < nearest2) nearest2 = d;
+      }
+      total += nearest2;
+      radius += s.reach * SKELETON_REACH;
+    }
+    const a = total / structures.length;
+    const r = radius / structures.length;
+    if (!(a > 0)) return null;
+    return {
+      a,
+      geometry: "circle",
+      fill: Math.min(MAX_FILL, Math.PI * r * r / (a * a)),
+      inclusion: SKELETON,
+      matrix: medium
+    };
+  }
+  function gapOf(crystal) {
+    if (!crystal) return null;
+    try {
+      return completeGap(crystal, 1, GAP_ORDER, GAP_SAMPLES);
+    } catch {
+      return null;
+    }
+  }
+  function catches(gap, omega) {
+    return gap !== null && omega > gap.lo && omega < gap.hi;
+  }
+  function detune(gap, omega) {
+    if (!gap) return 1;
+    if (omega > gap.lo && omega < gap.hi) return 0;
+    const edge2 = omega <= gap.lo ? gap.lo : gap.hi;
+    return Math.min(1, Math.abs(omega - edge2) / omega);
+  }
+  function workableSpacing(omega, medium, reach) {
+    const r = reach * SKELETON_REACH;
+    let lo = Infinity;
+    let hi = 0;
+    for (let a = 6e-5; a <= 22e-5; a += 1e-5) {
+      const gap = gapOf({
+        a,
+        geometry: "circle",
+        fill: Math.min(MAX_FILL, Math.PI * r * r / (a * a)),
+        inclusion: SKELETON,
+        matrix: medium
+      });
+      if (catches(gap, omega)) {
+        lo = Math.min(lo, a);
+        hi = Math.max(hi, a);
+      }
+    }
+    return hi > 0 ? { lo: lo - 5e-6, hi: hi + 5e-6 } : null;
+  }
+  function advice(crystal, gap, omega) {
+    if (!crystal) return "BUILD. TWO IS NOT A CRYSTAL";
+    if (!gap) {
+      return crystal.fill < 0.45 ? "NO GAP AT ALL - BUILD MORE, AND CLOSER TOGETHER" : "NO GAP AT ALL - THE SPACING IS TOO UNEVEN";
+    }
+    if (omega > gap.lo && omega < gap.hi) return "THE GAP HAS IT - KEEP IT STANDING";
+    return omega > gap.hi ? "TOO FAR APART - BUILD THEM CLOSER" : "TOO CLOSE TOGETHER - SPREAD THEM OUT";
   }
 
   // src/gorkov.ts
@@ -1436,6 +1490,7 @@
       crystal: null,
       gap: null,
       spacing: null,
+      bodies: [],
       phase: "settle",
       entities: [],
       structures: [],
@@ -1806,10 +1861,14 @@
     }
     run.entities = keep;
   }
+  function latticePitch(run) {
+    return run.spacing ? (run.spacing.lo + run.spacing.hi) / 2 : run.world.pitch * 1.3;
+  }
   function retune(run) {
     const was = catches(run.gap, run.bound.omega);
     run.crystal = crystalOf(run.structures, run.world.medium);
     run.gap = gapOf(run.crystal);
+    run.bodies = bodiesOf(run.structures, latticePitch(run));
     const now = catches(run.gap, run.bound.omega);
     if (now !== was) run.events.push({ kind: "tuned", caught: now });
   }
@@ -1841,10 +1900,12 @@
     const c = run.cells[index];
     if (!c) return "none";
     if (onThrone(run, run.you.x, run.you.y)) return "too-close";
+    const at = snap(run.you.x, run.you.y, latticePitch(run));
+    if (at.x < 0 || at.x > ARENA_W || at.y < 0 || at.y > ARENA_H) return "too-close";
     for (const s2 of run.structures) {
-      if (Math.hypot(s2.x - run.you.x, s2.y - run.you.y) < s2.reach * 0.9) return "too-close";
+      if (Math.hypot(s2.x - at.x, s2.y - at.y) < latticePitch(run) * 0.5) return "occupied";
     }
-    const s = structureFrom(run.nextId++, c.group.hm, run.you.x, run.you.y);
+    const s = structureFrom(run.nextId++, c.group.hm, at.x, at.y);
     run.structures.push(s);
     run.cells.splice(index, 1);
     run.score += s.strength * 2;
@@ -2754,7 +2815,8 @@
       const run = this.run;
       if (!run.cells[i]) return;
       const r = placeCell(run, i);
-      if (r === "too-close") this.say("TOO CLOSE TO SOMETHING ELSE");
+      if (r === "too-close") this.say("NOT THERE");
+      if (r === "occupied") this.say("THAT SITE IS TAKEN");
       if (r === "wrong-phase") this.say("NOT NOW");
     }
     doCrown() {
@@ -3029,6 +3091,8 @@
       }
       this.drawField();
       this.drawLattice();
+      this.drawSites();
+      this.drawBodies();
       this.drawStructures();
       this.drawBound();
       this.drawThrone();
@@ -3196,6 +3260,103 @@
       g2.textAlign = "center";
       g2.fillText("PUT THE NEXT ONE HERE", hx, hy - px(band.hi) - 5);
       g2.textAlign = "left";
+    }
+    /**
+     * The lattice, and the thing you are making on it.
+     *
+     * A crystal is a lattice plus a motif, so the lattice is drawn: faint sites
+     * around you, and a bright one where the next cell will actually land. It
+     * used to go down wherever you were standing, which is why what people built
+     * was a heap.
+     */
+    drawSites() {
+      const run = this.run;
+      if (run.cells.length === 0 || run.phase === "dead") return;
+      const g2 = this.ctx;
+      const pitch = latticePitch(run);
+      const p = px(pitch);
+      const here = snap(run.you.x, run.you.y, pitch);
+      g2.fillStyle = "rgba(120,225,245,0.13)";
+      for (let i = -2; i <= 2; i++) {
+        for (let j = -2; j <= 2; j++) {
+          const sx = px(here.x + i * pitch), sy = px(here.y + j * pitch);
+          if (sx < 0 || sy < 0 || sx > VIEW_W || sy > VIEW_H) continue;
+          g2.beginPath();
+          g2.arc(sx, sy, 1.6, 0, Math.PI * 2);
+          g2.fill();
+        }
+      }
+      const taken = run.structures.some(
+        (s) => Math.hypot(s.x - here.x, s.y - here.y) < pitch * 0.5
+      );
+      const hx = px(here.x), hy = px(here.y);
+      g2.strokeStyle = taken ? "rgba(255,80,110,0.6)" : `rgba(${JADE},0.75)`;
+      g2.lineWidth = 1.4;
+      g2.setLineDash([4, 4]);
+      g2.beginPath();
+      g2.arc(hx, hy, p * 0.34, 0, Math.PI * 2);
+      g2.stroke();
+      g2.setLineDash([]);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        g2.beginPath();
+        g2.moveTo(hx + dx * p * 0.34, hy + dy * p * 0.34);
+        g2.lineTo(hx + dx * p * 0.44, hy + dy * p * 0.44);
+        g2.stroke();
+      }
+    }
+    /**
+     * A body: the cells that are joined, drawn as one thing.
+     *
+     * Two passes of the same path — a wide soft stroke that makes the silhouette
+     * and a thin bright one that edges it — so adjacent cells read as connected
+     * tissue rather than as separate objects that happen to be near each other.
+     */
+    drawBodies() {
+      const run = this.run;
+      if (run.bodies.length === 0) return;
+      const g2 = this.ctx;
+      const pitch = latticePitch(run);
+      const near = pitch * 1.5;
+      for (const body of run.bodies) {
+        if (body.cells.length < 2) continue;
+        const live = autonomous(body);
+        const path = new Path2D();
+        for (const a of body.cells) {
+          path.addPath(new Path2D(`M ${px(a.x)} ${px(a.y)} l 0.01 0`));
+          for (const b of body.cells) {
+            if (b === a) continue;
+            if (Math.hypot(b.x - a.x, b.y - a.y) > near) continue;
+            const seg = new Path2D();
+            seg.moveTo(px(a.x), px(a.y));
+            seg.lineTo(px(b.x), px(b.y));
+            path.addPath(seg);
+          }
+        }
+        g2.lineCap = "round";
+        g2.lineJoin = "round";
+        g2.strokeStyle = live ? `rgba(${JADE},0.16)` : "rgba(120,225,245,0.09)";
+        g2.lineWidth = px(pitch) * 0.62;
+        g2.stroke(path);
+        g2.strokeStyle = live ? `rgba(${JADE},0.5)` : "rgba(120,225,245,0.26)";
+        g2.lineWidth = 1.6;
+        g2.stroke(path);
+        g2.lineCap = "butt";
+        const sym = symbolOf(body);
+        if (sym) {
+          g2.textAlign = "center";
+          g2.font = `700 11px ${MONO}`;
+          g2.fillStyle = live ? `rgb(${JADE})` : "rgba(160,220,240,0.7)";
+          g2.fillText(sym.symbol, px(body.x), px(body.y - body.extent) - 16);
+          g2.font = `600 8px ${MONO}`;
+          g2.fillStyle = FAINT2;
+          g2.fillText(
+            `${sym.pointGroup}  \xB7  ${body.cells.length} CELLS${live ? "  \xB7  IT WORKS ALONE" : ""}`,
+            px(body.x),
+            px(body.y - body.extent) - 5
+          );
+          g2.textAlign = "left";
+        }
+      }
     }
     drawStructures() {
       const g2 = this.ctx;
@@ -3976,7 +4137,13 @@
       const rows = [
         ["LASTED", `${run.t.toFixed(0)} SECONDS  \xB7  AEON ${run.world.aeon}`],
         ["GATHERED", `${n("merge")} MERGES INTO ${run.built} CELLS`],
-        ["BUILT", `${n("place")} STRUCTURES, ${run.structures.length} STILL STANDING`],
+        ["BUILT", `${n("place")} CELLS PLACED, ${run.structures.length} STANDING`],
+        ["YOUR BODY", (() => {
+          const b = run.bodies[0];
+          if (!b) return "NEVER JOINED ANYTHING UP";
+          const sym = symbolOf(b);
+          return `${b.cells.length} CELLS${sym ? `  \xB7  ${sym.symbol}` : ""}${autonomous(b) ? "  \xB7  IT WORKED ALONE" : ""}`;
+        })()],
         ["THE BOUND FIELD", run.bound.free ? "FREED" : n("tuned") > 0 ? "CAUGHT, THEN LOST" : "NEVER CAUGHT"],
         ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, ${n("hit:touched")} DRIFTED INTO`],
         ["SCORE", String(run.score)]
@@ -4093,6 +4260,9 @@
       if (run.structures.length < 2 && n("place") < 2) {
         return "TWO BUILDINGS IS THE FEWEST THAT IS A CRYSTAL. THE FIELD NEEDS ONE";
       }
+      if (run.bodies.length > 1 && !run.bodies.some((b) => b.cells.length >= 3)) {
+        return "YOUR CELLS ARE SCATTERED. PUT THEM ON ADJACENT SITES AND THEY BECOME ONE";
+      }
       if (!run.bound.free && n("tuned") === 0) {
         return `THE GAP NEVER CAUGHT IT - ${advice(run.crystal, run.gap, run.bound.omega)}`;
       }
@@ -4127,6 +4297,7 @@
         `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
         `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
         `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`,
+        `bodies: ${run.bodies.length}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
         `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
         `diagnosis: ${this.diagnosis()}`

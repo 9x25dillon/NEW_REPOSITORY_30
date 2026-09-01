@@ -476,6 +476,42 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### What you build is an organism, and it has a name
+
+A placed cell already worked without you — it projects holding points along its
+own group's directions and things collect and merge at them whether or not you
+are there. What was missing was **connection**. Structures went down wherever
+the player happened to be standing, so what you built was a heap of separate
+objects that happened to be near each other, and nothing could be asked of it as
+a whole.
+
+So placements **snap to a lattice**. A crystal is a lattice plus a motif — that
+is the definition, not a metaphor — and the moment they do, the thing you are
+building *is* a crystal and every question about it becomes answerable: which
+cells are joined, how big it is, what symmetry it has, what its band structure
+does. Cells on adjacent sites, orthogonally or diagonally, are one **body**.
+
+And it has a name. `src/sohncke.ts` has held the 65 space groups a chiral world
+permits since before the game existed and had never once been asked. A body's
+point group is its most symmetric cell, exactly as a sovereign's is; a lattice
+with that point group on it is a space group, and a body assembled by hand has
+no centring in it, so the honest answer is the primitive one. **Three joined
+622s is P622**, and that is what the game says.
+
+The lattice pitch is the spacing this water's bound field needs, so building a
+properly made body and freeing the trapped field stop being two problems:
+
+```
+ 2 cells  a=114um  gap 51-67 Mrad/s   <== it has the field
+ 3 cells  P622
+ 6 cells  P622   ·  it works alone
+ 8 cells  P622   →  held, and the field goes free
+```
+
+They were only ever two problems because the placements were freehand and a
+player had to hit a twenty-micron band by hand, twenty-six times, while being
+hunted.
+
 ### The water has to have something in it
 
 The first water held fourteen motifs in six tenths of a square millimetre, and
@@ -673,6 +709,8 @@ game/lattice.ts      the eleven cells a chiral world permits, and why not a twel
 game/beasts.ts       four bodies, told apart by contrast factor and nothing else
 game/shape.ts        what a point group looks like from directly above it
 game/world.ts        worlds, sovereigns, and what is born out of a body
+game/bound.ts        the other field, and the band gap that will not carry it
+game/body.ts         the lattice, what is joined to what, and its space group
 game/run.ts          the aeon: settle, crown, reign, birth
 app/drifter.ts       SONIC DRIFTER: the game surface, canvas and rendering
 app/pad.ts           the controller, and the keyboard standing in for one
@@ -683,7 +721,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                223 tests: what the modules above are actually claiming
+test/                231 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
