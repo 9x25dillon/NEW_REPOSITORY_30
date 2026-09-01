@@ -1333,6 +1333,8 @@
       pitch: 88e-6,
       pool: ["a2", "a2", "a2", "g", "d"],
       wildlife: wildlifeFor(medium, 1, 0),
+      density: 30,
+      calm: 40,
       current: 1e-5,
       inheritance: 0
     };
@@ -1350,6 +1352,9 @@
       pitch: Math.max(58e-6, 104e-6 - s.mass * 11e-7),
       pool: [...pool],
       wildlife: wildlifeFor(medium, aeon, s.mass),
+      // A richer body leaves more of itself suspended, and less peace.
+      density: Math.min(40, 26 + Math.round(s.mass / 3)),
+      calm: Math.max(4, 14 - aeon * 2),
       current: 9e-6 + aeon * 14e-7,
       // A richer king leaves more of the old world standing.
       inheritance: Math.min(0.6, 0.12 + s.mass * 0.016)
@@ -1429,7 +1434,7 @@
       rand: rng(seed),
       nextId: 0
     };
-    for (let i = 0; i < 14; i++) run.entities.push(newMotif(run, true));
+    for (let i = 0; i < world.density; i++) run.entities.push(newMotif(run, true));
     return run;
   }
   function clusterParticle(parts) {
@@ -1518,7 +1523,7 @@
       return;
     }
     run.spawnIn -= dt;
-    if (run.spawnIn <= 0) {
+    if (run.spawnIn <= 0 && run.t >= run.world.calm) {
       run.spawnIn = spawnGap(run) * (0.7 + run.rand() * 0.6);
       const live = run.entities.filter((e) => e.faction === "beast").length;
       const cap = run.phase === "reign" ? 4 + Math.floor(run.world.aeon / 2) : 1 + Math.floor(run.world.aeon / 3);
@@ -1528,7 +1533,7 @@
       }
     }
     const motifs = run.entities.filter((e) => e.faction === "motif").length;
-    if (motifs < 14) run.entities.push(newMotif(run));
+    if (motifs < run.world.density) run.entities.push(newMotif(run));
     release(run, dt);
     drift(run, dt);
     settle(run, dt);
@@ -2058,7 +2063,7 @@
     retune(run);
     run.bolts = [];
     run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
-    for (let i = 0; i < 12; i++) run.entities.push(newMotif(run, true));
+    for (let i = run.entities.length; i < w.density; i++) run.entities.push(newMotif(run, true));
     run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
     run.spawnIn = 4;
     run.phase = "settle";

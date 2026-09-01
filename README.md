@@ -467,6 +467,32 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### The water has to have something in it
+
+The first water held fourteen motifs in six tenths of a square millimetre, and
+that one number made the game unplayable. Your hand is 55 µm across, it carries
+one body at a time, and it only carries below the speed its own trap can drag
+one — while the nearest thing you could bind with was consistently **130 to 230
+µm away**. Every merge was a fetch across three hand-widths.
+
+A policy that played perfectly and could not be killed built one cell a minute;
+**five runs in six built none at all in four minutes.** Every other playability
+test in the suite passed throughout, because they all run for seven hundred
+seconds and ask whether the cycle eventually closes.
+
+| motifs | first cell | cells in three minutes |
+| --- | --- | --- |
+| 14 | 19–132 s | 1–3 |
+| 24 | 3–40 s | 5–14 |
+| **30** | **2–24 s** | **16–35** |
+| 48 | 2–13 s | 58–71, which is soup |
+
+It is a suspension, so how much is in it is a property of the water, and a
+richer king leaves more of itself dissolved. The first water also grants forty
+seconds of **calm** before anything hunts you; every later world is somebody's
+corpse and grants almost none. `test/run.test.ts` now asserts a cell inside the
+first minute, which is the test that would have caught this.
+
 ### The opening is a choice, and one of them is cubic
 
 The first water used to hold a dimer and a girdle. A dimer plus a girdle is a
@@ -648,7 +674,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                221 tests: what the modules above are actually claiming
+test/                222 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

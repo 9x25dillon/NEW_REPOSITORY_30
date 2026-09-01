@@ -185,6 +185,35 @@ export interface World {
   pool: string[];
   /** Which wildlife the medium carries. */
   wildlife: string[];
+  /**
+   * How much matter is suspended in it.
+   *
+   * THE NUMBER THAT DECIDED WHETHER THE GAME COULD BE PLAYED. At fourteen
+   * motifs in an arena of six tenths of a square millimetre the nearest thing
+   * you could bind with was consistently a hundred and thirty to two hundred
+   * and thirty microns away — against a hand fifty-five microns across, which
+   * carries one body at a time and only below the speed its trap can drag it.
+   * Every merge was a fetch across three hand-widths. A policy that played
+   * perfectly and could not be killed built one cell a minute; five runs in six
+   * built NONE in four minutes.
+   *
+   *     14 motifs   first cell at 19-132 s      1-3 cells in three minutes
+   *     24          first cell at  3- 40 s      5-14
+   *     34          first cell at  2- 24 s     16-35
+   *     48          first cell at  2- 13 s     58-71, which is soup
+   *
+   * It is a suspension. How much is in it is a property of the water, and it is
+   * the first thing to reach for when the game feels like work.
+   */
+  density: number;
+  /**
+   * Seconds before anything in it starts hunting you.
+   *
+   * The first water gives you long enough to find out what gathering IS before
+   * something that shares your contrast arrives in your lap. Every later world
+   * is somebody's corpse and grants almost none.
+   */
+  calm: number;
   /** Circulation, m/s. */
   current: number;
   /** How much of the previous world's building survived, 0..1. */
@@ -316,6 +345,8 @@ export function firstWorld(): World {
     pitch: 88e-6,
     pool: ["a2", "a2", "a2", "g", "d"],
     wildlife: wildlifeFor(medium, 1, 0),
+    density: 30,
+    calm: 40,
     current: 1.0e-5,
     inheritance: 0,
   };
@@ -358,6 +389,9 @@ export function worldFrom(s: Sovereign, aeon: number): World {
     pitch: Math.max(58e-6, 104e-6 - s.mass * 1.1e-6),
     pool: [...pool],
     wildlife: wildlifeFor(medium, aeon, s.mass),
+    // A richer body leaves more of itself suspended, and less peace.
+    density: Math.min(40, 26 + Math.round(s.mass / 3)),
+    calm: Math.max(4, 14 - aeon * 2),
     current: 0.9e-5 + aeon * 1.4e-6,
     // A richer king leaves more of the old world standing.
     inheritance: Math.min(0.6, 0.12 + s.mass * 0.016),

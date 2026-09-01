@@ -234,7 +234,7 @@ export function startRun(seed = 1): Run {
     rand: rng(seed),
     nextId: 0,
   };
-  for (let i = 0; i < 14; i++) run.entities.push(newMotif(run, true));
+  for (let i = 0; i < world.density; i++) run.entities.push(newMotif(run, true));
   return run;
 }
 
@@ -362,7 +362,7 @@ export function step(run: Run, input: Input, dt: number): void {
 
   // arrivals
   run.spawnIn -= dt;
-  if (run.spawnIn <= 0) {
+  if (run.spawnIn <= 0 && run.t >= run.world.calm) {
     run.spawnIn = spawnGap(run) * (0.7 + run.rand() * 0.6);
     const live = run.entities.filter((e) => e.faction === "beast").length;
     const cap = run.phase === "reign"
@@ -374,7 +374,7 @@ export function step(run: Run, input: Input, dt: number): void {
     }
   }
   const motifs = run.entities.filter((e) => e.faction === "motif").length;
-  if (motifs < 14) run.entities.push(newMotif(run));
+  if (motifs < run.world.density) run.entities.push(newMotif(run));
 
   release(run, dt);
   drift(run, dt);
@@ -1095,7 +1095,7 @@ export function enterWorld(run: Run): void {
   retune(run);
   run.bolts = [];
   run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
-  for (let i = 0; i < 12; i++) run.entities.push(newMotif(run, true));
+  for (let i = run.entities.length; i < w.density; i++) run.entities.push(newMotif(run, true));
   run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
   run.spawnIn = 4;
   run.phase = "settle";

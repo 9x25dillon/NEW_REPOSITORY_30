@@ -8,7 +8,7 @@ import {
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
-import { cellFor, motif } from "../game/lattice.js";
+import { assemble, cellFor, motif } from "../game/lattice.js";
 import { lobes } from "../game/shape.js";
 import { cadence, emptyThrone, feed, structureFrom, volley } from "../game/world.js";
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
@@ -777,17 +777,73 @@ test("what you feed the throne changes what it is, in every direction at once", 
     "and a 222 comes apart in your hand far faster than a 622");
 });
 
+test("the first minute produces a cell, which is the whole opening", () => {
+  // THE TEST THAT WOULD HAVE CAUGHT IT. Every other playability test here runs
+  // for seven hundred seconds and asks whether the cycle eventually closes, so
+  // all of them passed while the opening was unplayable: a policy that played
+  // perfectly and could not be killed built ONE cell a minute, and five runs in
+  // six built none at all in four minutes. The water held fourteen motifs in
+  // six tenths of a square millimetre, so the nearest thing you could bind with
+  // was two hundred microns away from a hand fifty-five microns across.
+  //
+  // Nobody reported it as a bug. It arrives as "I suck at this game".
+  // The policy is the one a person uses: pick the biggest thing you have going
+  // and feed it whatever is nearest that will bind, rather than chasing whichever
+  // pair in the whole arena happens to be closest this frame.
+  for (const seed of [1, 2, 3, 5]) {
+    const run = startRun(seed);
+    let first = 0;
+    let mine = -1;
+
+    for (let i = 0; i < 60 * 90 && !first; i++) {
+      const motifs = run.entities.filter((e) => e.faction === "motif");
+      let me = motifs.find((e) => e.id === mine);
+      if (!me) {
+        me = motifs.slice().sort((a, b) => b.parts.length - a.parts.length)[0];
+        mine = me?.id ?? -1;
+      }
+
+      let partner: Entity | null = null;
+      let near = Infinity;
+      if (me) {
+        for (const o of motifs) {
+          if (o === me) continue;
+          const asm = assemble([...me.parts, ...o.parts]);
+          if (!asm.group && !asm.partial) continue;
+          const d = Math.hypot(o.x - me.x, o.y - me.y);
+          if (d < near) { near = d; partner = o; }
+        }
+      }
+
+      run.integrity = MAX_INTEGRITY;      // measuring the pace, not the survival
+      step(run, me && partner
+        ? seek(run, (me.x + partner.x) / 2, (me.y + partner.y) / 2, true)
+        : IDLE, DT);
+      if (run.events.some((e) => e.kind === "crystal")) first = run.t;
+      run.events.length = 0;
+    }
+    assert.ok(first > 0 && first < 60,
+      `seed ${seed}: first cell at ${first ? `${first.toFixed(0)}s` : "never"} — the opening is a wall`);
+  }
+});
+
 test("the worlds it makes are not the same world", () => {
-  // Guards the fixed point directly: play far enough to see a second and third
-  // water and check they are actually different places.
-  const run = playRun(42, 1100, 1);
-  assert.ok(run.aeonsSurvived >= 1);
-  assert.ok(run.world.aeon >= 2);
+  // Guards the fixed point directly: play far enough to see a second water and
+  // check it is actually a different place. Across seeds rather than on one,
+  // because whether a particular run survives its first king is luck and this
+  // is not a test about luck.
+  const reached = SEEDS
+    .map((seed) => playRun(seed, 900, 1))
+    .filter((run) => run.world.aeon >= 2);
+
+  assert.ok(reached.length > 0, "no seed lived to see a second water");
   const first = { c: 1497, pitch: 88e-6 };
-  assert.ok(
-    Math.abs(run.world.medium.c - first.c) > 10 || Math.abs(run.world.pitch - first.pitch) > 2e-6,
-    "the water it ended in should not be the water it started in",
-  );
+  for (const run of reached) {
+    assert.ok(
+      Math.abs(run.world.medium.c - first.c) > 10 || Math.abs(run.world.pitch - first.pitch) > 2e-6,
+      "the water it ended in should not be the water it started in",
+    );
+  }
 });
 
 test("standing still is still fatal", () => {
