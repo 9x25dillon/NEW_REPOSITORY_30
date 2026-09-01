@@ -405,8 +405,9 @@ under.
 | **RT** | grip | apodisation. The drive concentrates from 1.9 trap pitches down to 0.62, which is the difference between a weak lattice everywhere and one trap under your hand. Costs stamina as amplitude squared. |
 | **A** | burst | the amplifier's peak rating against its continuous one. Twice the drive for 120 ms, and force goes as pressure squared, so four times the speed — about 200 µm, and every other body in the water lurches with you. |
 | **X / Y** | place, crown | a cell onto the ground, or into the throne if you are standing on it. |
+| **START** | stop the world | and the pause screen carries the verbs, because that is the screen you open when you cannot remember what the game lets you do. |
 
-Keyboard plays the same game: WASD, space, K, E or 1–9, C.
+Keyboard plays the same game: WASD, space, K, E or 1–9, C, ESC.
 
 There is no invert button any more, and its absence is the mechanic. Both
 lattices are rigidly a quarter wavelength apart and the trap re-centres on you
@@ -647,7 +648,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                209 tests: what the modules above are actually claiming
+test/                221 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

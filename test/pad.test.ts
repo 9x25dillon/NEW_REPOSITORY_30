@@ -123,6 +123,36 @@ test("with no pad the keyboard produces the same intent", () => {
   assert.ok(!p.read().dash, "and holding it does not burst again");
 });
 
+test("stopping the world is its own button, and not the one that confirms", () => {
+  // Start pauses in play; A is what gets you off a menu. Sharing one button
+  // between them means either the pause screen eats your first press or the
+  // title screen pauses a game that has not started.
+  const p = new Pad();
+  const gp = pad();
+  pads = [gp];
+  p.read();
+
+  press(gp, 9);                       // START
+  const it = p.read();
+  assert.ok(it.pause, "START stops it");
+  press(gp, 9, false);
+  p.read();
+
+  press(gp, 0);                       // A
+  const face = p.read();
+  assert.ok(face.confirm, "A confirms");
+  assert.ok(!face.pause, "and does not stop it");
+
+  pads = [];
+  p.read();
+  key("Escape");
+  assert.ok(p.read().pause, "ESC on a keyboard");
+  key("Escape", true);
+  p.read();
+  key("KeyP");
+  assert.ok(p.read().pause, "and P");
+});
+
 test("a number key names a rack slot directly", () => {
   const p = new Pad();
   pads = [];

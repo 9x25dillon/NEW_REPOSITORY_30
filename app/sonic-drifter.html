@@ -2096,6 +2096,7 @@
     crown: false,
     cycle: 0,
     confirm: false,
+    pause: false,
     mute: false,
     restart: false
   };
@@ -2117,6 +2118,7 @@
     prev: [LB],
     next: [B],
     confirm: [START, A],
+    pause: [START],
     mute: [BACK]
   };
   var LOOSE = {
@@ -2127,6 +2129,7 @@
     prev: [4],
     next: [5],
     confirm: [0, 1, 2, 3, 8, 9],
+    pause: [9, 8],
     mute: [8]
   };
   var Pad = class {
@@ -2201,6 +2204,7 @@
         out.crown = anyHit(m.crown);
         out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
         out.confirm = anyHit(m.confirm);
+        out.pause = anyHit(m.pause);
         out.mute = anyHit(m.mute);
         this.prev = [...gp.buttons].map((_, i) => down(i));
       } else {
@@ -2225,6 +2229,7 @@
       if (tap("KeyR")) out.restart = true;
       if (tap("KeyM")) out.mute = true;
       if (tap("Space") || tap("Enter")) out.confirm = true;
+      if (tap("Escape") || tap("KeyP")) out.pause = true;
       this.prevKeys = new Set(this.keys);
       return out;
     }
@@ -2263,6 +2268,7 @@
       crown: "Y",
       cycle: "LB / B",
       confirm: "START",
+      pause: "START",
       mute: "BACK"
     },
     keys: {
@@ -2273,6 +2279,7 @@
       crown: "C",
       cycle: "Q",
       confirm: "SPACE",
+      pause: "ESC / P",
       mute: "M"
     }
   };
@@ -2506,6 +2513,8 @@
       /** Which cell in the rack a bare press will spend. */
       __publicField(this, "selected", 0);
       __publicField(this, "wasGrip", false);
+      /** Stopped. Nothing in the water advances, and the surface keeps drawing. */
+      __publicField(this, "paused", false);
       /** Frames of held time after a heavy landing. Sold as impact; it is really
        *  just the update being withheld for a moment while the draw keeps going. */
       __publicField(this, "hitstop", 0);
@@ -2644,6 +2653,7 @@
       this.canvas.style.height = `${Math.floor(VIEW_H * s)}px`;
     }
     begin() {
+      this.paused = false;
       this.seed = this.seed * 1664525 + 1013904223 >>> 0;
       this.run = startRun(this.seed);
       this.screen = "play";
@@ -2686,6 +2696,11 @@
       const run = this.run;
       const it = this.pad.read();
       this.intent = it;
+      if (it.pause && this.screen === "play") {
+        this.paused = !this.paused;
+        this.sfx.tick();
+      }
+      if (this.paused && this.screen === "play") return;
       this.act(it);
       if (this.screen === "title") {
         step(run, {
@@ -2932,6 +2947,7 @@
         this.drawHud();
         if (this.screen === "birth") this.drawBirth();
         if (this.screen === "dead") this.drawDead();
+        if (this.paused) this.drawPaused();
       }
       this.drawCard();
       if (this.flash > 0) {
@@ -3806,6 +3822,57 @@
       g2.fillStyle = "#9fbdd0";
       wrap(g2, this.card.body, 276, y + 31, 592, 13);
       g2.globalAlpha = 1;
+    }
+    /**
+     * Stopped.
+     *
+     * It also carries the verbs, because this is the screen somebody opens when
+     * they cannot remember what the game lets them do — and being unable to find
+     * that out was, in the end, the same complaint as not wanting to keep
+     * playing.
+     */
+    drawPaused() {
+      const g2 = this.ctx;
+      const run = this.run;
+      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      g2.fillStyle = "rgba(5,7,14,0.82)";
+      g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      g2.textAlign = "center";
+      g2.font = `700 34px ${MONO}`;
+      g2.fillStyle = INK;
+      g2.fillText("STOPPED", VIEW_W / 2, 118);
+      g2.font = `600 10px ${MONO}`;
+      g2.fillStyle = `rgb(${NODE})`;
+      g2.fillText(
+        run.bound.free ? "THE FIELD OF THIS WATER IS OUT. THE WAY ON IS THROUGH WHAT YOU CROWN." : advice(run.crystal, run.gap, run.bound.omega),
+        VIEW_W / 2,
+        156
+      );
+      g2.font = `600 11px ${MONO}`;
+      g2.fillStyle = DIM;
+      const pad = (t) => t.padEnd(13, " ");
+      const lines = [
+        `${pad(G.move)}THE NODE GOES A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
+        `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
+        `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
+        `${pad(G.place)}BUILD HERE. ON THE THRONE IT FEEDS INSTEAD.`,
+        `${pad(G.cycle)}CHOOSE WHICH CELL.`,
+        `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
+        `${pad(G.mute)}SOUND.`,
+        "",
+        "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
+        "WHOSE BAND GAP CATCHES IT: HOW MUCH YOU BUILD DECIDES WHETHER THERE IS",
+        "A GAP, AND HOW FAR APART DECIDES WHERE IT SITS.",
+        "",
+        "WHAT SHARES YOUR CONTRAST COMES TO YOUR FEET. THE REST IS HELD OFF.",
+        "A HUNTER STOPS AND GATHERS BEFORE IT STRIKES, AND GOES WHERE IT POINTED."
+      ];
+      lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 196 + i * 17));
+      const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
+      g2.font = `700 13px ${MONO}`;
+      g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+      g2.fillText(`${G.pause} TO GO ON`, VIEW_W / 2, VIEW_H - 40);
+      g2.textAlign = "left";
     }
     drawTitle() {
       const g2 = this.ctx;

@@ -37,13 +37,15 @@ export interface Intent {
   cycle: number;
   /** Start / A / Space on a menu. One-shot. */
   confirm: boolean;
+  /** Stop the world. One-shot. */
+  pause: boolean;
   mute: boolean;
   restart: boolean;
 }
 
 const NOTHING: Intent = {
   move: { x: 0, y: 0 }, grip: false, dash: false, place: false,
-  crown: false, cycle: 0, confirm: false, mute: false, restart: false,
+  crown: false, cycle: 0, confirm: false, pause: false, mute: false, restart: false,
 };
 
 /** Buttons in the standard mapping, by the name written on an Xbox pad. */
@@ -51,12 +53,12 @@ const A = 0, B = 1, X = 2, Y = 3, LB = 4, RB = 5, LT = 6, RT = 7, BACK = 8, STAR
 
 interface Layout {
   grip: number[]; dash: number[]; place: number[]; crown: number[];
-  prev: number[]; next: number[]; confirm: number[]; mute: number[];
+  prev: number[]; next: number[]; confirm: number[]; pause: number[]; mute: number[];
 }
 
 const STANDARD: Layout = {
   grip: [RT, RB], dash: [A, LT], place: [X], crown: [Y],
-  prev: [LB], next: [B], confirm: [START, A], mute: [BACK],
+  prev: [LB], next: [B], confirm: [START, A], pause: [START], mute: [BACK],
 };
 
 /**
@@ -76,7 +78,7 @@ const STANDARD: Layout = {
  */
 const LOOSE: Layout = {
   grip: [4, 5, 6, 7], dash: [0, 1], place: [2], crown: [3],
-  prev: [4], next: [5], confirm: [0, 1, 2, 3, 8, 9], mute: [8],
+  prev: [4], next: [5], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8], mute: [8],
 };
 
 export class Pad {
@@ -157,6 +159,7 @@ export class Pad {
       out.crown = anyHit(m.crown);
       out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
       out.confirm = anyHit(m.confirm);
+      out.pause = anyHit(m.pause);
       out.mute = anyHit(m.mute);
 
       this.prev = [...gp.buttons].map((_, i) => down(i));
@@ -188,6 +191,7 @@ export class Pad {
     if (tap("KeyR")) out.restart = true;
     if (tap("KeyM")) out.mute = true;
     if (tap("Space") || tap("Enter")) out.confirm = true;
+    if (tap("Escape") || tap("KeyP")) out.pause = true;
 
     this.prevKeys = new Set(this.keys);
     return out;
@@ -229,10 +233,10 @@ export class Pad {
 export const GLYPH = {
   pad: {
     move: "L STICK", grip: "RT", dash: "A", place: "X", crown: "Y",
-    cycle: "LB / B", confirm: "START", mute: "BACK",
+    cycle: "LB / B", confirm: "START", pause: "START", mute: "BACK",
   },
   keys: {
     move: "WASD", grip: "SPACE", dash: "K", place: "E / 1-9", crown: "C",
-    cycle: "Q", confirm: "SPACE", mute: "M",
+    cycle: "Q", confirm: "SPACE", pause: "ESC / P", mute: "M",
   },
 } as const;
