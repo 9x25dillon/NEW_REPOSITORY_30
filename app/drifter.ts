@@ -1604,10 +1604,22 @@ export class Game {
     if (!run.bound.free && n("tuned") === 0) {
       return `THE GAP NEVER CAUGHT IT - ${advice(run.crystal, run.gap, run.bound.omega)}`;
     }
-    if (n("hit:struck") > n("hit:volley") && n("dash") < n("coil") / 3) {
-      return "THEY TELEGRAPH. WHEN ONE STOPS AND GATHERS, BURST OFF THE LINE IT SHOWS";
+    // Speak to what ACTUALLY killed them. This used to fire on struck > volley
+    // without asking which cause dominated, so a run that took six hits by
+    // drifting into things and one from a strike was told to dodge better.
+    const causes: Array<[string, number]> = [
+      ["struck", n("hit:struck")], ["volley", n("hit:volley")], ["touched", n("hit:touched")],
+    ];
+    const worst = causes.sort((a, b) => b[1] - a[1])[0];
+    if (worst[1] > 0) {
+      if (worst[0] === "struck") {
+        return n("dash") < n("strike") / 4
+          ? "THEY TELEGRAPH. WHEN ONE STOPS AND GATHERS, BURST OFF THE LINE IT SHOWS"
+          : "CLOSE YOUR HAND ON ONE AND IT CANNOT STRIKE AT ALL";
+      }
+      if (worst[0] === "volley") return "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
+      return "WHAT SHARES YOUR CONTRAST IS DRAWN INTO YOUR NODE. HOLD IT OR LEAVE";
     }
-    if (n("hit:volley") >= 2) return "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
     if (n("spent") >= 3) return "YOU RAN THE DRIVE DRY. THE LATTICE IS YOUR COVER - LET IT BACK UP";
     return "THE THING YOU CROWNED IS MADE OF WHAT YOU FED IT. FEED IT LESS";
   }

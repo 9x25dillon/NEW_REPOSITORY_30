@@ -84,16 +84,46 @@ test("each beast differs by its contrast factor, not by a stat block", () => {
   assert.equal(Object.keys(BEASTS).length, 4);
 });
 
-test("a body you have hold of is not free to reach you", () => {
+test("only a strike hurts you, and a body in your hand cannot strike", () => {
+  // ALL DAMAGE IS TELEGRAPHED. A hunter used to hurt you by being near you,
+  // which is not something you can read or answer — and because anything
+  // sharing your contrast is drawn into your node by your own drive, gathering
+  // filled your lap with things that damaged you for existing. The first real
+  // run of the shipped build took six of its seven hits that way, and one from
+  // an actual strike.
   const run = startRun(3);
   run.entities = [];
   stand(run, CENTRE.x, CENTRE.y);
-  for (let i = 0; i < 3; i++) seedBeast(run, "vesicle", CENTRE.x, CENTRE.y);
 
+  // Sitting on you, not striking: a body in the water and nothing more.
+  const idle = seedBeast(run, "vesicle", CENTRE.x, CENTRE.y);
+  for (let i = 0; i < 30; i++) {
+    idle.x = CENTRE.x; idle.y = CENTRE.y; idle.wind = 0; idle.strike = 0;
+    step(run, IDLE, DT);
+    run.events.length = 0;
+  }
+  assert.equal(run.integrity, MAX_INTEGRITY, "drifting into you is not an attack");
+
+  // Mid-strike, it is.
+  const striking = [idle, seedBeast(run, "vesicle", CENTRE.x, CENTRE.y),
+    seedBeast(run, "vesicle", CENTRE.x, CENTRE.y)];
+  for (const e of striking) { e.x = CENTRE.x; e.y = CENTRE.y; e.strike = 0.2; e.held = 0; }
   step(run, IDLE, DT);
-  assert.equal(run.integrity, MAX_INTEGRITY - 1, "three at once is one hit");
+  assert.equal(run.integrity, MAX_INTEGRITY - 1, "three at once is still one hit");
+  for (const e of striking) { e.x = CENTRE.x; e.y = CENTRE.y; e.strike = 0.2; }
   step(run, IDLE, DT);
   assert.equal(run.integrity, MAX_INTEGRITY - 1, "mercy holds");
+
+  // And being caught takes the strike away before it happens.
+  const caught = seedBeast(run, "vesicle", CENTRE.x + 60e-6, CENTRE.y);
+  run.wave.amplitude = run.wave.maxAmplitude;
+  run.you.grip = 1;
+  step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+  assert.ok(caught.wind > 0, "it gathers itself");
+  caught.held = 0.2;
+  step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+  assert.equal(caught.wind, 0);
+  assert.equal(caught.strike, 0, "in your hand it can do nothing at all");
 });
 
 // ── it tells you before it does it ──────────────────────────────────────────

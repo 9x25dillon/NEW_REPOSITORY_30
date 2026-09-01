@@ -433,6 +433,14 @@ stamina back. Running out is how this kills you.
 
 ### Everything tells you first
 
+**All damage is telegraphed, and a hunter's strike is its only attack.** For a
+while it also hurt you simply by being near, which is not something you can read
+or answer — and since anything sharing your contrast is drawn into your node by
+your own drive, gathering quietly filled your lap with things that damaged you
+for existing. The first real playtest took six of its seven hits that way and
+one from an actual strike. Outside its strike a hunter is a body in the water,
+and it shoves you, which is what a body in the water does.
+
 A hunter that only walks at you is weather, and the only answer to weather is to
 have gripped earlier. So a hunter closes, **stops**, and gathers itself — a
 quarter to two-thirds of a second depending on what it is — and then goes along

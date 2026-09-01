@@ -1029,8 +1029,18 @@ function contact(run: Run, dt: number): void {
     const b = beast(e.species);
     if (Math.hypot(e.x - run.you.x, e.y - run.you.y) < TOUCH + particleOf(e).radius) {
       e.flash = 0.3;
-      if (b.damage > 0) { bite += b.damage; struck ||= e.strike > 0; }
-      else drain += b.drain;
+      // ALL DAMAGE IS TELEGRAPHED, and this is where that was still untrue. A
+      // hunter hurt you by being NEAR you, which is not something you can read
+      // or answer — and since anything sharing your contrast is drawn into your
+      // node by your own drive, gathering quietly filled your lap with things
+      // that damaged you for existing. The first real run reported six of seven
+      // hits taken that way and one from an actual strike.
+      //
+      // The strike is the attack. Outside it a hunter is a body in the water
+      // and it shoves you, which is what a body in the water does.
+      if (b.damage > 0) {
+        if (e.strike > 0) { bite += b.damage; struck = true; }
+      } else drain += b.drain;
     }
   }
 
