@@ -96,28 +96,37 @@ export const DASH_LEAD = 0.45;
 /**
  * The drive that is always on, as a fraction of the sustained maximum.
  *
- * GAME CONSTANT, and the most carefully chosen number in the game, because a
- * STANDING WAVE IS A FENCE. A lattice that is always on pins every body to its
- * nearest node — that is what a tweezer is for — and a pinned hunter cannot
- * cross the cell it is pinned in. At half amplitude nothing in the water could
- * reach the player at all: the whole bestiary parked itself one node out, about
- * eighty microns away, and stood there. It was not a difficulty problem, it was
- * a game in which nothing could happen.
+ * GAME CONSTANT, and the one that decides whether this is playable at all,
+ * because a STANDING WAVE IS A FENCE. A lattice that is always on pins every
+ * body to its nearest node — that is what a tweezer is for — and a pinned
+ * hunter cannot cross the cell it is pinned in. At half amplitude and a wide
+ * aperture nothing in the water could reach the player: the whole bestiary
+ * parked itself one node out, about eighty microns away, and stood there.
  *
- * So the idle drive is set below the point where it can hold anything that
- * swims: a vesicle's trap velocity at this amplitude is nine microns a second
- * against a swim of fifty. You crawl rather than walk, the fence is not there,
- * and everything converges on you. Which makes the real shape of the game:
+ * The first fix for that was to make the idle drive very weak, and it was the
+ * wrong one. It cost 26 um/s of cruising speed — twenty-six pixels a second, on
+ * an eight-hundred-pixel arena — which does not read as a slow walk, it reads
+ * as a control that is not connected to anything. The first person to pick up a
+ * pad said they could not control it, and they were right.
  *
- *   THE FIELD IS THE SHIELD, AND STAMINA IS ITS CLOCK. Gripping fences the
- *   water off and lets you move at speed; releasing drops the lattice, and
- *   whatever was standing off comes in while you get it back.
+ * SPEED AND FENCING ARE ONLY THE SAME KNOB IF THE APERTURE IS WIDE. What made a
+ * fence was reach, not strength: the drive was spread over nearly two trap
+ * pitches, so it still owned bodies hundreds of microns away. Concentrated to
+ * under one pitch it can be three times stronger and still lose to a vesicle's
+ * own swimming past about fifty microns — so you walk at 225 um/s, and beyond
+ * arm's length the water is nobody's.
+ *
+ * Which leaves the shape of the game intact:
+ *
+ *   THE FIELD IS THE SHIELD, AND STAMINA IS ITS CLOCK. Gripping concentrates it
+ *   into one trap, fences off what answers to the other lattice, and triples
+ *   your speed again; releasing drops all three while you get it back.
  */
-export const CRUISE_AMPLITUDE = 0.18;
+export const CRUISE_AMPLITUDE = 0.55;
 
 /** Apodisation, in trap pitches: released, and gripping. Wider than the pitch
  *  is many traps at once; narrower is one trap, which is a hand. */
-export const CRUISE_FOCUS = 1.9;
+export const CRUISE_FOCUS = 0.9;
 export const HAND_FOCUS = 0.62;
 
 /** Time constant of the apodisation ramp, s. It is a physical aperture being

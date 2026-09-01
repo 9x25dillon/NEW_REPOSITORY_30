@@ -49,6 +49,36 @@ const NOTHING: Intent = {
 /** Buttons in the standard mapping, by the name written on an Xbox pad. */
 const A = 0, B = 1, X = 2, Y = 3, LB = 4, RB = 5, LT = 6, RT = 7, BACK = 8, START = 9;
 
+interface Layout {
+  grip: number[]; dash: number[]; place: number[]; crown: number[];
+  prev: number[]; next: number[]; confirm: number[]; mute: number[];
+}
+
+const STANDARD: Layout = {
+  grip: [RT, RB], dash: [A, LT], place: [X], crown: [Y],
+  prev: [LB], next: [B], confirm: [START, A], mute: [BACK],
+};
+
+/**
+ * For a pad the browser did not recognise.
+ *
+ * The spec only promises the order above for pads it has a mapping for;
+ * everything else arrives as mapping "" with the axes and buttons in whatever
+ * order the driver felt like, and then index 9 is not Start and index 0 is not
+ * A. The page does not throw, does not log, and simply ignores you.
+ *
+ * So the fallback is deliberately forgiving rather than another guess at one
+ * layout: every shoulder and trigger grips, either of the first two buttons
+ * bursts, and any face or menu button gets you off the title screen. It will
+ * not be comfortable, but nobody is locked out of their own game while we work
+ * out what their controller actually is — and the title screen prints the id
+ * and the live axes so that can be worked out at all.
+ */
+const LOOSE: Layout = {
+  grip: [4, 5, 6, 7], dash: [0, 1], place: [2], crown: [3],
+  prev: [4], next: [5], confirm: [0, 1, 2, 3, 8, 9], mute: [8],
+};
+
 export class Pad {
   /** True while a gamepad is actually reporting. Drives which glyphs the HUD
    *  prints — telling somebody to press A when they are on a keyboard is worse
@@ -83,6 +113,19 @@ export class Pad {
     return null;
   }
 
+  /**
+   * Which axes are the left stick, and which button is which.
+   *
+   * The spec's "standard" mapping is a promise the browser only makes for pads
+   * it recognises; everything else arrives as mapping "" with the axes and
+   * buttons in whatever order the driver felt like. Rather than trust it, the
+   * indices are read through here, so a pad that reports something else can be
+   * corrected in one place.
+   */
+  private layout(gp: Gamepad): Layout {
+    return gp.mapping === "standard" ? STANDARD : LOOSE;
+  }
+
   /** Radial deadzone with a curve, applied to the vector rather than the axes. */
   private stick(ax: number, ay: number): { x: number; y: number } {
     const r = Math.hypot(ax, ay);
@@ -102,18 +145,21 @@ export class Pad {
         const b = gp.buttons[i];
         return b ? b.pressed || b.value > TRIGGER : false;
       };
-      const hit = (i: number): boolean => down(i) && !this.prev[i];
+      const anyDown = (list: number[]): boolean => list.some(down);
+      const anyHit = (list: number[]): boolean =>
+        list.some((i) => down(i) && !this.prev[i]);
 
+      const m = this.layout(gp);
       out.move = this.stick(gp.axes[0] ?? 0, gp.axes[1] ?? 0);
-      out.grip = down(RT) || down(RB);
-      out.dash = hit(A) || hit(LT);
-      out.place = hit(X);
-      out.crown = hit(Y);
-      out.cycle = (hit(RB) ? 0 : 0) + (hit(LB) ? -1 : 0) + (hit(B) ? 1 : 0);
-      out.confirm = hit(START) || hit(A);
-      out.mute = hit(BACK);
+      out.grip = anyDown(m.grip);
+      out.dash = anyHit(m.dash);
+      out.place = anyHit(m.place);
+      out.crown = anyHit(m.crown);
+      out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
+      out.confirm = anyHit(m.confirm);
+      out.mute = anyHit(m.mute);
 
-      this.prev = gp.buttons.map((_, i) => down(i));
+      this.prev = [...gp.buttons].map((_, i) => down(i));
     } else {
       this.prev = [];
     }
@@ -145,6 +191,30 @@ export class Pad {
 
     this.prevKeys = new Set(this.keys);
     return out;
+  }
+
+  /**
+   * What the browser is actually reporting, in one line.
+   *
+   * A controller that does not work is the least debuggable thing there is:
+   * nothing throws, nothing logs, the page simply ignores you. The Gamepad API
+   * only promises a "standard" button and axis order for pads it recognises,
+   * and for anything it does not, index 9 is not Start and index 0 is not A.
+   * This is printed on the title screen so the failure is a thing you can read
+   * rather than a thing you have to bisect.
+   */
+  describe(): string {
+    const raw = navigator.getGamepads?.() ?? [];
+    const found = [...raw].filter((p) => p);
+    if (found.length === 0) return "NO CONTROLLER SEEN - PRESS A BUTTON ON IT";
+
+    const gp = found[0] as Gamepad;
+    const ax = [...gp.axes].slice(0, 4).map((v) => v.toFixed(2)).join(" ");
+    const pressed = [...gp.buttons]
+      .map((b, i) => (b.pressed || b.value > TRIGGER ? i : -1))
+      .filter((i) => i >= 0);
+    return `${gp.id.slice(0, 34)} | MAPPING ${gp.mapping || "(none)"} `
+      + `| AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
   }
 
   /** A number key held this frame, 1..9, or zero. Placing a specific cell is

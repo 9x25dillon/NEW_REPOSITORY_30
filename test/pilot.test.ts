@@ -7,6 +7,7 @@ import {
   selfContrast, speed,
 } from "../game/pilot.js";
 import { advance, aimAt, grip, newWave, velocityAt } from "../game/wave.js";
+import { HOLD_PRESSURE } from "../game/run.js";
 import { WATER, contrastFactor } from "../src/gorkov.js";
 
 const DT = 1 / 60;
@@ -99,27 +100,44 @@ test("gripping concentrates the drive rather than merely raising it", () => {
 
   for (let i = 0; i < 60; i++) concentrate(p, w, true, DT);
   assert.ok(handed(p));
-  assert.ok(w.focus < loose * 0.5, "closing your hand narrows the aperture");
+  assert.ok(w.focus < loose, "closing your hand narrows the aperture");
   assert.ok(Math.abs(w.focus - PITCH * HAND_FOCUS) < 1e-9, "down to under one trap pitch");
+  assert.ok(loose < PITCH, "and the idle aperture is under a pitch too — it has to be, or it fences");
 });
 
-test("the idle drive is too weak to be a fence", () => {
+test("the idle drive owns your arm's length and nothing beyond it", () => {
   // A standing wave pins whatever it can hold, and a pinned hunter never
-  // arrives. The idle drive has to lose to a vesicle's own swimming speed or
-  // the game has nothing in it.
+  // arrives — so an idle drive that reaches across the arena is a game in which
+  // nothing can happen. What made that fence was REACH, not strength: the
+  // aperture was spread over nearly two trap pitches and still owned bodies
+  // hundreds of microns out. Concentrated under one pitch it can be three times
+  // stronger, walk you at a useful speed, and still lose to a vesicle's own
+  // swimming past about fifty microns.
   const { w, p } = rig();
   grip(w, false, 1);
   concentrate(p, w, false, DT);
   assert.ok(w.amplitude <= MAX * CRUISE_AMPLITUDE + 1e-9);
+  assert.ok(w.amplitude < HOLD_PRESSURE, "and it still cannot HOLD anything at all");
 
   const vesicle = { radius: 5.5e-6, rho: 915, c: 1450 };
+  const swim = 5.0e-5;
   aimAt(w, 0, 0, contrastFactor(vesicle, WATER) < 0);
-  let worst = 0;
-  for (let i = 0; i <= 60; i++) {
-    const v = Math.abs(velocityAt(w, (i / 60) * (PITCH / 2), 0, vesicle).vx);
-    if (v > worst) worst = v;
+
+  const pullAt = (from: number): number => {
+    let worst = 0;
+    for (let i = 0; i <= 30; i++) {
+      const v = Math.abs(velocityAt(w, from + (i / 30) * (PITCH / 2), 0, vesicle).vx);
+      if (v > worst) worst = v;
+    }
+    return worst;
+  };
+
+  assert.ok(pullAt(0) > swim, "close in, the water is yours");
+  for (let r = 100e-6; r < 500e-6; r += 50e-6) {
+    assert.ok(pullAt(r) < swim,
+      `at ${(r * 1e6).toFixed(0)} um the idle drive still pins a vesicle `
+      + `(${(pullAt(r) * 1e6).toFixed(0)} um/s against a ${(swim * 1e6).toFixed(0)} um/s swim)`);
   }
-  assert.ok(worst < 5.0e-5, `idle pull ${(worst * 1e6).toFixed(0)} um/s must lose to a 50 um/s swim`);
 });
 
 // ── the dash ────────────────────────────────────────────────────────────────

@@ -814,8 +814,8 @@
   var YOU = { radius: 9e-6, rho: 915, c: 1450 };
   var LEAD = 0.25;
   var DASH_LEAD = 0.45;
-  var CRUISE_AMPLITUDE = 0.18;
-  var CRUISE_FOCUS = 1.9;
+  var CRUISE_AMPLITUDE = 0.55;
+  var CRUISE_FOCUS = 0.9;
   var HAND_FOCUS = 0.62;
   var FOCUS_TIME = 0.085;
   var DASH_GAIN = 2;
@@ -1790,6 +1790,26 @@
   var RT = 7;
   var BACK = 8;
   var START = 9;
+  var STANDARD = {
+    grip: [RT, RB],
+    dash: [A, LT],
+    place: [X],
+    crown: [Y],
+    prev: [LB],
+    next: [B],
+    confirm: [START, A],
+    mute: [BACK]
+  };
+  var LOOSE = {
+    grip: [4, 5, 6, 7],
+    dash: [0, 1],
+    place: [2],
+    crown: [3],
+    prev: [4],
+    next: [5],
+    confirm: [0, 1, 2, 3, 8, 9],
+    mute: [8]
+  };
   var Pad = class {
     constructor() {
       /** True while a gamepad is actually reporting. Drives which glyphs the HUD
@@ -1823,6 +1843,18 @@
       }
       return null;
     }
+    /**
+     * Which axes are the left stick, and which button is which.
+     *
+     * The spec's "standard" mapping is a promise the browser only makes for pads
+     * it recognises; everything else arrives as mapping "" with the axes and
+     * buttons in whatever order the driver felt like. Rather than trust it, the
+     * indices are read through here, so a pad that reports something else can be
+     * corrected in one place.
+     */
+    layout(gp) {
+      return gp.mapping === "standard" ? STANDARD : LOOSE;
+    }
     /** Radial deadzone with a curve, applied to the vector rather than the axes. */
     stick(ax, ay) {
       const r = Math.hypot(ax, ay);
@@ -1840,16 +1872,18 @@
           const b = gp.buttons[i];
           return b ? b.pressed || b.value > TRIGGER : false;
         };
-        const hit = (i) => down(i) && !this.prev[i];
+        const anyDown = (list) => list.some(down);
+        const anyHit = (list) => list.some((i) => down(i) && !this.prev[i]);
+        const m = this.layout(gp);
         out.move = this.stick(gp.axes[0] ?? 0, gp.axes[1] ?? 0);
-        out.grip = down(RT) || down(RB);
-        out.dash = hit(A) || hit(LT);
-        out.place = hit(X);
-        out.crown = hit(Y);
-        out.cycle = (hit(RB) ? 0 : 0) + (hit(LB) ? -1 : 0) + (hit(B) ? 1 : 0);
-        out.confirm = hit(START) || hit(A);
-        out.mute = hit(BACK);
-        this.prev = gp.buttons.map((_, i) => down(i));
+        out.grip = anyDown(m.grip);
+        out.dash = anyHit(m.dash);
+        out.place = anyHit(m.place);
+        out.crown = anyHit(m.crown);
+        out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
+        out.confirm = anyHit(m.confirm);
+        out.mute = anyHit(m.mute);
+        this.prev = [...gp.buttons].map((_, i) => down(i));
       } else {
         this.prev = [];
       }
@@ -1874,6 +1908,25 @@
       if (tap("Space") || tap("Enter")) out.confirm = true;
       this.prevKeys = new Set(this.keys);
       return out;
+    }
+    /**
+     * What the browser is actually reporting, in one line.
+     *
+     * A controller that does not work is the least debuggable thing there is:
+     * nothing throws, nothing logs, the page simply ignores you. The Gamepad API
+     * only promises a "standard" button and axis order for pads it recognises,
+     * and for anything it does not, index 9 is not Start and index 0 is not A.
+     * This is printed on the title screen so the failure is a thing you can read
+     * rather than a thing you have to bisect.
+     */
+    describe() {
+      const raw = navigator.getGamepads?.() ?? [];
+      const found = [...raw].filter((p) => p);
+      if (found.length === 0) return "NO CONTROLLER SEEN - PRESS A BUTTON ON IT";
+      const gp = found[0];
+      const ax = [...gp.axes].slice(0, 4).map((v) => v.toFixed(2)).join(" ");
+      const pressed = [...gp.buttons].map((b, i) => b.pressed || b.value > TRIGGER ? i : -1).filter((i) => i >= 0);
+      return `${gp.id.slice(0, 34)} | MAPPING ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
     }
     /** A number key held this frame, 1..9, or zero. Placing a specific cell is
      *  the one thing a keyboard does better than a pad. */
@@ -2122,6 +2175,8 @@
       __publicField(this, "run");
       __publicField(this, "screen", "title");
       __publicField(this, "pad", new Pad());
+      /** What the controls did this frame, for inspection. */
+      __publicField(this, "intent", null);
       /** Where the body has been, for the streak. Flat pairs. */
       __publicField(this, "youTrail", []);
       /** Which cell in the rack a bare press will spend. */
@@ -2182,6 +2237,10 @@
       this.bindInput();
       this.fit();
       window.addEventListener("resize", () => this.fit());
+    }
+    /** The run, for inspection. Read-only in spirit. */
+    get state() {
+      return this.run;
     }
     // ── input ─────────────────────────────────────────────────────────────────
     /**
@@ -2302,6 +2361,7 @@
       this.t += dt;
       const run = this.run;
       const it = this.pad.read();
+      this.intent = it;
       this.act(it);
       if (this.screen === "title") {
         step(run, {
@@ -3325,11 +3385,9 @@
       g2.font = `700 14px ${MONO}`;
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
       g2.fillText(on ? "PRESS START" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
-      if (on) {
-        g2.font = `600 9px ${MONO}`;
-        g2.fillStyle = `rgb(${JADE})`;
-        g2.fillText("CONTROLLER CONNECTED", VIEW_W / 2, 440);
-      }
+      g2.font = `600 8px ${MONO}`;
+      g2.fillStyle = on ? `rgb(${JADE})` : FAINT2;
+      g2.fillText(this.pad.describe(), VIEW_W / 2, 440);
       if (this.best > 0) {
         g2.fillStyle = DIM;
         g2.font = `600 10px ${MONO}`;
@@ -3387,7 +3445,11 @@
     if (line) g2.fillText(line, x, y + row * lh);
   }
   var canvas = document.getElementById("game");
-  if (canvas) new Game(canvas).start();
+  if (canvas) {
+    const game = new Game(canvas);
+    window.drifter = game;
+    game.start();
+  }
 })();
 </script>
 </body>

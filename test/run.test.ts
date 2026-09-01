@@ -140,9 +140,11 @@ test("a strike goes where it was pointed, not where you went", () => {
   // Now leave. It is already going, and it goes past.
   stand(run, CENTRE.x, CENTRE.y - 200e-6);
   const y0 = v.y;
+  const x1 = v.x;
   for (let i = 0; i < 200 && v.strike > 0; i++) { step(run, IDLE, DT); run.events.length = 0; }
   assert.ok(Math.abs(v.y - y0) < 8e-6, "a strike does not steer");
-  assert.ok(v.x < CENTRE.x, "and it overshoots where you were");
+  assert.ok(v.x < x1 - 40e-6,
+    `it should carry on west regardless (${(x1 * 1e6).toFixed(0)} -> ${(v.x * 1e6).toFixed(0)} um)`);
 });
 
 test("a body in your hand cannot strike at all", () => {

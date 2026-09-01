@@ -8,7 +8,10 @@ import { test } from "node:test";
 // nothing else in the suite would ever touch it.
 
 interface FakeButton { pressed: boolean; value: number }
-interface FakePad { index: number; connected: boolean; axes: number[]; buttons: FakeButton[] }
+interface FakePad {
+  index: number; connected: boolean; mapping: string;
+  id: string; axes: number[]; buttons: FakeButton[];
+}
 
 let pads: FakePad[] = [];
 const listeners = new Map<string, (e: unknown) => void>();
@@ -24,9 +27,9 @@ Object.defineProperty(globalThis, "navigator", {
 
 const { GLYPH, Pad } = await import("../app/pad.js");
 
-function pad(axes: [number, number] = [0, 0]): FakePad {
+function pad(axes: [number, number] = [0, 0], mapping = "standard"): FakePad {
   return {
-    index: 0, connected: true, axes,
+    index: 0, connected: true, mapping, id: "Xbox Wireless Controller", axes,
     buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
   };
 }
@@ -141,4 +144,50 @@ test("the prompts follow the hardware that is actually plugged in", () => {
   assert.ok(p.connected);
   assert.equal(GLYPH.pad.dash, "A");
   assert.equal(GLYPH.keys.dash, "K");
+});
+
+test("a pad the browser does not recognise still gets you into the game", () => {
+  // The failure this exists for is silent: mapping "" means the indices are
+  // whatever the driver felt like, so Start is not button nine, nothing throws,
+  // nothing logs, and the page simply ignores you. The fallback is forgiving on
+  // purpose — it will not be comfortable, but nobody is locked out.
+  const p = new Pad();
+  const gp = pad([0, 0], "");
+  pads = [gp];
+  p.read();
+
+  for (const face of [0, 1, 2, 3, 8, 9]) {
+    press(gp, face);
+    assert.ok(p.read().confirm, `button ${face} should get past a title screen`);
+    press(gp, face, false);
+    p.read();
+  }
+
+  for (const shoulder of [4, 5, 6, 7]) {
+    press(gp, shoulder);
+    assert.ok(p.read().grip, `button ${shoulder} should grip`);
+    press(gp, shoulder, false);
+    p.read();
+  }
+
+  // And the stick is still the stick: axes 0 and 1 are the one thing every
+  // driver agrees on.
+  pads = [pad([0, -1], "")];
+  const m = p.read().move;
+  assert.ok(Math.abs(m.y + 1) < 1e-9 && Math.abs(m.x) < 1e-9);
+});
+
+test("it says out loud what the browser is reporting", () => {
+  const p = new Pad();
+  pads = [];
+  assert.match(p.describe(), /NO CONTROLLER/);
+
+  const gp = pad([0.5, -0.25], "");
+  press(gp, 7);
+  pads = [gp];
+  const line = p.describe();
+  assert.match(line, /Xbox Wireless Controller/);
+  assert.match(line, /MAPPING \(none\)/, "an unrecognised mapping must be visible");
+  assert.match(line, /0\.50/);
+  assert.match(line, /DOWN 7/);
 });

@@ -161,6 +161,10 @@ export class Game {
   private screen: Screen = "title";
 
   private readonly pad = new Pad();
+  /** The run, for inspection. Read-only in spirit. */
+  get state(): Run { return this.run; }
+  /** What the controls did this frame, for inspection. */
+  intent: Intent | null = null;
   /** Where the body has been, for the streak. Flat pairs. */
   private youTrail: number[] = [];
   /** Which cell in the rack a bare press will spend. */
@@ -337,6 +341,7 @@ export class Game {
     const run = this.run;
 
     const it = this.pad.read();
+    this.intent = it;
     this.act(it);
 
     if (this.screen === "title") {
@@ -1376,11 +1381,12 @@ export class Game {
     g.font = `700 14px ${MONO}`;
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.fillText(on ? "PRESS START" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
-    if (on) {
-      g.font = `600 9px ${MONO}`;
-      g.fillStyle = `rgb(${JADE})`;
-      g.fillText("CONTROLLER CONNECTED", VIEW_W / 2, 440);
-    }
+    // What the browser is actually reporting. A controller that does not work
+    // is the least debuggable thing there is — nothing throws and nothing logs —
+    // so it is put on the screen instead of left to be guessed at.
+    g.font = `600 8px ${MONO}`;
+    g.fillStyle = on ? `rgb(${JADE})` : FAINT;
+    g.fillText(this.pad.describe(), VIEW_W / 2, 440);
     if (this.best > 0) {
       g.fillStyle = DIM;
       g.font = `600 10px ${MONO}`;
@@ -1448,4 +1454,12 @@ function wrap(
 // ── boot ────────────────────────────────────────────────────────────────────
 
 const canvas = document.getElementById("game") as HTMLCanvasElement | null;
-if (canvas) new Game(canvas).start();
+if (canvas) {
+  const game = new Game(canvas);
+  // A handle on the running game, for the console and for the smoke test. The
+  // test that shipped with the controller only ever asserted that two hundred
+  // frames did not THROW, which is not the same as asserting that anything
+  // moved — and the difference between those two was a build nobody could play.
+  (window as unknown as { drifter?: Game }).drifter = game;
+  game.start();
+}
