@@ -4233,9 +4233,16 @@
         "A HUNTER STOPS AND GATHERS BEFORE IT STRIKES, AND GOES WHERE IT POINTED."
       ];
       lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 196 + i * 17));
+      const it = this.intent;
       g2.font = `600 9px ${MONO}`;
       g2.fillStyle = this.pad.connected ? `rgb(${JADE})` : GOLD;
-      g2.fillText(this.pad.describe(), VIEW_W / 2, VIEW_H - 62);
+      g2.fillText(this.pad.describe(), VIEW_W / 2, VIEW_H - 76);
+      g2.fillStyle = DIM;
+      g2.fillText(
+        it ? `READ AS  move ${it.move.x.toFixed(2)},${it.move.y.toFixed(2)}   grip ${it.grip ? "YES" : "no"}   dash ${it.dash ? "YES" : "no"}   place ${it.place ? "YES" : "no"}   throne ${it.crownDown ? "YES" : "no"}` : "READ AS  (nothing yet)",
+        VIEW_W / 2,
+        VIEW_H - 62
+      );
       const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
       g2.font = `700 13px ${MONO}`;
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;

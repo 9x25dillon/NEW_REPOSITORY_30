@@ -1839,11 +1839,24 @@ export class Game {
     ];
     lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 196 + i * 17));
 
-    // The pad, here too: this is the screen somebody opens when a control is
-    // not doing what they expect.
+    // THE DECISIVE TEST, on the screen somebody opens when a control is not
+    // doing what they expect. Two lines: what the browser is handing over, and
+    // what this game made of it. If the first moves and the second does not,
+    // the fault is mine and the numbers say where. If neither moves, the
+    // browser is not delivering — which on a desktop is very often nothing more
+    // than the page having lost focus to a devtools window.
+    const it = this.intent;
     g.font = `600 9px ${MONO}`;
     g.fillStyle = this.pad.connected ? `rgb(${JADE})` : GOLD;
-    g.fillText(this.pad.describe(), VIEW_W / 2, VIEW_H - 62);
+    g.fillText(this.pad.describe(), VIEW_W / 2, VIEW_H - 76);
+    g.fillStyle = DIM;
+    g.fillText(
+      it
+        ? `READ AS  move ${it.move.x.toFixed(2)},${it.move.y.toFixed(2)}`
+          + `   grip ${it.grip ? "YES" : "no"}   dash ${it.dash ? "YES" : "no"}`
+          + `   place ${it.place ? "YES" : "no"}   throne ${it.crownDown ? "YES" : "no"}`
+        : "READ AS  (nothing yet)",
+      VIEW_W / 2, VIEW_H - 62);
 
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
     g.font = `700 13px ${MONO}`;
