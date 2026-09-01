@@ -2375,18 +2375,26 @@
      * rather than a thing you have to bisect.
      */
     describe() {
+      try {
+        return this.describeUnsafe();
+      } catch (err) {
+        return `CONTROLLER READ FAILED: ${String(err).slice(0, 60)}`;
+      }
+    }
+    describeUnsafe() {
       const raw = navigator.getGamepads?.() ?? [];
       const found = [...raw].filter((p) => p);
       if (found.length === 0) return "NO CONTROLLER SEEN - PRESS A BUTTON ON IT";
       const gp = found[0];
+      const id = String(gp.id ?? "UNNAMED PAD");
       const focused = typeof document === "undefined" ? true : document.hasFocus?.() ?? true;
       if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
       if (!this.everMoved) {
-        return `${gp.id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
+        return `${id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
       }
-      const ax = [...gp.axes].slice(0, 4).map((v) => v.toFixed(2)).join(" ");
-      const pressed = [...gp.buttons].map((b, i) => b.pressed || b.value > TRIGGER ? i : -1).filter((i) => i >= 0);
-      return `${gp.id.slice(0, 30)} | ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
+      const ax = [...gp.axes ?? []].slice(0, 4).map((v) => (v ?? 0).toFixed(2)).join(" ");
+      const pressed = [...gp.buttons ?? []].map((b, i) => b && (b.pressed || b.value > TRIGGER) ? i : -1).filter((i) => i >= 0);
+      return `${id.slice(0, 30)} | ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
     }
     /** A number key held this frame, 1..9, or zero. Placing a specific cell is
      *  the one thing a keyboard does better than a pad. */
@@ -2407,10 +2415,13 @@
       pause: "START",
       mute: "BACK"
     },
+    // Mouse first, because the movement this game wants is a direction WITH a
+    // magnitude and a pointer gives both continuously, where WASD gives eight
+    // directions at full deflection.
     keys: {
-      move: "WASD",
-      grip: "SPACE",
-      dash: "K",
+      move: "MOUSE",
+      grip: "L-CLICK",
+      dash: "R-CLICK",
       place: "E / 1-9",
       crown: "C",
       cycle: "Q",
@@ -2663,6 +2674,18 @@
        *  just the update being withheld for a moment while the draw keeps going. */
       __publicField(this, "hitstop", 0);
       __publicField(this, "lastRefusal", -99);
+      /**
+       * The pointer, in metres, and whether it is steering.
+       *
+       * The movement this game wants is a DIRECTION WITH A MAGNITUDE — it is the
+       * offset of the trap from your body — and a mouse gives both, continuously,
+       * where WASD gives eight directions at full deflection. It is the better
+       * analogue of a stick, and it was thrown away when the controller went in.
+       */
+      __publicField(this, "pointer", null);
+      __publicField(this, "steering", false);
+      __publicField(this, "mouseGrip", false);
+      __publicField(this, "mouseDash", false);
       /** How long the throne button has been held, and whether it already fired. */
       __publicField(this, "crownHeld", 0);
       __publicField(this, "crowned", false);
@@ -2691,6 +2714,7 @@
       __publicField(this, "envX", new Float32Array(WASH_W));
       __publicField(this, "envY", new Float32Array(WASH_H));
       __publicField(this, "vignette");
+      __publicField(this, "wasMouseDash", false);
       const ctx = canvas2.getContext("2d");
       if (!ctx) throw new Error("no 2d context");
       this.ctx = ctx;
@@ -2734,9 +2758,25 @@
     bindInput() {
       const wake = () => this.sfx.unlock();
       window.addEventListener("keydown", wake, { once: false });
+      const world = (e) => {
+        const r = this.canvas.getBoundingClientRect();
+        return {
+          sx: (e.clientX - r.left) / r.width * VIEW_W,
+          sy: (e.clientY - r.top) / r.height * VIEW_H
+        };
+      };
+      this.canvas.addEventListener("pointermove", (e) => {
+        const { sx, sy } = world(e);
+        this.pointer = { x: mx(sx), y: mx(sy) };
+        this.steering = true;
+      });
+      this.canvas.addEventListener("pointerleave", () => {
+        this.steering = false;
+      });
       this.canvas.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         wake();
+        this.canvas.focus();
         if (this.screen === "title" || this.screen === "dead") {
           this.begin();
           return;
@@ -2746,16 +2786,50 @@
           this.screen = "play";
           return;
         }
-        const r = this.canvas.getBoundingClientRect();
-        const sx = (e.clientX - r.left) / r.width * VIEW_W;
-        const sy = (e.clientY - r.top) / r.height * VIEW_H;
+        const { sx, sy } = world(e);
         const slot = this.slotAt(sx, sy);
         if (slot >= 0) {
           this.selected = slot;
           this.spend(slot);
+          return;
         }
+        this.pointer = { x: mx(sx), y: mx(sy) };
+        this.steering = true;
+        if (e.button === 0) this.mouseGrip = true;
+        if (e.button === 2) this.mouseDash = true;
+        this.canvas.setPointerCapture(e.pointerId);
       });
+      const up = (e) => {
+        if (e.button === 0) this.mouseGrip = false;
+        if (e.button === 2) this.mouseDash = false;
+      };
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
       this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    }
+    /** Turn one frame of intent into everything that is not movement. */
+    /**
+     * Steer by pointing.
+     *
+     * The keys win when they are held, because somebody reaching for WASD means
+     * it; otherwise the offset is the vector from your body to the pointer, its
+     * magnitude growing over about a hundred and thirty microns so that pointing
+     * just ahead of yourself is the slow, precise approach and pointing across
+     * the arena is full deflection. That is the same shape as a stick, and it is
+     * a truer one than eight directions at maximum.
+     */
+    mouse(it) {
+      if (this.mouseGrip) it.grip = true;
+      if (this.mouseDash && !this.wasMouseDash) it.dash = true;
+      this.wasMouseDash = this.mouseDash;
+      if (!this.steering || !this.pointer) return;
+      if (it.move.x !== 0 || it.move.y !== 0) return;
+      const dx = this.pointer.x - this.run.you.x;
+      const dy = this.pointer.y - this.run.you.y;
+      const r = Math.hypot(dx, dy);
+      if (r < 6e-6) return;
+      const m = Math.min(1, r / 13e-5);
+      it.move = { x: dx / r * m, y: dy / r * m };
     }
     act(it, dt) {
       const run = this.run;
@@ -2861,6 +2935,7 @@
       this.t += dt;
       const run = this.run;
       const it = this.pad.read();
+      this.mouse(it);
       this.intent = it;
       if (it.pause && this.screen === "play") {
         this.paused = !this.paused;
@@ -4236,7 +4311,7 @@
       g2.fillStyle = DIM;
       const pad = (t) => t.padEnd(13, " ");
       const lines = [
-        `${pad(G.move)}THE NODE GOES A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
+        `${pad(G.move)}POINT WHERE TO GO. THE NODE LEADS YOU, AND YOU FALL INTO IT.`,
         `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
         `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
         `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
@@ -4364,7 +4439,7 @@
       g2.font = `600 11px ${MONO}`;
       const pad = (t) => t.padEnd(13, " ");
       const lines = [
-        `${pad(G.move)}PUT THE NODE A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
+        `${pad(G.move)}POINT WHERE TO GO - OR WASD. THE NODE LEADS YOU AND YOU FALL IN.`,
         `${pad(G.grip)}CLOSE YOUR HAND: ONE TRAP, AND SPEED. IT COSTS STAMINA.`,
         `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
         `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
@@ -4398,7 +4473,6 @@
       g2.textAlign = "left";
     }
   };
-  /** Turn one frame of intent into everything that is not movement. */
   __publicField(_Game, "CROWN_HOLD", 0.9);
   var Game = _Game;
   function warmth(phi) {

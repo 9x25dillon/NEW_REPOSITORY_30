@@ -173,7 +173,7 @@ test("the prompts follow the hardware that is actually plugged in", () => {
   p.read();
   assert.ok(p.connected);
   assert.equal(GLYPH.pad.dash, "A");
-  assert.equal(GLYPH.keys.dash, "K");
+  assert.equal(GLYPH.keys.dash, "R-CLICK");
 });
 
 test("a pad the browser does not recognise still gets you into the game", () => {

@@ -239,11 +239,24 @@ export class Pad {
    * rather than a thing you have to bisect.
    */
   describe(): string {
+    // NOTHING IN HERE MAY THROW. It is drawn every frame on the title screen,
+    // so a diagnostic that dies on a device reporting something unexpected —
+    // a pad with no id, no mapping, no axes — takes the whole page with it, and
+    // does so precisely on the machines it exists to describe.
+    try {
+      return this.describeUnsafe();
+    } catch (err) {
+      return `CONTROLLER READ FAILED: ${String(err).slice(0, 60)}`;
+    }
+  }
+
+  private describeUnsafe(): string {
     const raw = navigator.getGamepads?.() ?? [];
     const found = [...raw].filter((p) => p);
     if (found.length === 0) return "NO CONTROLLER SEEN - PRESS A BUTTON ON IT";
 
     const gp = found[0] as Gamepad;
+    const id = String(gp.id ?? "UNNAMED PAD");
     const focused = typeof document === "undefined" ? true : (document.hasFocus?.() ?? true);
 
     // THE QUESTION THAT DECIDES EVERYTHING. A pad that enumerated fine and
@@ -253,14 +266,14 @@ export class Pad {
     // somebody chasing the wrong thing.
     if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
     if (!this.everMoved) {
-      return `${gp.id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
+      return `${id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
     }
 
-    const ax = [...gp.axes].slice(0, 4).map((v) => v.toFixed(2)).join(" ");
-    const pressed = [...gp.buttons]
-      .map((b, i) => (b.pressed || b.value > TRIGGER ? i : -1))
+    const ax = [...(gp.axes ?? [])].slice(0, 4).map((v) => (v ?? 0).toFixed(2)).join(" ");
+    const pressed = [...(gp.buttons ?? [])]
+      .map((b, i) => (b && (b.pressed || b.value > TRIGGER) ? i : -1))
       .filter((i) => i >= 0);
-    return `${gp.id.slice(0, 30)} | ${gp.mapping || "(none)"} `
+    return `${id.slice(0, 30)} | ${gp.mapping || "(none)"} `
       + `| AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
   }
 
@@ -278,8 +291,11 @@ export const GLYPH = {
     move: "L STICK", grip: "RT", dash: "A", place: "X", crown: "Y",
     cycle: "LB / B", confirm: "START", pause: "START", mute: "BACK",
   },
+  // Mouse first, because the movement this game wants is a direction WITH a
+  // magnitude and a pointer gives both continuously, where WASD gives eight
+  // directions at full deflection.
   keys: {
-    move: "WASD", grip: "SPACE", dash: "K", place: "E / 1-9", crown: "C",
+    move: "MOUSE", grip: "L-CLICK", dash: "R-CLICK", place: "E / 1-9", crown: "C",
     cycle: "Q", confirm: "SPACE", pause: "ESC / P", mute: "M",
   },
 } as const;

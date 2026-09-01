@@ -195,6 +195,18 @@ export class Game {
    *  just the update being withheld for a moment while the draw keeps going. */
   private hitstop = 0;
   private lastRefusal = -99;
+  /**
+   * The pointer, in metres, and whether it is steering.
+   *
+   * The movement this game wants is a DIRECTION WITH A MAGNITUDE — it is the
+   * offset of the trap from your body — and a mouse gives both, continuously,
+   * where WASD gives eight directions at full deflection. It is the better
+   * analogue of a stick, and it was thrown away when the controller went in.
+   */
+  private pointer: { x: number; y: number } | null = null;
+  private steering = false;
+  private mouseGrip = false;
+  private mouseDash = false;
   /** How long the throne button has been held, and whether it already fired. */
   private crownHeld = 0;
   private crowned = false;
@@ -268,22 +280,77 @@ export class Game {
     const wake = () => this.sfx.unlock();
     window.addEventListener("keydown", wake, { once: false });
 
+    const world = (e: { clientX: number; clientY: number }) => {
+      const r = this.canvas.getBoundingClientRect();
+      return {
+        sx: ((e.clientX - r.left) / r.width) * VIEW_W,
+        sy: ((e.clientY - r.top) / r.height) * VIEW_H,
+      };
+    };
+
+    this.canvas.addEventListener("pointermove", (e) => {
+      const { sx, sy } = world(e);
+      this.pointer = { x: mx(sx), y: mx(sy) };
+      this.steering = true;
+    });
+    this.canvas.addEventListener("pointerleave", () => { this.steering = false; });
+
     this.canvas.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       wake();
+      this.canvas.focus();
       if (this.screen === "title" || this.screen === "dead") { this.begin(); return; }
       if (this.screen === "birth") { enterWorld(this.run); this.screen = "play"; return; }
 
-      const r = this.canvas.getBoundingClientRect();
-      const sx = ((e.clientX - r.left) / r.width) * VIEW_W;
-      const sy = ((e.clientY - r.top) / r.height) * VIEW_H;
+      const { sx, sy } = world(e);
       const slot = this.slotAt(sx, sy);
-      if (slot >= 0) { this.selected = slot; this.spend(slot); }
+      if (slot >= 0) { this.selected = slot; this.spend(slot); return; }
+
+      this.pointer = { x: mx(sx), y: mx(sy) };
+      this.steering = true;
+      if (e.button === 0) this.mouseGrip = true;
+      if (e.button === 2) this.mouseDash = true;
+      this.canvas.setPointerCapture(e.pointerId);
     });
+
+    const up = (e: PointerEvent) => {
+      if (e.button === 0) this.mouseGrip = false;
+      if (e.button === 2) this.mouseDash = false;
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
   /** Turn one frame of intent into everything that is not movement. */
+  /**
+   * Steer by pointing.
+   *
+   * The keys win when they are held, because somebody reaching for WASD means
+   * it; otherwise the offset is the vector from your body to the pointer, its
+   * magnitude growing over about a hundred and thirty microns so that pointing
+   * just ahead of yourself is the slow, precise approach and pointing across
+   * the arena is full deflection. That is the same shape as a stick, and it is
+   * a truer one than eight directions at maximum.
+   */
+  private mouse(it: Intent): void {
+    if (this.mouseGrip) it.grip = true;
+    if (this.mouseDash && !this.wasMouseDash) it.dash = true;
+    this.wasMouseDash = this.mouseDash;
+
+    if (!this.steering || !this.pointer) return;
+    if (it.move.x !== 0 || it.move.y !== 0) return;   // the keys mean it
+
+    const dx = this.pointer.x - this.run.you.x;
+    const dy = this.pointer.y - this.run.you.y;
+    const r = Math.hypot(dx, dy);
+    if (r < 6e-6) return;
+    const m = Math.min(1, r / 130e-6);
+    it.move = { x: (dx / r) * m, y: (dy / r) * m };
+  }
+
+  private wasMouseDash = false;
+
   private static readonly CROWN_HOLD = 0.9;
 
   private act(it: Intent, dt: number): void {
@@ -399,6 +466,7 @@ export class Game {
     const run = this.run;
 
     const it = this.pad.read();
+    this.mouse(it);
     this.intent = it;
 
     // Pause first, and only where there is something to pause. A menu is
@@ -1822,7 +1890,7 @@ export class Game {
     g.fillStyle = DIM;
     const pad = (t: string) => t.padEnd(13, " ");
     const lines = [
-      `${pad(G.move)}THE NODE GOES A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
+      `${pad(G.move)}POINT WHERE TO GO. THE NODE LEADS YOU, AND YOU FALL INTO IT.`,
       `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
       `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
       `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
@@ -1967,7 +2035,7 @@ export class Game {
     g.font = `600 11px ${MONO}`;
     const pad = (t: string) => t.padEnd(13, " ");
     const lines = [
-      `${pad(G.move)}PUT THE NODE A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
+      `${pad(G.move)}POINT WHERE TO GO - OR WASD. THE NODE LEADS YOU AND YOU FALL IN.`,
       `${pad(G.grip)}CLOSE YOUR HAND: ONE TRAP, AND SPEED. IT COSTS STAMINA.`,
       `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
       `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
