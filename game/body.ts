@@ -29,6 +29,7 @@
 
 import { type Structure } from "./world.js";
 import { cellFor } from "./lattice.js";
+import { lobes } from "./shape.js";
 import { pointGroup } from "../src/pointgroups.js";
 import { type SpaceGroup, groupsOfPointGroup } from "../src/sohncke.js";
 
@@ -72,10 +73,21 @@ export interface Body {
  * orthogonally or diagonally, since a body that may only grow along the axes is
  * a plus sign and not an organism. Everything else is flood fill.
  */
+export function joined(a: Structure, b: Structure, pitch: number): boolean {
+  const d = Math.hypot(b.x - a.x, b.y - a.y);
+  const dz = Math.abs(b.layer - a.layer);
+  if (dz > 1) return false;
+
+  // ACROSS, a step in any of the eight directions. UP, the same site and no
+  // other: a leg is a column, so building one is a deliberate act — retune the
+  // channel, place the cell directly under the one you mean to hang it from,
+  // and retune back. Nothing about that can happen by accident.
+  return dz === 0 ? d <= pitch * 1.5 : d <= pitch * 0.5;
+}
+
 export function bodiesOf(structures: readonly Structure[], pitch: number): Body[] {
   const left = new Set(structures);
   const out: Body[] = [];
-  const near = pitch * 1.5;   // one step, orthogonal or diagonal, with slack
 
   while (left.size > 0) {
     const seed = left.values().next().value as Structure;
@@ -84,8 +96,7 @@ export function bodiesOf(structures: readonly Structure[], pitch: number): Body[
 
     for (let i = 0; i < cells.length; i++) {
       for (const s of [...left]) {
-        const d = Math.hypot(s.x - cells[i].x, s.y - cells[i].y);
-        if (d <= near) { left.delete(s); cells.push(s); }
+        if (joined(cells[i], s, pitch)) { left.delete(s); cells.push(s); }
       }
     }
 
@@ -109,6 +120,114 @@ export function bodiesOf(structures: readonly Structure[], pitch: number): Body[
   }
 
   return out.sort((a, b) => b.mass - a.mass);
+}
+
+/**
+ * A limb: a run of cells reaching out of the body along one of its own
+ * directions.
+ *
+ * WHAT AN ORGANISM IS ALLOWED TO GROW is not a design decision. shape.lobes
+ * gives the in-plane directions a point group actually distinguishes — the
+ * orbit of a horizontal vector under its operations — and a chain running any
+ * other way is not an appendage, it is a lump. A 222 has two directions to grow
+ * in and a 622 has six, which is the same rule that decides where a building can
+ * fire and how a king throws its arms, spent a third time.
+ *
+ * A LEG is a limb that changes plane. Nothing swims, so a body reaches another
+ * height the way anything else does: by having something standing on it. That
+ * is why it takes a retune to build one — you drive the channel to another
+ * harmonic, place the cell, and drive back, and the limb is left spanning two
+ * planes.
+ */
+export interface Limb {
+  cells: Structure[];
+  /** Where it points, as a unit vector in the plane. */
+  dir: [number, number];
+  /** How many cells long, not counting where it attaches. */
+  length: number;
+  /** True if it changes plane along its run. */
+  leg: boolean;
+  /** The layers it touches. */
+  layers: number[];
+}
+
+/** How near a lobe direction a chain has to run to be an appendage. */
+export const LIMB_ARC = 0.45;
+
+export function limbsOf(body: Body, pitch: number): Limb[] {
+  const cells = body.cells;
+  if (cells.length < 3) return [];
+
+  const degree = new Map<Structure, number>();
+  for (const a of cells) {
+    let n = 0;
+    for (const b of cells) if (b !== a && joined(a, b, pitch)) n++;
+    degree.set(a, n);
+  }
+
+  const dirs = lobes(body.hm);
+  const out: Limb[] = [];
+
+  for (const tip of cells) {
+    if ((degree.get(tip) ?? 0) !== 1) continue;
+
+    // Walk inward while the chain stays a chain, and take ONE more cell as the
+    // shoulder it hangs from. The shoulder belongs to the trunk, not the limb,
+    // but the limb's direction and its span in z are both measured from it —
+    // without it a single cell hanging off a body has no direction at all and
+    // no way to be seen as a leg, which is exactly what a leg usually is.
+    const run = [tip];
+    let prev: Structure | null = null;
+    let here = tip;
+    let root: Structure | null = null;
+    for (;;) {
+      const next = cells.find((c) => c !== here && c !== prev && joined(here, c, pitch));
+      if (!next) break;
+      if ((degree.get(next) ?? 0) > 2) { root = next; break; }
+      prev = here;
+      here = next;
+      run.push(here);
+      if (run.length > cells.length) break;
+    }
+
+    const from = root ?? run[run.length - 1];
+    const dx = tip.x - from.x;
+    const dy = tip.y - from.y;
+    const r = Math.hypot(dx, dy);
+
+    // It must run along a direction this body's symmetry actually has. A chain
+    // pointing anywhere else is a lump, not an appendage.
+    let dir: [number, number] | null = null;
+    if (r > 1e-12) {
+      const th = Math.atan2(dy, dx);
+      for (const [lx, ly] of dirs) {
+        let d = Math.abs(Math.atan2(ly, lx) - th);
+        while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
+        if (d < LIMB_ARC) { dir = [lx, ly]; break; }
+      }
+    }
+    const layers = [...new Set([...run, from].map((c) => c.layer))].sort();
+    const leg = layers.length > 1;
+    if (!dir && !leg) continue;      // a purely vertical run IS a leg
+
+    out.push({
+      cells: run,
+      dir: dir ?? [0, 0],
+      length: run.length,
+      leg,
+      layers,
+    });
+  }
+
+  return out.sort((a, b) => b.length - a.length);
+}
+
+/** Every plane this body can touch: the one it stands on, and any its legs
+ *  reach. An organism with a leg on another plane can work there. */
+export function reaches(body: Body, pitch: number): number[] {
+  const out = new Set(body.cells.map((c) => c.layer));
+  for (const l of limbsOf(body, pitch)) for (const z of l.layers) out.add(z);
+  return [...out].sort();
 }
 
 /** The largest thing you have made, or nothing. */

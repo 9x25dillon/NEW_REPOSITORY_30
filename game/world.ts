@@ -41,6 +41,15 @@ import { pointGroup } from "../src/pointgroups.js";
 export interface Structure {
   /** Which node plane it is built on. */
   layer: number;
+  /**
+   * Every plane this cell's whole body can work on.
+   *
+   * Its own, and any a LEG of the body it belongs to reaches. This is what an
+   * appendage is for: an organism standing on one plane and hanging a limb onto
+   * another gathers on both, which is the first thing in this game that a body
+   * can do and a heap of separate buildings cannot.
+   */
+  serves: number[];
   id: number;
   /** The group of the cell that was placed. */
   hm: string;
@@ -68,7 +77,7 @@ export function structureFrom(
   id: number, hm: string, x: number, y: number, layer = 0,
 ): Structure {
   return {
-    id, hm, x, y, layer,
+    id, hm, x, y, layer, serves: [layer],
     lobes: lobes(hm),
     reach: reachOf(hm),
     strength: pointGroup(hm).order,

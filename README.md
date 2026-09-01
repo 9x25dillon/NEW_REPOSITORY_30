@@ -478,6 +478,36 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### Appendages, and what a leg is for
+
+A body can only grow where its own symmetry has a direction. `shape.lobes()` is
+the orbit of a horizontal vector under a point group's operations, so a 222 has
+two directions to grow in and a 622 has six — the same rule that decides where a
+building fires and how a king throws its arms, spent a third time. **A chain
+running any other way is not an appendage, it is a lump**, and it is not counted
+as one.
+
+A **leg** is a limb that changes plane. Nothing swims, so a body reaches another
+height the way anything else does — by having something standing on it — and
+cells join across planes only *straight above*, never diagonally. Building a leg
+is therefore a deliberate three-part act: retune the channel to another
+harmonic, place the cell directly under the one you mean to hang it from, and
+retune back. Nothing about that happens by accident.
+
+And a leg is *for* something. A body that hangs a limb onto another plane
+**works on both**: its holding points gather there, its merges happen there.
+That is the first thing an organism can do that a heap of separate buildings
+cannot.
+
+```
+a trunk of five, standing on three legs   →  8 cells, P222, reaches planes 0 and 1
+a cell hung under every segment           →  0 legs — the legs touch, so it is a floor
+```
+
+That second line was found by the code rather than by me: legs have to be
+separated or they are a second storey. A water bear's legs come in spaced pairs
+for the same reason.
+
 ### The third dimension was the other half of the library
 
 The game only ever used half of `src/fields.ts`. The SSAW half puts a lattice
@@ -763,7 +793,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                239 tests: what the modules above are actually claiming
+test/                247 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

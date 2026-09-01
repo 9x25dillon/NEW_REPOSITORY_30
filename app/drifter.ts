@@ -31,7 +31,7 @@ import {
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
 import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
-import { autonomous, snap, symbolOf } from "../game/body.js";
+import { autonomous, limbsOf, snap, symbolOf } from "../game/body.js";
 import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
@@ -991,6 +991,34 @@ export class Game {
       g.stroke(path);
       g.lineCap = "butt";
 
+      // Its limbs, which are the parts of it that are shaped rather than
+      // filled in. A leg is drawn as what it is: a column going somewhere you
+      // are not, so it is dashed and it is labelled with the plane it lands on.
+      for (const limb of limbsOf(body, pitch)) {
+        const tip = limb.cells[0];
+        const tx = px(tip.x), ty = px(tip.y);
+        if (limb.leg) {
+          g.strokeStyle = "rgba(255,201,74,0.55)";
+          g.lineWidth = 2;
+          g.setLineDash([3, 3]);
+          g.beginPath();
+          g.moveTo(tx, ty);
+          g.lineTo(tx, ty + (limb.layers[0] < tip.layer ? 12 : -12));
+          g.stroke();
+          g.setLineDash([]);
+          g.fillStyle = "rgba(255,201,74,0.8)";
+          g.font = `700 8px ${MONO}`;
+          g.textAlign = "center";
+          g.fillText(`${limb.layers.join("/")}`, tx, ty + 22);
+          g.textAlign = "left";
+        } else {
+          g.fillStyle = `rgba(${JADE},0.55)`;
+          g.beginPath();
+          g.arc(tx + limb.dir[0] * 7, ty + limb.dir[1] * 7, 2.2, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+
       // What it is, in the vocabulary the rest of the repository speaks.
       const sym = symbolOf(body);
       if (sym) {
@@ -1000,8 +1028,13 @@ export class Game {
         g.fillText(sym.symbol, px(body.x), px(body.y - body.extent) - 16);
         g.font = `600 8px ${MONO}`;
         g.fillStyle = FAINT;
+        const limbs = limbsOf(body, pitch);
+        const legs = limbs.filter((l) => l.leg).length;
         g.fillText(
-          `${sym.pointGroup}  ·  ${body.cells.length} CELLS${live ? "  ·  IT WORKS ALONE" : ""}`,
+          `${sym.pointGroup}  ·  ${body.cells.length} CELLS`
+          + `${limbs.length ? `  ·  ${limbs.length - legs} LIMBS` : ""}`
+          + `${legs ? `  ·  ${legs} LEGS` : ""}`
+          + `${live ? "  ·  IT WORKS ALONE" : ""}`,
           px(body.x), px(body.y - body.extent) - 5);
         g.textAlign = "left";
       }
@@ -2092,6 +2125,11 @@ export class Game {
       `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}`
         + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`,
       `bodies: ${run.bodies.length}`
+        + `${run.bodies[0] ? (() => {
+          const l = limbsOf(run.bodies[0], latticePitch(run));
+          const legs = l.filter((x) => x.leg).length;
+          return ` limbs ${l.length - legs} legs ${legs}`;
+        })() : ""}`
         + `${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells`
           + ` ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}`
           + `${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}`

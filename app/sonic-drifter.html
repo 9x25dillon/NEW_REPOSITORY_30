@@ -614,6 +614,39 @@
     return out.sort((a, b) => pointGroup(a.group).order - pointGroup(b.group).order);
   }
 
+  // game/shape.ts
+  var TOL = 1e-6;
+  function apply(m, v) {
+    return [
+      m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+      m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+      m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2]
+    ];
+  }
+  function inPlaneOrbit(hm) {
+    const out = [];
+    for (const m of operations(hm)) {
+      const [x, y] = apply(m, [1, 0, 0]);
+      const r = Math.hypot(x, y);
+      if (r < 1e-9) continue;
+      const d = [x / r, y / r];
+      if (!out.some((e) => Math.abs(e[0] - d[0]) < TOL && Math.abs(e[1] - d[1]) < TOL)) {
+        out.push(d);
+      }
+    }
+    out.sort((a, b) => Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]));
+    return out;
+  }
+  var CACHE2 = /* @__PURE__ */ new Map();
+  function lobes(hm) {
+    let hit = CACHE2.get(hm);
+    if (!hit) {
+      hit = inPlaneOrbit(hm);
+      CACHE2.set(hm, hit);
+    }
+    return hit;
+  }
+
   // game/body.ts
   var ORIGIN = { x: 0, y: 0 };
   function snap(x, y, pitch) {
@@ -622,18 +655,22 @@
       y: ORIGIN.y + Math.round((y - ORIGIN.y) / pitch) * pitch
     };
   }
+  function joined(a, b, pitch) {
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    const dz = Math.abs(b.layer - a.layer);
+    if (dz > 1) return false;
+    return dz === 0 ? d <= pitch * 1.5 : d <= pitch * 0.5;
+  }
   function bodiesOf(structures, pitch) {
     const left = new Set(structures);
     const out = [];
-    const near = pitch * 1.5;
     while (left.size > 0) {
       const seed = left.values().next().value;
       left.delete(seed);
       const cells = [seed];
       for (let i = 0; i < cells.length; i++) {
         for (const s of [...left]) {
-          const d = Math.hypot(s.x - cells[i].x, s.y - cells[i].y);
-          if (d <= near) {
+          if (joined(cells[i], s, pitch)) {
             left.delete(s);
             cells.push(s);
           }
@@ -656,6 +693,70 @@
       out.push({ cells, hm, mass, x: cx, y: cy, extent });
     }
     return out.sort((a, b) => b.mass - a.mass);
+  }
+  var LIMB_ARC = 0.45;
+  function limbsOf(body, pitch) {
+    const cells = body.cells;
+    if (cells.length < 3) return [];
+    const degree = /* @__PURE__ */ new Map();
+    for (const a of cells) {
+      let n = 0;
+      for (const b of cells) if (b !== a && joined(a, b, pitch)) n++;
+      degree.set(a, n);
+    }
+    const dirs = lobes(body.hm);
+    const out = [];
+    for (const tip of cells) {
+      if ((degree.get(tip) ?? 0) !== 1) continue;
+      const run = [tip];
+      let prev = null;
+      let here = tip;
+      let root = null;
+      for (; ; ) {
+        const next = cells.find((c) => c !== here && c !== prev && joined(here, c, pitch));
+        if (!next) break;
+        if ((degree.get(next) ?? 0) > 2) {
+          root = next;
+          break;
+        }
+        prev = here;
+        here = next;
+        run.push(here);
+        if (run.length > cells.length) break;
+      }
+      const from = root ?? run[run.length - 1];
+      const dx = tip.x - from.x;
+      const dy = tip.y - from.y;
+      const r = Math.hypot(dx, dy);
+      let dir = null;
+      if (r > 1e-12) {
+        const th = Math.atan2(dy, dx);
+        for (const [lx, ly] of dirs) {
+          let d = Math.abs(Math.atan2(ly, lx) - th);
+          while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
+          if (d < LIMB_ARC) {
+            dir = [lx, ly];
+            break;
+          }
+        }
+      }
+      const layers = [...new Set([...run, from].map((c) => c.layer))].sort();
+      const leg = layers.length > 1;
+      if (!dir && !leg) continue;
+      out.push({
+        cells: run,
+        dir: dir ?? [0, 0],
+        length: run.length,
+        leg,
+        layers
+      });
+    }
+    return out.sort((a, b) => b.length - a.length);
+  }
+  function reaches(body, pitch) {
+    const out = new Set(body.cells.map((c) => c.layer));
+    for (const l of limbsOf(body, pitch)) for (const z of l.layers) out.add(z);
+    return [...out].sort();
   }
   function symbolOf(body) {
     if (body.cells.length < 3) return null;
@@ -1299,39 +1400,6 @@
     if (p.iframe > 0) p.iframe = Math.max(0, p.iframe - dt);
   }
 
-  // game/shape.ts
-  var TOL = 1e-6;
-  function apply(m, v) {
-    return [
-      m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-      m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-      m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2]
-    ];
-  }
-  function inPlaneOrbit(hm) {
-    const out = [];
-    for (const m of operations(hm)) {
-      const [x, y] = apply(m, [1, 0, 0]);
-      const r = Math.hypot(x, y);
-      if (r < 1e-9) continue;
-      const d = [x / r, y / r];
-      if (!out.some((e) => Math.abs(e[0] - d[0]) < TOL && Math.abs(e[1] - d[1]) < TOL)) {
-        out.push(d);
-      }
-    }
-    out.sort((a, b) => Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]));
-    return out;
-  }
-  var CACHE2 = /* @__PURE__ */ new Map();
-  function lobes(hm) {
-    let hit = CACHE2.get(hm);
-    if (!hit) {
-      hit = inPlaneOrbit(hm);
-      CACHE2.set(hm, hit);
-    }
-    return hit;
-  }
-
   // game/world.ts
   function reachOf(hm) {
     return 34e-6 + pointGroup(hm).order * 22e-7;
@@ -1343,6 +1411,7 @@
       x,
       y,
       layer,
+      serves: [layer],
       lobes: lobes(hm),
       reach: reachOf(hm),
       strength: pointGroup(hm).order,
@@ -1421,9 +1490,9 @@
   function wildlifeFor(medium, aeon, mass) {
     const mine = contrastFactor(YOU, medium);
     const sameSign = (id) => contrastFactor(BEASTS[id].particle, medium) * mine > 0;
-    const reaches = HUNTERS.filter(sameSign);
+    const reaches2 = HUNTERS.filter(sameSign);
     const rings = HUNTERS.filter((id) => !sameSign(id));
-    const out = (reaches.length > 0 ? reaches : [...HUNTERS]).slice(0, 1 + Math.floor(aeon / 2));
+    const out = (reaches2.length > 0 ? reaches2 : [...HUNTERS]).slice(0, 1 + Math.floor(aeon / 2));
     if (aeon >= 2) out.push("mote");
     if (aeon >= 2 && rings.length > 0) out.push(rings[0]);
     if (aeon >= 3 && mass >= 10 && rings.length > 1) out.push(rings[1]);
@@ -1693,6 +1762,7 @@
       }
       if (contrastFactor(p, run.world.medium) > 0) {
         for (const s of run.structures) {
+          if (!s.serves.includes(e.layer)) continue;
           for (const [hx, hy] of holdPoints(s)) {
             const qx = hx - e.x, qy = hy - e.y;
             const r = Math.hypot(qx, qy);
@@ -1804,8 +1874,9 @@
       }
     }
   }
-  function underStructure(run, x, y) {
+  function underStructure(run, x, y, layer) {
     for (const s of run.structures) {
+      if (!s.serves.includes(layer)) continue;
       for (const [hx, hy] of holdPoints(s)) {
         if (Math.hypot(hx - x, hy - y) < s.reach * 0.55) return true;
       }
@@ -1836,7 +1907,7 @@
         a.partner = -1;
         continue;
       }
-      const bound = gripping || underStructure(run, a.x, a.y);
+      const bound = gripping || underStructure(run, a.x, a.y, a.layer);
       if (!bound) {
         a.dwell = 0;
         a.partner = -1;
@@ -1909,7 +1980,12 @@
     const was = catches(run.gap, run.bound.omega);
     run.crystal = crystalOf(run.structures, run.world.medium);
     run.gap = gapOf(run.crystal);
-    run.bodies = bodiesOf(run.structures, latticePitch(run));
+    const pitch = latticePitch(run);
+    run.bodies = bodiesOf(run.structures, pitch);
+    for (const b of run.bodies) {
+      const zs = reaches(b, pitch);
+      for (const c of b.cells) c.serves = zs;
+    }
     const now = catches(run.gap, run.bound.omega);
     if (now !== was) run.events.push({ kind: "tuned", caught: now });
   }
@@ -3512,6 +3588,30 @@
         g2.lineWidth = 1.6;
         g2.stroke(path);
         g2.lineCap = "butt";
+        for (const limb of limbsOf(body, pitch)) {
+          const tip = limb.cells[0];
+          const tx = px(tip.x), ty = px(tip.y);
+          if (limb.leg) {
+            g2.strokeStyle = "rgba(255,201,74,0.55)";
+            g2.lineWidth = 2;
+            g2.setLineDash([3, 3]);
+            g2.beginPath();
+            g2.moveTo(tx, ty);
+            g2.lineTo(tx, ty + (limb.layers[0] < tip.layer ? 12 : -12));
+            g2.stroke();
+            g2.setLineDash([]);
+            g2.fillStyle = "rgba(255,201,74,0.8)";
+            g2.font = `700 8px ${MONO}`;
+            g2.textAlign = "center";
+            g2.fillText(`${limb.layers.join("/")}`, tx, ty + 22);
+            g2.textAlign = "left";
+          } else {
+            g2.fillStyle = `rgba(${JADE},0.55)`;
+            g2.beginPath();
+            g2.arc(tx + limb.dir[0] * 7, ty + limb.dir[1] * 7, 2.2, 0, Math.PI * 2);
+            g2.fill();
+          }
+        }
         const sym = symbolOf(body);
         if (sym) {
           g2.textAlign = "center";
@@ -3520,8 +3620,10 @@
           g2.fillText(sym.symbol, px(body.x), px(body.y - body.extent) - 16);
           g2.font = `600 8px ${MONO}`;
           g2.fillStyle = FAINT2;
+          const limbs = limbsOf(body, pitch);
+          const legs = limbs.filter((l) => l.leg).length;
           g2.fillText(
-            `${sym.pointGroup}  \xB7  ${body.cells.length} CELLS${live ? "  \xB7  IT WORKS ALONE" : ""}`,
+            `${sym.pointGroup}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? "  \xB7  IT WORKS ALONE" : ""}`,
             px(body.x),
             px(body.y - body.extent) - 5
           );
@@ -4543,7 +4645,11 @@
         `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
         `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
         `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`,
-        `bodies: ${run.bodies.length}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
+        `bodies: ${run.bodies.length}${run.bodies[0] ? (() => {
+          const l = limbsOf(run.bodies[0], latticePitch(run));
+          const legs = l.filter((x) => x.leg).length;
+          return ` limbs ${l.length - legs} legs ${legs}`;
+        })() : ""}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
         `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
         `pad: ${this.pad.describe()}`,

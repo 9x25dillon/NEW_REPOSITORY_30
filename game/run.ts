@@ -25,7 +25,7 @@
 // headlessly and the tests can tell whether any of this is actually a game.
 
 import { beast } from "./beasts.js";
-import { type Body, bodiesOf, snap } from "./body.js";
+import { type Body, bodiesOf, reaches, snap } from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
@@ -467,9 +467,11 @@ function drift(run: Run, dt: number): void {
       dy += swim.y;
     }
 
-    // What you built pulls on what answers to it, whether or not you are here.
+    // What you built pulls on what answers to it, whether or not you are here —
+    // on every plane the body it belongs to can reach.
     if (contrastFactor(p, run.world.medium) > 0) {
       for (const s of run.structures) {
+        if (!s.serves.includes(e.layer)) continue;
         for (const [hx, hy] of holdPoints(s)) {
           const qx = hx - e.x, qy = hy - e.y;
           const r = Math.hypot(qx, qy);
@@ -611,8 +613,9 @@ export function kill(run: Run, e: Entity): void {
 // ── merging, and what your buildings do while you are away ──────────────────
 
 /** True if this point is inside some structure's holding field. */
-function underStructure(run: Run, x: number, y: number): boolean {
+function underStructure(run: Run, x: number, y: number, layer: number): boolean {
   for (const s of run.structures) {
+    if (!s.serves.includes(layer)) continue;
     for (const [hx, hy] of holdPoints(s)) {
       if (Math.hypot(hx - x, hy - y) < s.reach * 0.55) return true;
     }
@@ -641,7 +644,7 @@ function mergePass(run: Run, dt: number): void {
 
     // A structure holds them together as well as your hand does. This is why
     // building is worth anything: what you left standing keeps working.
-    const bound = gripping || underStructure(run, a.x, a.y);
+    const bound = gripping || underStructure(run, a.x, a.y, a.layer);
     if (!bound) { a.dwell = 0; a.partner = -1; continue; }
 
     const asm = assemble([...a.parts, ...best.parts]);
@@ -718,7 +721,16 @@ export function retune(run: Run): void {
   const was = catches(run.gap, run.bound.omega);
   run.crystal = crystalOf(run.structures, run.world.medium);
   run.gap = gapOf(run.crystal);
-  run.bodies = bodiesOf(run.structures, latticePitch(run));
+  const pitch = latticePitch(run);
+  run.bodies = bodiesOf(run.structures, pitch);
+
+  // WHAT A LEG IS FOR. A body that hangs a limb onto another plane can work
+  // there, and every cell of it can — which is the first thing an organism does
+  // that a heap of separate buildings cannot.
+  for (const b of run.bodies) {
+    const zs = reaches(b, pitch);
+    for (const c of b.cells) c.serves = zs;
+  }
   const now = catches(run.gap, run.bound.omega);
   if (now !== was) run.events.push({ kind: "tuned", caught: now });
 }
