@@ -839,14 +839,22 @@ function walkBodies(run: Run, dt: number): void {
     const dir = gaitDirection(body, run.you.x, run.you.y);
     if (!dir) continue;
 
-    // IT KEEPS ITS DISTANCE. It followed to within one site, which meant a
-    // sixteen-cell organism stood on every lattice site around you for the rest
-    // of the run — and since a cell can only be placed on a free site, building
-    // simply stopped working once you had something that walked. It stops at
-    // its own edge plus a clear site, so there is always somewhere to put the
-    // next one down.
-    const clear = body.extent + pitch * 2;
-    if (Math.hypot(run.you.x - body.x, run.you.y - body.y) < clear) continue;
+    // IT KEEPS A SITE CLEAR, MEASURED FROM ITS NEAREST CELL.
+    //
+    // Following to within one site of the player meant a large organism stood
+    // on every lattice site around them and building stopped working. Measuring
+    // the clearance from the body's CENTRE instead was worse and in the other
+    // direction: a twelve-cell body has an extent of two hundred microns, so it
+    // had to hang back four hundred and thirty — which is the far edge of what
+    // the sweep can reach, and it stopped walking at all. Six hundred and twenty
+    // steps in one run became three in the next.
+    //
+    // What has to stay clear is the ground around YOU, and that is one site
+    // from whichever cell is nearest, whatever the size of the thing it belongs
+    // to.
+    // The rule is on the DESTINATION, not on where it is standing now: asked
+    // before the step it walks from one and eight tenths of a site to nought
+    // and eight, which is exactly the ground it was supposed to leave alone.
 
     const dx = Math.round(dir[0]) * pitch;
     const dy = Math.round(dir[1]) * pitch;
@@ -855,6 +863,7 @@ function walkBodies(run: Run, dt: number): void {
     const mine = new Set(body.cells);
     const ok = body.cells.every((c) => {
       const nx = c.x + dx, ny = c.y + dy;
+      if (Math.hypot(nx - run.you.x, ny - run.you.y) < pitch * 1.2) return false;
       const b = run.bounds;
       if (nx < b.x || nx > b.x + b.w || ny < b.y || ny > b.y + b.h) return false;
       if (onThrone(run, nx, ny)) return false;

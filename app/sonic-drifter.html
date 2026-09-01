@@ -1269,7 +1269,7 @@
     return { radius: s.reach * 0.5, ...SKELETON };
   }
   var GAIT_MARGIN = 0.5;
-  var WALK_FOCUS = 3.6;
+  var WALK_FOCUS = 8;
   function walkSpeed(body, wave) {
     const focus = wave.pitch * WALK_FOCUS;
     let slowest = Infinity;
@@ -2103,14 +2103,13 @@
       lead.gait = 0;
       const dir = gaitDirection(body, run.you.x, run.you.y);
       if (!dir) continue;
-      const clear = body.extent + pitch * 2;
-      if (Math.hypot(run.you.x - body.x, run.you.y - body.y) < clear) continue;
       const dx = Math.round(dir[0]) * pitch;
       const dy = Math.round(dir[1]) * pitch;
       if (dx === 0 && dy === 0) continue;
       const mine = new Set(body.cells);
       const ok = body.cells.every((c) => {
         const nx = c.x + dx, ny = c.y + dy;
+        if (Math.hypot(nx - run.you.x, ny - run.you.y) < pitch * 1.2) return false;
         const b = run.bounds;
         if (nx < b.x || nx > b.x + b.w || ny < b.y || ny > b.y + b.h) return false;
         if (onThrone(run, nx, ny)) return false;

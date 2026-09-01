@@ -59,8 +59,13 @@ test("an organism big enough to work alone follows you", () => {
   // your own lattice site takes away every place you could build.
   const arrived = run.bodies[0].x;
   watch(run, base.x + 5 * pitch, base.y, 8);
-  const gap = Math.abs(run.bodies[0].x - (base.x + 5 * pitch));
-  assert.ok(gap > pitch * 1.5, `it stopped ${gap / pitch} sites away, which is too close`);
+  // It leaves a clear site around YOU, measured from whichever of its cells is
+  // nearest — not from its centre, which for a large body is so far back that
+  // the sweep cannot reach it and it stops walking altogether.
+  const me = { x: base.x + 5 * pitch, y: base.y };
+  const nearest = Math.min(...run.bodies[0].cells.map(
+    (c) => Math.hypot(me.x - c.x, me.y - c.y)));
+  assert.ok(nearest > pitch * 0.95, `its nearest cell is ${nearest / pitch} sites off, which is on top of you`);
   assert.ok(Math.abs(run.bodies[0].x - arrived) < pitch * 3, "and settles rather than orbiting");
 });
 
@@ -136,7 +141,7 @@ test("the slowest cell sets the pace, so distance is what slows a body down", ()
     return walkSpeed(run.bodies[0], run.wave);
   })();
   const far = (() => {
-    run.you.x = base.x + 2 * pitch + 600e-6; run.you.y = base.y;
+    run.you.x = base.x + 2 * pitch + 1800e-6; run.you.y = base.y;
     step(run, IDLE, DT);
     return walkSpeed(run.bodies[0], run.wave);
   })();

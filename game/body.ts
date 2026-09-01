@@ -260,8 +260,15 @@ export const GAIT_MARGIN = 0.5;
  * Wide enough to walk an organism you are standing in front of, and still not
  * infinite: a sprawling thing several hundred microns across genuinely does
  * have an end the drive cannot reach, and that end is why it stays where it is.
+ *
+ * Widened again when the channel grew. At under four pitches a body could not
+ * follow a player who was WALKING — the drive fell off faster than a person
+ * moves, so it was left behind the instant you turned away, and a run that had
+ * six hundred and twenty steps in it had three. Eight pitches follows to about
+ * a millimetre and lags past that, which in a four-millimetre channel is a
+ * companion rather than a piece of furniture.
  */
-export const WALK_FOCUS = 3.6;
+export const WALK_FOCUS = 8;
 
 /**
  * How fast the whole body can be walked, m/s.
