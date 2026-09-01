@@ -179,6 +179,14 @@ export class Game {
   /** Which cell in the rack a bare press will spend. */
   private selected = 0;
   private wasGrip = false;
+  /**
+   * What happened, counted.
+   *
+   * There are no logs — it is a static page and nothing writes anything — so
+   * three times now the only account of a run has been somebody trying to
+   * remember it. This is the account.
+   */
+  private tally: Record<string, number> = {};
   /** Stopped. Nothing in the water advances, and the surface keeps drawing. */
   private paused = false;
   /** Frames of held time after a heavy landing. Sold as impact; it is really
@@ -310,6 +318,7 @@ export class Game {
 
   private begin(): void {
     this.paused = false;
+    this.tally = {};
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
     this.run = startRun(this.seed);
     this.screen = "play";
@@ -415,6 +424,8 @@ export class Game {
   private drain(): void {
     const run = this.run;
     for (const ev of run.events) {
+      this.tally[ev.kind] = (this.tally[ev.kind] ?? 0) + 1;
+      if (ev.kind === "hit") this.tally[`hit:${ev.cause}`] = (this.tally[`hit:${ev.cause}`] ?? 0) + 1;
       switch (ev.kind) {
         case "hit":
           this.flash = 1; this.flashRed = true; this.shake = 13;
@@ -1456,29 +1467,37 @@ export class Game {
     g.font = `700 34px ${MONO}`;
     g.fillText("THE FIELD COLLAPSED", VIEW_W / 2, 186);
 
+    const t = this.tally;
+    const n = (k: string) => t[k] ?? 0;
     const rows: Array<[string, string]> = [
-      ["WORLDS MADE", String(run.aeonsSurvived)],
-      ["DIED IN", `AEON ${run.world.aeon}  ·  ${run.world.name}`],
-      ["CELLS BUILT", String(run.built)],
-      ["STILL STANDING", `${run.structures.length} STRUCTURES`],
+      ["LASTED", `${run.t.toFixed(0)} SECONDS  ·  AEON ${run.world.aeon}`],
+      ["GATHERED", `${n("merge")} MERGES INTO ${run.built} CELLS`],
+      ["BUILT", `${n("place")} STRUCTURES, ${run.structures.length} STILL STANDING`],
+      ["THE BOUND FIELD", run.bound.free ? "FREED" : n("tuned") > 0 ? "CAUGHT, THEN LOST" : "NEVER CAUGHT"],
+      ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, ${n("hit:touched")} DRIFTED INTO`],
       ["SCORE", String(run.score)],
     ];
     rows.forEach(([k, v], i) => {
-      const y = 258 + i * 28;
+      const y = 244 + i * 26;
       g.textAlign = "right";
       g.fillStyle = DIM;
       g.font = `600 10px ${MONO}`;
       g.fillText(k, VIEW_W / 2 - 16, y + 3);
       g.textAlign = "left";
-      g.fillStyle = i === 4 ? GOLD : INK;
-      g.font = `700 13px ${MONO}`;
+      g.fillStyle = i === rows.length - 1 ? GOLD : INK;
+      g.font = `700 12px ${MONO}`;
       g.fillText(v, VIEW_W / 2 + 16, y);
     });
 
+    // The one line that is worth reading: what to do differently.
     g.textAlign = "center";
+    g.font = `700 11px ${MONO}`;
+    g.fillStyle = `rgb(${NODE})`;
+    g.fillText(this.diagnosis(), VIEW_W / 2, 412);
+
     g.fillStyle = DIM;
     g.font = `600 10px ${MONO}`;
-    g.fillText(`BEST ${this.best}   ·   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 428);
+    g.fillText(`BEST ${this.best}   ·   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 436);
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.font = `700 14px ${MONO}`;
@@ -1561,6 +1580,60 @@ export class Game {
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.fillText(`${G.pause} TO GO ON`, VIEW_W / 2, VIEW_H - 40);
     g.textAlign = "left";
+  }
+
+  /**
+   * What to do differently, in one line.
+   *
+   * Ordered so the earliest thing that went wrong is the thing it says. Telling
+   * somebody to dodge better when they never built anything is advice about the
+   * wrong end of their run.
+   */
+  private diagnosis(): string {
+    const run = this.run;
+    const t = this.tally;
+    const n = (k: string) => t[k] ?? 0;
+
+    if (run.built === 0) {
+      return "YOU NEVER MADE A CELL. FOUR OF A KIND - BURST THROUGH THEM TO GATHER";
+    }
+    if (n("place") === 0) return "YOU MADE CELLS AND NEVER PUT ONE DOWN. THEY DO NOTHING IN HAND";
+    if (run.structures.length < 2 && n("place") < 2) {
+      return "TWO BUILDINGS IS THE FEWEST THAT IS A CRYSTAL. THE FIELD NEEDS ONE";
+    }
+    if (!run.bound.free && n("tuned") === 0) {
+      return `THE GAP NEVER CAUGHT IT - ${advice(run.crystal, run.gap, run.bound.omega)}`;
+    }
+    if (n("hit:struck") > n("hit:volley") && n("dash") < n("coil") / 3) {
+      return "THEY TELEGRAPH. WHEN ONE STOPS AND GATHERS, BURST OFF THE LINE IT SHOWS";
+    }
+    if (n("hit:volley") >= 2) return "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
+    if (n("spent") >= 3) return "YOU RAN THE DRIVE DRY. THE LATTICE IS YOUR COVER - LET IT BACK UP";
+    return "THE THING YOU CROWNED IS MADE OF WHAT YOU FED IT. FEED IT LESS";
+  }
+
+  /**
+   * The run, as something that can be pasted to somebody who was not there.
+   *
+   * Reachable from the console as `drifter.report()`, because a static page
+   * writes no logs and "I died after a few minutes" is not enough to work from.
+   */
+  report(): string {
+    const run = this.run;
+    const t = this.tally;
+    const keys = Object.keys(t).sort();
+    return [
+      `SONIC DRIFTER  ${run.t.toFixed(0)}s  aeon ${run.world.aeon} (${run.world.name})  phase ${run.phase}`,
+      `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
+      `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
+      `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}`
+        + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`,
+      `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}`
+        + `  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}`
+        + `  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
+      `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
+      `diagnosis: ${this.diagnosis()}`,
+    ].join("\n");
   }
 
   private drawTitle(): void {

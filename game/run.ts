@@ -151,7 +151,9 @@ export interface Bolt {
 export type Phase = "settle" | "reign" | "birth" | "dead";
 
 export type Ev =
-  | { kind: "hit"; x: number; y: number }
+  /** What reached you. A post-mortem that cannot say WHY you died teaches
+   *  nothing, and "you were hit six times" is not a reason. */
+  | { kind: "hit"; x: number; y: number; cause: "struck" | "touched" | "volley" }
   | { kind: "kill"; x: number; y: number; species: string; score: number }
   | { kind: "merge"; x: number; y: number }
   | { kind: "refuse"; x: number; y: number; text: string }
@@ -1012,20 +1014,30 @@ function contact(run: Run, dt: number): void {
   const w = run.wave;
   let bite = 0;
   let drain = 0;
+  let struck = false;
+  let volleyed = false;
 
+  // AT YOUR BODY, NOT AT YOUR TRAP. This was still measuring from run.aim, which
+  // is the node a quarter pitch ahead of you in whatever direction you are
+  // driving — a leftover from when the player WAS the cursor. Everything in the
+  // water hunts run.you and was landing its hits on somewhere you are not, up
+  // to twenty-two microns off and moving with the stick. It is exactly the kind
+  // of thing that makes dying feel arbitrary and unreportable.
   for (const e of run.entities) {
     if (e.faction !== "beast") continue;
     if (e.held > 0) continue;   // a body you have hold of is not free to reach you
     const b = beast(e.species);
-    if (Math.hypot(e.x - run.aim.x, e.y - run.aim.y) < TOUCH + particleOf(e).radius) {
+    if (Math.hypot(e.x - run.you.x, e.y - run.you.y) < TOUCH + particleOf(e).radius) {
       e.flash = 0.3;
-      if (b.damage > 0) bite += b.damage;
+      if (b.damage > 0) { bite += b.damage; struck ||= e.strike > 0; }
       else drain += b.drain;
     }
   }
 
   for (const b of run.bolts) {
-    if (Math.hypot(b.x - run.aim.x, b.y - run.aim.y) < BOLT_TOUCH) { bite += 1; b.life = 0; }
+    if (Math.hypot(b.x - run.you.x, b.y - run.you.y) < BOLT_TOUCH) {
+      bite += 1; b.life = 0; volleyed = true;
+    }
   }
   run.bolts = run.bolts.filter((b) => b.life > 0);
 
@@ -1039,10 +1051,13 @@ function contact(run: Run, dt: number): void {
   if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0) {
     run.integrity -= 1;
     run.iframe = IFRAME;
-    run.events.push({ kind: "hit", x: run.aim.x, y: run.aim.y });
+    run.events.push({
+      kind: "hit", x: run.you.x, y: run.you.y,
+      cause: volleyed ? "volley" : struck ? "struck" : "touched",
+    });
     for (const e of run.entities) {
       if (e.faction !== "beast") continue;
-      const dx = e.x - run.aim.x, dy = e.y - run.aim.y;
+      const dx = e.x - run.you.x, dy = e.y - run.you.y;
       const r = Math.hypot(dx, dy);
       if (r < 140e-6 && r > 1e-9) {
         e.x += (dx / r) * KNOCKBACK; e.y += (dy / r) * KNOCKBACK; e.held = 0;
