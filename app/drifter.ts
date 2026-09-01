@@ -20,7 +20,8 @@ import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
-  beast, crown, enterWorld, particleOf, placeCell, readoutFor,
+  beast, crown, dischargesToKill, enterWorld, feedThrone, particleOf, placeCell,
+  readoutFor,
   startRun, step,
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
@@ -192,6 +193,10 @@ export class Game {
   /** Frames of held time after a heavy landing. Sold as impact; it is really
    *  just the update being withheld for a moment while the draw keeps going. */
   private hitstop = 0;
+  private lastRefusal = -99;
+  /** How long the throne button has been held, and whether it already fired. */
+  private crownHeld = 0;
+  private crowned = false;
   private seed = 20260830;
 
   private sparks: Spark[] = [];
@@ -278,7 +283,9 @@ export class Game {
   }
 
   /** Turn one frame of intent into everything that is not movement. */
-  private act(it: Intent): void {
+  private static readonly CROWN_HOLD = 0.9;
+
+  private act(it: Intent, dt: number): void {
     const run = this.run;
 
     if (it.mute) this.sfx.muted = !this.sfx.muted;
@@ -307,7 +314,36 @@ export class Game {
     if (key > 0 && run.cells[key - 1]) { this.selected = key - 1; this.spend(key - 1); }
     else if (it.place) this.spend(this.selected);
 
-    if (it.crown) this.doCrown();
+    // TAP TO FEED, HOLD TO CROWN. Feeding used to be the building button,
+    // told apart by where you happened to be standing, and the throne is at
+    // the centre of the arena where people build: the first run to reach it fed
+    // fifty-one cells by accident and woke something with three thousand eight
+    // hundred hit points.
+    if (it.crownDown) {
+      this.crownHeld += dt;
+      if (this.crownHeld >= Game.CROWN_HOLD && !this.crowned) {
+        this.crowned = true;
+        this.doCrown();
+      }
+    } else {
+      if (this.crownHeld > 0 && !this.crowned) this.doFeed();
+      this.crownHeld = 0;
+      this.crowned = false;
+    }
+  }
+
+  private doFeed(): void {
+    const run = this.run;
+    const r = feedThrone(run, this.selected);
+    if (r === "off-throne") this.say("STAND ON THE THRONE TO FEED IT");
+    if (r === "none") this.say("NOTHING IN HAND");
+    if (r === "wrong-phase") this.say("IT IS ALREADY AWAKE");
+    if (r === "fed") {
+      const need = dischargesToKill(run);
+      this.say(Number.isFinite(need)
+        ? `FED ${run.throne.fed.length}  ·  ${run.throne.hm}  ·  ${need} DISCHARGES TO KILL`
+        : `FED ${run.throne.fed.length}  ·  ${run.throne.hm}  ·  NOTHING CAN KILL IT YET`);
+    }
   }
 
   private fit(): void {
@@ -372,7 +408,7 @@ export class Game {
     }
     if (this.paused && this.screen === "play") return;
 
-    this.act(it);
+    this.act(it, dt);
 
     if (this.screen === "title") {
       // The attract loop plays itself, badly and on purpose: it drives in a
@@ -440,7 +476,17 @@ export class Game {
           break;
         case "merge": this.burst(ev.x, ev.y, 6, NODE); break;
         case "refuse":
-          this.popups.push({ x: ev.x, y: ev.y, text: refusal(ev.text), life: 1.3, colour: "#ff9c6d", big: false });
+          // One run reported six hundred and eight of these. The rule is worth
+          // saying; saying it every second and a half is not teaching, it is
+          // weather. The bodies still flash and shove each other apart — that
+          // part is the field and it stays.
+          if (this.t - this.lastRefusal > 2.5) {
+            this.lastRefusal = this.t;
+            this.popups.push({
+              x: ev.x, y: ev.y, text: refusal(ev.text), life: 1.3,
+              colour: "#ff9c6d", big: false,
+            });
+          }
           if (ev.text === "five-fold") this.teach("fivefold");
           break;
         case "crystal":
@@ -890,6 +936,40 @@ export class Game {
     g.font = `700 9px ${MONO}`;
     g.textAlign = "center";
     g.fillText(run.throne.fed.length ? run.throne.hm : "THRONE", x, y - R - 14);
+
+    // WHAT YOU ARE MAKING, IN THE TERMS THAT DECIDE THE FIGHT. A player fed it
+    // fifty-one cells and woke three thousand eight hundred hit points, which
+    // no arsenal in the game could bring down — and every number on screen up
+    // to that moment was a count of what they had given it, not a statement of
+    // what it would take to kill.
+    if (run.throne.fed.length > 0) {
+      const need = dischargesToKill(run);
+      const beyond = !Number.isFinite(need) || need > run.structures.length + run.cells.length;
+      g.font = `700 9px ${MONO}`;
+      g.fillStyle = beyond ? RED : GOLD;
+      g.fillText(
+        `FED ${run.throne.fed.length}  ·  ${run.throne.maxHp} HP  ·  `
+        + `${Number.isFinite(need) ? `${need} DISCHARGES` : "NOTHING CAN KILL IT"}`,
+        x, y - R - 26);
+      if (beyond) {
+        g.fillStyle = RED;
+        g.font = `600 8px ${MONO}`;
+        g.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
+      }
+    }
+
+    // The hold that wakes it, drawn while it is being made.
+    if (this.crownHeld > 0) {
+      const f = Math.min(1, this.crownHeld / Game.CROWN_HOLD);
+      g.strokeStyle = `rgba(255,201,74,${(0.4 + f * 0.6).toFixed(2)})`;
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(x, y, R + 8, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+      g.stroke();
+      g.fillStyle = GOLD;
+      g.font = `700 9px ${MONO}`;
+      g.fillText(f >= 1 ? "AWAKE" : "HOLD TO CROWN", x, y + R + 16);
+    }
     g.textAlign = "left";
   }
 
@@ -1320,7 +1400,7 @@ export class Game {
         : run.cells.length > 0
           ? `${G.place} BUILDS   ·   ON THE THRONE IT FEEDS INSTEAD`
           : run.throne.fed.length > 0
-            ? `${G.crown} TO CROWN IT`
+            ? `HOLD ${G.crown} TO WAKE IT   ·   TAP IT ON THE THRONE TO FEED MORE`
             : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   ·   FOUR MAKES A CELL`;
     g.fillText(hint, VIEW_W / 2, VIEW_H - 16);
     g.textAlign = "left";
@@ -1561,9 +1641,9 @@ export class Game {
       `${pad(G.move)}THE NODE GOES A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
       `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
       `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
-      `${pad(G.place)}BUILD HERE. ON THE THRONE IT FEEDS INSTEAD.`,
+      `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
       `${pad(G.cycle)}CHOOSE WHICH CELL.`,
-      `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
+      `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
       `${pad(G.mute)}SOUND.`,
       "",
       "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
@@ -1678,8 +1758,8 @@ export class Game {
       `${pad(G.move)}PUT THE NODE A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
       `${pad(G.grip)}CLOSE YOUR HAND: ONE TRAP, AND SPEED. IT COSTS STAMINA.`,
       `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
-      `${pad(G.place)}PLACE A CELL. STAND ON THE THRONE TO FEED IT INSTEAD.`,
-      `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
+      `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
+      `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
       "",
       "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
       "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",

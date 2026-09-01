@@ -690,33 +690,59 @@ export function onThrone(run: Run, x: number, y: number): boolean {
   return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
 }
 
-export type PlaceResult = "placed" | "fed" | "none" | "too-close" | "wrong-phase";
+export type PlaceResult = "placed" | "none" | "too-close" | "wrong-phase";
+export type FeedResult = "fed" | "none" | "off-throne" | "wrong-phase";
 
 /**
- * Spend a cell: onto the ground as a structure, or into the throne.
+ * Put a cell into the throne. Irreversible, and the decision the game is about.
  *
- * The same gesture does both, and which one it is depends only on where you are
- * standing. Feeding is irreversible and it is the decision the game is about —
- * a fed cell is gone from your hand, makes the king harder, and makes the world
- * born out of it richer.
+ * IT USED TO BE THE SAME BUTTON AS BUILDING, told apart by where you happened
+ * to be standing — and the throne sits at the centre of the arena, which is
+ * exactly where a player builds. The first run to reach it fed fifty-one cells
+ * and placed twenty-five, crowned a sovereign with three thousand eight hundred
+ * hit points, and could not have killed it with a hundred and nineteen perfect
+ * discharges. Two thirds of that player's work went into the throne by accident
+ * and nothing said a word about it.
+ *
+ * An action you cannot undo does not share a button with the one you do sixty
+ * times a run.
  */
+export function feedThrone(run: Run, index: number): FeedResult {
+  if (run.phase !== "settle") return "wrong-phase";
+  const c = run.cells[index];
+  if (!c) return "none";
+  if (!onThrone(run, run.you.x, run.you.y)) return "off-throne";
+
+  feed(run.throne, c);
+  run.cells.splice(index, 1);
+  run.events.push({ kind: "fed", group: c.group.hm });
+  return "fed";
+}
+
+/**
+ * How many aligned discharges of what you are holding and standing on would be
+ * needed to bring down what you have fed the throne so far.
+ *
+ * The number the player needs BEFORE they crown it, in the only terms that
+ * matter. Infinity when there is nothing to do it with.
+ */
+export function dischargesToKill(run: Run): number {
+  const best = Math.max(
+    0,
+    ...run.structures.map((s) => s.strength),
+    ...run.cells.map((c) => structureFrom(-1, c.group.hm, 0, 0).strength),
+  );
+  if (best <= 0) return Infinity;
+  return Math.ceil(run.throne.maxHp / (best * DISCHARGE_GAIN));
+}
+
+/** Put a cell on the ground. It never feeds — that is its own verb now. */
 export function placeCell(run: Run, index: number): PlaceResult {
   if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
   const c = run.cells[index];
   if (!c) return "none";
 
-  // Feeding is a settling decision only. Once it is awake the bargain is
-  // closed — but you can still BUILD during the reign, and you will have to:
-  // it eats what you made, so the fight is a race between what it can devour
-  // and what you can put up while it does.
-  if (run.phase === "settle" && onThrone(run, run.you.x, run.you.y)) {
-    feed(run.throne, c);
-    run.cells.splice(index, 1);
-    run.events.push({ kind: "fed", group: c.group.hm });
-    return "fed";
-  }
-
-  if (run.phase === "reign" && onThrone(run, run.you.x, run.you.y)) return "too-close";
+  if (onThrone(run, run.you.x, run.you.y)) return "too-close";
   for (const s of run.structures) {
     if (Math.hypot(s.x - run.you.x, s.y - run.you.y) < s.reach * 0.9) return "too-close";
   }

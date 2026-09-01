@@ -4,7 +4,8 @@ import { test } from "node:test";
 import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
-  DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, placeCell, readoutFor, wearRate,
+  DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
+  placeCell, readoutFor, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
@@ -202,7 +203,7 @@ test("the king's arms stop turning while it is winding up", () => {
   const run = startRun(11);
   grant(run, ["622"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   crown(run);
   stand(run, run.throne.x + 220e-6, run.throne.y);
 
@@ -273,14 +274,44 @@ test("placing puts a cell on the ground and it stays", () => {
   assert.equal(placeCell(run, 0), "too-close", "buildings do not overlap");
 });
 
-test("standing on the throne feeds instead of builds", () => {
+test("feeding the throne is its own verb, and cannot happen by accident", () => {
+  // It used to be the same call as building, told apart by where you were
+  // standing — and the throne is at the centre of the arena, which is where a
+  // player builds. The first run to reach it fed fifty-one cells and placed
+  // twenty-five, then crowned something with three thousand eight hundred hit
+  // points that no arsenal in the game could bring down.
   const run = startRun(11);
   grant(run, ["422", "2"]);
+
+  // On the throne, BUILDING is refused rather than silently becoming a meal.
   stand(run, run.throne.x, run.throne.y);
-  assert.equal(placeCell(run, 0), "fed");
-  assert.equal(run.throne.fed.length, 1);
+  assert.equal(placeCell(run, 0), "too-close");
+  assert.equal(run.throne.fed.length, 0, "and it ate nothing");
+  assert.equal(run.structures.length, 0);
+
+  // Feeding is a different call, and only works where the throne is.
+  assert.equal(feedThrone(run, 0), "fed");
   assert.equal(run.throne.hm, "422");
-  assert.equal(run.structures.length, 0, "nothing was built");
+  stand(run, 200e-6, 200e-6);
+  assert.equal(feedThrone(run, 0), "off-throne", "and nowhere else");
+  assert.equal(placeCell(run, 0), "placed", "which is where building works");
+});
+
+test("it says what you are making before you wake it", () => {
+  // The number that was missing. A player fed fifty-one cells because nothing
+  // ever put the consequence in the terms that decide the fight.
+  const run = startRun(12);
+  stand(run, run.throne.x, run.throne.y);
+
+  grant(run, ["222", "222"]);      // one to feed, one still in hand to fight with
+  feedThrone(run, 0);
+  const modest = dischargesToKill(run);
+  assert.ok(modest > 0 && modest < 6, `one helping should be a few discharges (${modest})`);
+
+  for (let i = 0; i < 20; i++) { grant(run, ["23"]); feedThrone(run, 0); }
+  const glutted = dischargesToKill(run);
+  assert.ok(glutted > modest * 5,
+    `twenty more should be visibly hopeless (${modest} -> ${glutted} discharges)`);
 });
 
 // ── crown ───────────────────────────────────────────────────────────────────
@@ -292,7 +323,7 @@ test("nothing wakes until you have fed it something", () => {
 
   grant(run, ["222"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   assert.equal(crown(run), "crowned");
   assert.equal(run.phase, "reign");
   assert.ok(run.throne.awake && run.throne.hp > 0);
@@ -302,12 +333,12 @@ test("once it is awake the bargain is closed, but you can still build", () => {
   const run = startRun(17);
   grant(run, ["222", "222", "2"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   crown(run);
 
-  // feeding is refused: standing on the throne now builds nothing
+  // feeding is refused once it is awake
   stand(run, run.throne.x, run.throne.y);
-  assert.equal(placeCell(run, 0), "too-close");
+  assert.equal(feedThrone(run, 0), "wrong-phase");
   assert.equal(run.throne.fed.length, 1, "no second helping");
 
   // but building elsewhere works, and has to: it eats what you made
@@ -321,7 +352,7 @@ test("a structure only hurts the king if one of its arms points at it", () => {
   const run = startRun(19);
   grant(run, ["222"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   crown(run);
   const hp0 = run.throne.hp;
 
@@ -345,7 +376,7 @@ test("a sixfold structure covers the compass and a twofold does not", () => {
   const run = startRun(23);
   grant(run, ["222"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   crown(run);
 
   const hits = (hm: string): number => {
@@ -367,14 +398,14 @@ test("your own node shoves a king off you, unless you gave it no handle", () => 
   const loose = startRun(29);
   grant(loose, ["222"]);
   stand(loose, loose.throne.x, loose.throne.y);
-  placeCell(loose, 0);
+  feedThrone(loose, 0);
   crown(loose);
   loose.throne.x = CENTRE.x; loose.throne.y = CENTRE.y;
 
   const anchored = startRun(29);
   grant(anchored, ["432"]);
   stand(anchored, anchored.throne.x, anchored.throne.y);
-  placeCell(anchored, 0);
+  feedThrone(anchored, 0);
   crown(anchored);
   anchored.throne.x = CENTRE.x; anchored.throne.y = CENTRE.y;
 
@@ -419,7 +450,7 @@ test("the guns cannot turn, so the king is what you aim", () => {
   const run = startRun(41);
   grant(run, ["222"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   crown(run);
 
   const gun = structureFrom(900, "222", 300e-6, 330e-6);
@@ -461,7 +492,7 @@ test("with nothing left to fire, your bare hand still kills it — unless it has
     const run = startRun(43);
     grant(run, [fed]);
     stand(run, run.throne.x, run.throne.y);
-    placeCell(run, 0);
+    feedThrone(run, 0);
     crown(run);
     run.structures = [];      // everything you built is gone
     run.entities = [];
@@ -493,7 +524,7 @@ test("the hand is far worse than a building, which is why you build", () => {
   const run = startRun(45);
   grant(run, ["222"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
+  feedThrone(run, 0);
   crown(run);
 
   const gun = structureFrom(901, "222", run.throne.x - 120e-6, run.throne.y);
@@ -547,8 +578,8 @@ test("killing it births the world it was made of", () => {
   const run = startRun(31);
   grant(run, ["422", "222"]);
   stand(run, run.throne.x, run.throne.y);
-  placeCell(run, 0);
-  placeCell(run, 0);
+  feedThrone(run, 0);
+  feedThrone(run, 0);
   crown(run);
 
   const before = run.world;
@@ -677,7 +708,7 @@ function makeBot(feedTarget = 2): (r: Run) => Input {
         && run.throne.fed.length < feedTarget) {
         const t = { x: run.throne.x, y: run.throne.y };
         if (distTo(run, t.x, t.y) > 16e-6) return seek(run, t.x, t.y);
-        placeCell(run, 0);
+        feedThrone(run, 0);
         return seek(run, t.x, t.y);
       }
       // Put it where one of its OWN arms will point at the throne. A 222 shows

@@ -1796,17 +1796,30 @@
   function onThrone(run, x, y) {
     return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
   }
+  function feedThrone(run, index) {
+    if (run.phase !== "settle") return "wrong-phase";
+    const c = run.cells[index];
+    if (!c) return "none";
+    if (!onThrone(run, run.you.x, run.you.y)) return "off-throne";
+    feed(run.throne, c);
+    run.cells.splice(index, 1);
+    run.events.push({ kind: "fed", group: c.group.hm });
+    return "fed";
+  }
+  function dischargesToKill(run) {
+    const best = Math.max(
+      0,
+      ...run.structures.map((s) => s.strength),
+      ...run.cells.map((c) => structureFrom(-1, c.group.hm, 0, 0).strength)
+    );
+    if (best <= 0) return Infinity;
+    return Math.ceil(run.throne.maxHp / (best * DISCHARGE_GAIN));
+  }
   function placeCell(run, index) {
     if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
     const c = run.cells[index];
     if (!c) return "none";
-    if (run.phase === "settle" && onThrone(run, run.you.x, run.you.y)) {
-      feed(run.throne, c);
-      run.cells.splice(index, 1);
-      run.events.push({ kind: "fed", group: c.group.hm });
-      return "fed";
-    }
-    if (run.phase === "reign" && onThrone(run, run.you.x, run.you.y)) return "too-close";
+    if (onThrone(run, run.you.x, run.you.y)) return "too-close";
     for (const s2 of run.structures) {
       if (Math.hypot(s2.x - run.you.x, s2.y - run.you.y) < s2.reach * 0.9) return "too-close";
     }
@@ -2111,6 +2124,7 @@
     dash: false,
     place: false,
     crown: false,
+    crownDown: false,
     cycle: 0,
     confirm: false,
     pause: false,
@@ -2219,6 +2233,7 @@
         out.dash = anyHit(m.dash);
         out.place = anyHit(m.place);
         out.crown = anyHit(m.crown);
+        out.crownDown = anyDown(m.crown);
         out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
         out.confirm = anyHit(m.confirm);
         out.pause = anyHit(m.pause);
@@ -2242,6 +2257,7 @@
       if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
       if (tap("KeyE") || tap("Enter")) out.place = true;
       if (tap("KeyC")) out.crown = true;
+      if (k("KeyC")) out.crownDown = true;
       if (tap("KeyQ")) out.cycle = -1;
       if (tap("KeyR")) out.restart = true;
       if (tap("KeyM")) out.mute = true;
@@ -2515,7 +2531,7 @@
       body: "RADIATION FORCE GOES AS RADIUS CUBED, STREAMING DRAG AS RADIUS. UNDER ABOUT 1.5 MICRONS STREAMING WINS AND NO TRAP HOLDS. MORE POWER DRIVES BOTH."
     }
   };
-  var Game = class {
+  var _Game = class _Game {
     constructor(canvas2) {
       __publicField(this, "canvas", canvas2);
       __publicField(this, "ctx");
@@ -2543,6 +2559,10 @@
       /** Frames of held time after a heavy landing. Sold as impact; it is really
        *  just the update being withheld for a moment while the draw keeps going. */
       __publicField(this, "hitstop", 0);
+      __publicField(this, "lastRefusal", -99);
+      /** How long the throne button has been held, and whether it already fired. */
+      __publicField(this, "crownHeld", 0);
+      __publicField(this, "crowned", false);
       __publicField(this, "seed", 20260830);
       __publicField(this, "sparks", []);
       __publicField(this, "popups", []);
@@ -2634,8 +2654,7 @@
       });
       this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     }
-    /** Turn one frame of intent into everything that is not movement. */
-    act(it) {
+    act(it, dt) {
       const run = this.run;
       if (it.mute) this.sfx.muted = !this.sfx.muted;
       if (it.restart) {
@@ -2670,7 +2689,28 @@
         this.selected = key3 - 1;
         this.spend(key3 - 1);
       } else if (it.place) this.spend(this.selected);
-      if (it.crown) this.doCrown();
+      if (it.crownDown) {
+        this.crownHeld += dt;
+        if (this.crownHeld >= _Game.CROWN_HOLD && !this.crowned) {
+          this.crowned = true;
+          this.doCrown();
+        }
+      } else {
+        if (this.crownHeld > 0 && !this.crowned) this.doFeed();
+        this.crownHeld = 0;
+        this.crowned = false;
+      }
+    }
+    doFeed() {
+      const run = this.run;
+      const r = feedThrone(run, this.selected);
+      if (r === "off-throne") this.say("STAND ON THE THRONE TO FEED IT");
+      if (r === "none") this.say("NOTHING IN HAND");
+      if (r === "wrong-phase") this.say("IT IS ALREADY AWAKE");
+      if (r === "fed") {
+        const need = dischargesToKill(run);
+        this.say(Number.isFinite(need) ? `FED ${run.throne.fed.length}  \xB7  ${run.throne.hm}  \xB7  ${need} DISCHARGES TO KILL` : `FED ${run.throne.fed.length}  \xB7  ${run.throne.hm}  \xB7  NOTHING CAN KILL IT YET`);
+      }
     }
     fit() {
       const s = Math.min(window.innerWidth / (VIEW_W + 40), window.innerHeight / (VIEW_H + 96));
@@ -2727,7 +2767,7 @@
         this.sfx.tick();
       }
       if (this.paused && this.screen === "play") return;
-      this.act(it);
+      this.act(it, dt);
       if (this.screen === "title") {
         step(run, {
           move: { x: Math.sin(this.t * 0.41), y: Math.sin(this.t * 0.63 + 1.1) },
@@ -2785,7 +2825,17 @@
             this.burst(ev.x, ev.y, 6, NODE);
             break;
           case "refuse":
-            this.popups.push({ x: ev.x, y: ev.y, text: refusal(ev.text), life: 1.3, colour: "#ff9c6d", big: false });
+            if (this.t - this.lastRefusal > 2.5) {
+              this.lastRefusal = this.t;
+              this.popups.push({
+                x: ev.x,
+                y: ev.y,
+                text: refusal(ev.text),
+                life: 1.3,
+                colour: "#ff9c6d",
+                big: false
+              });
+            }
             if (ev.text === "five-fold") this.teach("fivefold");
             break;
           case "crystal":
@@ -3253,6 +3303,33 @@
       g2.font = `700 9px ${MONO}`;
       g2.textAlign = "center";
       g2.fillText(run.throne.fed.length ? run.throne.hm : "THRONE", x, y - R - 14);
+      if (run.throne.fed.length > 0) {
+        const need = dischargesToKill(run);
+        const beyond = !Number.isFinite(need) || need > run.structures.length + run.cells.length;
+        g2.font = `700 9px ${MONO}`;
+        g2.fillStyle = beyond ? RED : GOLD;
+        g2.fillText(
+          `FED ${run.throne.fed.length}  \xB7  ${run.throne.maxHp} HP  \xB7  ${Number.isFinite(need) ? `${need} DISCHARGES` : "NOTHING CAN KILL IT"}`,
+          x,
+          y - R - 26
+        );
+        if (beyond) {
+          g2.fillStyle = RED;
+          g2.font = `600 8px ${MONO}`;
+          g2.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
+        }
+      }
+      if (this.crownHeld > 0) {
+        const f = Math.min(1, this.crownHeld / _Game.CROWN_HOLD);
+        g2.strokeStyle = `rgba(255,201,74,${(0.4 + f * 0.6).toFixed(2)})`;
+        g2.lineWidth = 3;
+        g2.beginPath();
+        g2.arc(x, y, R + 8, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+        g2.stroke();
+        g2.fillStyle = GOLD;
+        g2.font = `700 9px ${MONO}`;
+        g2.fillText(f >= 1 ? "AWAKE" : "HOLD TO CROWN", x, y + R + 16);
+      }
       g2.textAlign = "left";
     }
     drawTrails() {
@@ -3670,7 +3747,7 @@
       g2.fillStyle = FAINT2;
       g2.font = `600 9px ${MONO}`;
       const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
-      const hint = run.phase === "reign" ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   \xB7   ${G.dash} TO BURST CLEAR` : !run.bound.free && run.structures.length >= 2 ? advice(run.crystal, run.gap, run.bound.omega) : run.cells.length > 0 ? `${G.place} BUILDS   \xB7   ON THE THRONE IT FEEDS INSTEAD` : run.throne.fed.length > 0 ? `${G.crown} TO CROWN IT` : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   \xB7   FOUR MAKES A CELL`;
+      const hint = run.phase === "reign" ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   \xB7   ${G.dash} TO BURST CLEAR` : !run.bound.free && run.structures.length >= 2 ? advice(run.crystal, run.gap, run.bound.omega) : run.cells.length > 0 ? `${G.place} BUILDS   \xB7   ON THE THRONE IT FEEDS INSTEAD` : run.throne.fed.length > 0 ? `HOLD ${G.crown} TO WAKE IT   \xB7   TAP IT ON THE THRONE TO FEED MORE` : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   \xB7   FOUR MAKES A CELL`;
       g2.fillText(hint, VIEW_W / 2, VIEW_H - 16);
       g2.textAlign = "left";
     }
@@ -3889,9 +3966,9 @@
         `${pad(G.move)}THE NODE GOES A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
         `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
         `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
-        `${pad(G.place)}BUILD HERE. ON THE THRONE IT FEEDS INSTEAD.`,
+        `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
         `${pad(G.cycle)}CHOOSE WHICH CELL.`,
-        `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
+        `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
         `${pad(G.mute)}SOUND.`,
         "",
         "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
@@ -4002,8 +4079,8 @@
         `${pad(G.move)}PUT THE NODE A QUARTER PITCH AHEAD. YOU FALL INTO IT.`,
         `${pad(G.grip)}CLOSE YOUR HAND: ONE TRAP, AND SPEED. IT COSTS STAMINA.`,
         `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
-        `${pad(G.place)}PLACE A CELL. STAND ON THE THRONE TO FEED IT INSTEAD.`,
-        `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
+        `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
+        `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
         "",
         "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
         "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",
@@ -4033,6 +4110,9 @@
       g2.textAlign = "left";
     }
   };
+  /** Turn one frame of intent into everything that is not movement. */
+  __publicField(_Game, "CROWN_HOLD", 0.9);
+  var Game = _Game;
   function warmth(phi) {
     if (Math.abs(phi) < 0.015) return "190,200,215";
     return phi > 0 ? "127,216,232" : "232,120,165";

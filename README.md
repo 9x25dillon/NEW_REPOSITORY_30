@@ -404,7 +404,8 @@ under.
 | **L stick** | steer | the offset of the node from your body. Full deflection is a quarter pitch — `sin(2ku)` peaks at λ/8, so pushing further would give you *less* pull, and the stick is capped where the physics caps it. |
 | **RT** | grip | apodisation. The drive concentrates from 1.9 trap pitches down to 0.62, which is the difference between a weak lattice everywhere and one trap under your hand. Costs stamina as amplitude squared. |
 | **A** | burst | the amplifier's peak rating against its continuous one. Twice the drive for 120 ms, and force goes as pressure squared, so four times the speed — about 200 µm, and every other body in the water lurches with you. |
-| **X / Y** | place, crown | a cell onto the ground, or into the throne if you are standing on it. |
+| **X** | build | a cell onto the ground. It never feeds the throne. |
+| **Y** | tap to feed, **hold** to crown | the throne is at the centre of the arena, which is where you build — so an act you cannot undo does not share a button with one you make sixty times a run. |
 | **START** | stop the world | and the pause screen carries the verbs, because that is the screen you open when you cannot remember what the game lets you do. |
 
 Keyboard plays the same game: WASD, space, K, E or 1–9, C, ESC.
@@ -682,7 +683,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                222 tests: what the modules above are actually claiming
+test/                223 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

@@ -33,6 +33,10 @@ export interface Intent {
   dash: boolean;
   place: boolean;
   crown: boolean;
+  /** The throne button, HELD rather than tapped. Tap it to feed, hold it to
+   *  crown: an act you cannot undo should not be the same gesture as one you
+   *  make sixty times a run. */
+  crownDown: boolean;
   /** -1, 0 or +1: step the selected cell. One-shot. */
   cycle: number;
   /** Start / A / Space on a menu. One-shot. */
@@ -45,7 +49,8 @@ export interface Intent {
 
 const NOTHING: Intent = {
   move: { x: 0, y: 0 }, grip: false, dash: false, place: false,
-  crown: false, cycle: 0, confirm: false, pause: false, mute: false, restart: false,
+  crown: false, crownDown: false, cycle: 0, confirm: false, pause: false,
+  mute: false, restart: false,
 };
 
 /** Buttons in the standard mapping, by the name written on an Xbox pad. */
@@ -157,6 +162,7 @@ export class Pad {
       out.dash = anyHit(m.dash);
       out.place = anyHit(m.place);
       out.crown = anyHit(m.crown);
+      out.crownDown = anyDown(m.crown);
       out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
       out.confirm = anyHit(m.confirm);
       out.pause = anyHit(m.pause);
@@ -187,6 +193,7 @@ export class Pad {
     if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
     if (tap("KeyE") || tap("Enter")) out.place = true;
     if (tap("KeyC")) out.crown = true;
+    if (k("KeyC")) out.crownDown = true;
     if (tap("KeyQ")) out.cycle = -1;
     if (tap("KeyR")) out.restart = true;
     if (tap("KeyM")) out.mute = true;
