@@ -6,7 +6,3 @@ dist/
 /data/raw/
 package-lock.json
 app/dist/
-
-# Reference clone, not a dependency: the game is TypeScript and ships as one HTML file.
-/cocos2d-x/
-/turbulenz_engine/
