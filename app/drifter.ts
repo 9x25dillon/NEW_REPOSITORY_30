@@ -640,6 +640,7 @@ export class Game {
       g.translate((Math.random() * 2 - 1) * this.shake, (Math.random() * 2 - 1) * this.shake);
     }
     this.drawField();
+    this.drawLattice();
     this.drawStructures();
     this.drawBound();
     this.drawThrone();
@@ -746,6 +747,65 @@ export class Game {
 
   /** What you built: a rosette with one arm per direction its group has, and
    *  a holding point at the end of each. */
+  /**
+   * The spacing you have, drawn as spacing.
+   *
+   * The objective is a band gap and the lever is a distance, and for a while
+   * the only thing on screen was the frequency. You cannot act on megaradians
+   * per second. You can act on a line between two buildings that is the wrong
+   * length, and on a ring that says put the next one here — and both of those
+   * are pictures rather than numbers.
+   */
+  private drawLattice(): void {
+    const run = this.run;
+    const band = run.spacing;
+    if (!band || run.bound.free || run.structures.length === 0) return;
+    const g = this.ctx;
+
+    // Every nearest-neighbour link, coloured by whether it is the right length.
+    for (const a of run.structures) {
+      let near: typeof a | null = null;
+      let best = Infinity;
+      for (const b of run.structures) {
+        if (b === a) continue;
+        const d = Math.hypot(b.x - a.x, b.y - a.y);
+        if (d < best) { best = d; near = b; }
+      }
+      if (!near) continue;
+      const right = best >= band.lo && best <= band.hi;
+      g.strokeStyle = right ? `rgba(${JADE},0.5)` : "rgba(255,140,90,0.28)";
+      g.lineWidth = right ? 1.6 : 1;
+      g.setLineDash(right ? [] : [3, 4]);
+      g.beginPath();
+      g.moveTo(px(a.x), px(a.y));
+      g.lineTo(px(near.x), px(near.y));
+      g.stroke();
+      g.setLineDash([]);
+    }
+
+    // And where the next one belongs: an annulus about whichever building you
+    // are standing nearest, at the spacing this water needs.
+    let host = run.structures[0];
+    let hostD = Infinity;
+    for (const s of run.structures) {
+      const d = Math.hypot(s.x - run.you.x, s.y - run.you.y);
+      if (d < hostD) { hostD = d; host = s; }
+    }
+    const hx = px(host.x), hy = px(host.y);
+    g.strokeStyle = "rgba(255,201,74,0.30)";
+    g.lineWidth = 1;
+    g.setLineDash([5, 6]);
+    for (const r of [band.lo, band.hi]) {
+      g.beginPath(); g.arc(hx, hy, px(r), 0, Math.PI * 2); g.stroke();
+    }
+    g.setLineDash([]);
+    g.fillStyle = "rgba(255,201,74,0.5)";
+    g.font = `600 8px ${MONO}`;
+    g.textAlign = "center";
+    g.fillText("PUT THE NEXT ONE HERE", hx, hy - px(band.hi) - 5);
+    g.textAlign = "left";
+  }
+
   private drawStructures(): void {
     const g = this.ctx;
     const run = this.run;
@@ -870,44 +930,56 @@ export class Game {
     const run = this.run;
     const b = run.bound;
     const g = this.ctx;
-    const x = 18, y = 62, w = 232, h = 9;
-    const SPAN = 130e6;                      // rad/s across the whole bar
-    const at = (om: number) => x + Math.max(0, Math.min(1, om / SPAN)) * w;
+    const x = 18, y = 62, w = 232, h = 11;
 
     g.font = `600 9px ${MONO}`;
     g.fillStyle = DIM;
-    g.fillText(b.free ? "IT IS OUT" : "THE BOUND FIELD", x, y - 12);
+    g.fillText(b.free ? "IT IS OUT" : "HOW FAR APART TO BUILD", x, y - 12);
 
-    g.fillStyle = "rgba(10,18,28,0.8)";
+    // A RULER IN MICRONS, not a band diagram in megaradians. The lever is a
+    // distance, so the picture is a distance.
+    const SPAN = 240e-6;
+    const at = (m: number) => x + Math.max(0, Math.min(1, m / SPAN)) * w;
+
+    g.fillStyle = "rgba(10,18,28,0.85)";
     g.fillRect(x, y, w, h);
 
-    if (run.gap) {
-      const lo = at(run.gap.lo), hi = at(run.gap.hi);
-      g.fillStyle = catches(run.gap, b.omega) ? `rgba(${JADE},0.55)` : "rgba(120,225,245,0.24)";
-      g.fillRect(lo, y, Math.max(2, hi - lo), h);
+    if (run.spacing) {
+      const lo = at(run.spacing.lo), hi = at(run.spacing.hi);
+      g.fillStyle = `rgba(${JADE},0.45)`;
+      g.fillRect(lo, y, Math.max(3, hi - lo), h);
     }
 
-    const m = at(b.omega);
-    g.strokeStyle = b.free ? `rgb(${JADE})` : "#e8d9ff";
-    g.lineWidth = 2;
-    g.beginPath(); g.moveTo(m, y - 3); g.lineTo(m, y + h + 3); g.stroke();
+    if (run.crystal) {
+      const inBand = run.spacing
+        && run.crystal.a >= run.spacing.lo && run.crystal.a <= run.spacing.hi;
+      const m = at(run.crystal.a);
+      g.strokeStyle = inBand ? "#eaffff" : "#ff8c5a";
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(m, y - 4); g.lineTo(m, y + h + 4); g.stroke();
+      g.fillStyle = inBand ? "#eaffff" : "#ff8c5a";
+      g.font = `700 9px ${MONO}`;
+      g.textAlign = "center";
+      g.fillText(`${(run.crystal.a * 1e6).toFixed(0)}`, m, y - 6);
+      g.textAlign = "left";
+    }
 
     g.strokeStyle = "rgba(120,225,245,0.3)";
     g.lineWidth = 1;
     g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
     g.font = `600 8px ${MONO}`;
-    g.fillStyle = b.free ? `rgb(${JADE})` : FAINT;
+    g.fillStyle = FAINT;
+    if (run.spacing) {
+      g.fillText(`${(run.spacing.lo * 1e6).toFixed(0)}`, at(run.spacing.lo) - 6, y + h + 8);
+      g.fillText(`${(run.spacing.hi * 1e6).toFixed(0)} UM`, at(run.spacing.hi) - 4, y + h + 8);
+    }
+
+    g.font = `700 9px ${MONO}`;
+    g.fillStyle = b.free ? `rgb(${JADE})` : `rgb(${NODE})`;
     g.fillText(
       b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
-      x, y + h + 6);
-
-    if (run.crystal) {
-      g.fillStyle = FAINT;
-      g.fillText(
-        `SPACING ${(run.crystal.a * 1e6).toFixed(0)} UM   FILL ${run.crystal.fill.toFixed(2)}`,
-        x, y + h + 17);
-    }
+      x, y + h + 20);
   }
 
   private drawThrone(): void {
@@ -1393,15 +1465,17 @@ export class Game {
     g.font = `600 9px ${MONO}`;
     const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
     // What to do next, and never more than one thing.
+    // NOT the spacing advice — that has its own panel, and while it lived here
+    // too it crowded out every other thing a player might do next. One report
+    // came back with twenty-six buildings placed, nothing fed, and a throne that
+    // had never been visited.
     const hint = run.phase === "reign"
       ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   ·   ${G.dash} TO BURST CLEAR`
-      : !run.bound.free && run.structures.length >= 2
-        ? advice(run.crystal, run.gap, run.bound.omega)
-        : run.cells.length > 0
-          ? `${G.place} BUILDS   ·   ON THE THRONE IT FEEDS INSTEAD`
-          : run.throne.fed.length > 0
-            ? `HOLD ${G.crown} TO WAKE IT   ·   TAP IT ON THE THRONE TO FEED MORE`
-            : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   ·   FOUR MAKES A CELL`;
+      : run.cells.length > 0
+        ? `${G.place} BUILDS ON THE RING   ·   ${G.crown} ON THE THRONE FEEDS IT INSTEAD`
+        : run.throne.fed.length > 0
+          ? `HOLD ${G.crown} TO WAKE IT   ·   TAP IT ON THE THRONE TO FEED MORE`
+          : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   ·   FOUR MAKES A CELL`;
     g.fillText(hint, VIEW_W / 2, VIEW_H - 16);
     g.textAlign = "left";
   }

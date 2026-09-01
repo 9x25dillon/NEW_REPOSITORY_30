@@ -4,8 +4,9 @@ import { test } from "node:test";
 import {
   MAX_FILL, SKELETON, SKELETON_REACH,
   advice, boundFrequency, catches, crystalOf, detune, gapOf, newBound,
+  workableSpacing,
 } from "../game/bound.js";
-import { structureFrom } from "../game/world.js";
+import { reachOf, structureFrom } from "../game/world.js";
 import { firstWorld } from "../game/world.js";
 
 const WATER = { rho: 997, c: 1497 };
@@ -136,4 +137,25 @@ test("the skeleton is what the wave sees, not the grip", () => {
   const z = (m: { rho: number; c: number }) => m.rho * m.c;
   assert.ok(z(SKELETON) / z(WATER) > 9, "a complete gap needs about tenfold");
   assert.ok(SKELETON_REACH > 1, "and the frustule is wider than the grip");
+});
+
+test("the objective is inverted into the thing the player has their hands on", () => {
+  // The lever is a distance and the objective is a frequency, and for a while
+  // the only thing on screen was the frequency. Nobody can act on megaradians
+  // per second. A report came back reading "crystal a=87um, gap 67.2-87.6"
+  // against a mode stuck at 53.4, having caught it twice and lost it twice.
+  const w = firstWorld();
+  const omega = boundFrequency(w.pitch, w.medium);
+  const band = workableSpacing(omega, w.medium, reachOf("222"));
+
+  assert.ok(band, "there must be a spacing that works, or the level is a lie");
+  assert.ok(band.lo > 80e-6 && band.hi < 160e-6, `${band.lo}..${band.hi}`);
+  assert.ok(band.hi - band.lo > 15e-6,
+    `and wide enough to hit by hand (${((band.hi - band.lo) * 1e6).toFixed(0)} um)`);
+
+  // Everything inside it really does catch the mode, which is the only reason
+  // the picture is allowed to say so.
+  const mid = (band.lo + band.hi) / 2;
+  assert.ok(catches(gapOf(crystalOf(array(mid), w.medium)), omega),
+    "the middle of the band must actually free it");
 });

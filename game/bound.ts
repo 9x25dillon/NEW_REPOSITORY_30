@@ -183,6 +183,40 @@ export function detune(gap: { lo: number; hi: number } | null, omega: number): n
   return Math.min(1, Math.abs(omega - edge) / omega);
 }
 
+/**
+ * THE SPACING THAT WOULD WORK, in microns, because that is what a player has
+ * their hands on.
+ *
+ * The objective is a frequency and the lever is a distance, and until this
+ * existed the game only ever showed the frequency. A player cannot act on
+ * megaradians per second. They can act on "your buildings are eighty-seven
+ * microns apart and they want to be a hundred and ten" — and they can SEE that,
+ * which a band diagram is not.
+ *
+ * Found by asking the same solver the objective is judged by, across the
+ * spacings a player can actually build at. It costs about half a second, so it
+ * is done once when a world begins and never again: the answer only depends on
+ * the water and on what a building is made of, neither of which changes inside
+ * a world.
+ */
+export function workableSpacing(
+  omega: number, medium: Medium, reach: number,
+): { lo: number; hi: number } | null {
+  const r = reach * SKELETON_REACH;
+  let lo = Infinity;
+  let hi = 0;
+
+  for (let a = 60e-6; a <= 220e-6; a += 10e-6) {
+    const gap = gapOf({
+      a, geometry: "circle",
+      fill: Math.min(MAX_FILL, (Math.PI * r * r) / (a * a)),
+      inclusion: SKELETON, matrix: medium,
+    });
+    if (catches(gap, omega)) { lo = Math.min(lo, a); hi = Math.max(hi, a); }
+  }
+  return hi > 0 ? { lo: lo - 5e-6, hi: hi + 5e-6 } : null;
+}
+
 /** Which way to go, in words, because a number alone teaches nothing. */
 export function advice(
   crystal: Crystal2D | null, gap: { lo: number; hi: number } | null, omega: number,
@@ -193,8 +227,8 @@ export function advice(
       ? "NO GAP AT ALL - BUILD MORE, AND CLOSER TOGETHER"
       : "NO GAP AT ALL - THE SPACING IS TOO UNEVEN";
   }
-  if (omega > gap.lo && omega < gap.hi) return "THE GAP HAS IT";
+  if (omega > gap.lo && omega < gap.hi) return "THE GAP HAS IT - KEEP IT STANDING";
   return omega > gap.hi
-    ? "THE GAP IS TOO LOW - BUILD TIGHTER"
-    : "THE GAP IS TOO HIGH - SPREAD OUT";
+    ? "TOO FAR APART - BUILD THEM CLOSER"
+    : "TOO CLOSE TOGETHER - SPREAD THEM OUT";
 }

@@ -26,10 +26,10 @@
 
 import { beast } from "./beasts.js";
 import {
-  type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound,
+  type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
 } from "./bound.js";
 import {
-  type Cell, assemble, cellFor, motif,
+  type Cell, BUILDABLE, assemble, cellFor, motif,
 } from "./lattice.js";
 import {
   type Wave, advance, axisX, axisY, grip, localAmplitude, newWave, rng,
@@ -40,7 +40,7 @@ import {
 } from "./pilot.js";
 import {
   type Sovereign, type Structure, type World,
-  cadence, emptyThrone, feed, firstWorld, holdPoints, sovereignInertia,
+  cadence, emptyThrone, feed, firstWorld, holdPoints, reachOf, sovereignInertia,
   sovereignParticle, sovereignSpeed, structureFrom, volley, worldFrom,
 } from "./world.js";
 import { type Particle, WATER, contrastFactor } from "../src/gorkov.js";
@@ -187,6 +187,14 @@ export interface Run {
    *  what you have built changes, because it costs sixty milliseconds. */
   crystal: ReturnType<typeof crystalOf>;
   gap: ReturnType<typeof gapOf>;
+  /**
+   * How far apart the buildings of THIS water have to be, in metres.
+   *
+   * The objective is a frequency and the lever is a distance. Nobody can act on
+   * megaradians per second, so it is inverted once when the world begins — it
+   * costs about half a second and the answer cannot change inside a world.
+   */
+  spacing: { lo: number; hi: number } | null;
   phase: Phase;
   entities: Entity[];
   structures: Structure[];
@@ -218,6 +226,7 @@ export function startRun(seed = 1): Run {
     bound: newBound(world.pitch, world.medium, ARENA_W * 0.72, ARENA_H * 0.28),
     crystal: null,
     gap: null,
+    spacing: null,
     phase: "settle",
     entities: [],
     structures: [],
@@ -237,6 +246,7 @@ export function startRun(seed = 1): Run {
     nextId: 0,
   };
   for (let i = 0; i < world.density; i++) run.entities.push(newMotif(run, true));
+  run.spacing = workableSpacing(run.bound.omega, world.medium, reachOf(BUILDABLE[0]));
   return run;
 }
 
@@ -1143,6 +1153,7 @@ export function enterWorld(run: Run): void {
   run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
   run.bound = newBound(w.pitch, w.medium,
     ARENA_W * (0.2 + run.rand() * 0.6), ARENA_H * (0.2 + run.rand() * 0.6));
+  run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
   retune(run);
   run.bolts = [];
   run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
