@@ -52,8 +52,45 @@ import { trapPositions } from "../src/fields.js";
 
 // ── the space ───────────────────────────────────────────────────────────────
 
+/**
+ * The water you start in, m.
+ *
+ * Not the channel — the part of it your drive covers. A device is as wide as
+ * its transducer, and yours grows: see `boundsFor`.
+ */
 export const ARENA_W = 900e-6;
 export const ARENA_H = 660e-6;
+
+/**
+ * The whole channel, m. Two and a half millimetres by nearly two.
+ *
+ * This is a real chip rather than a big one — acoustofluidic devices are
+ * centimetres of glass with channels a millimetre or two across — and at one
+ * pixel to the micron it is about three screens wide and three deep.
+ */
+export const CHANNEL_W = 2600e-6;
+export const CHANNEL_H = 1900e-6;
+
+/**
+ * How much of the channel you can work in, given what you have built.
+ *
+ * IT OPENS AS THE ORGANISM DOES. A crystal of silica skeletons is a phononic
+ * structure: it is what guides and confines a wave, which is the whole of the
+ * bound field's story, and the region you can drive is the region your crystal
+ * reaches into. So the water you can move in is a function of the largest body
+ * you have made, and a player who has built nothing is in a pool the size of the
+ * game as it has always been.
+ *
+ * Squared off rather than round because the lattice is, and clamped at the walls
+ * of the actual channel because glass is glass.
+ */
+export function boundsFor(cells: number): { w: number; h: number } {
+  const grow = 1 + Math.max(0, cells - 2) * 0.14;
+  return {
+    w: Math.min(CHANNEL_W, ARENA_W * grow),
+    h: Math.min(CHANNEL_H, ARENA_H * grow),
+  };
+}
 export const MAX_AMPLITUDE = 2.0e5;
 
 /** Focus must stay well under the trap pitch or your hand is not one trap. */
@@ -206,6 +243,8 @@ export interface Run {
   /** What your buildings have joined into. Recomputed with the dispersion,
    *  because they are the same event: a body IS the crystal. */
   bodies: Body[];
+  /** How much of the channel you can work in. It opens as the organism grows. */
+  bounds: { w: number; h: number };
   phase: Phase;
   entities: Entity[];
   structures: Structure[];
@@ -241,6 +280,7 @@ export function startRun(seed = 1): Run {
     gap: null,
     spacing: null,
     bodies: [],
+    bounds: boundsFor(0),
     phase: "settle",
     entities: [],
     structures: [],
@@ -301,9 +341,9 @@ export function labelOf(e: Entity): string {
 
 function edge(run: Run): { x: number; y: number } {
   if (run.rand() < 0.5) {
-    return { x: run.rand() < 0.5 ? 4e-6 : ARENA_W - 4e-6, y: run.rand() * ARENA_H };
+    return { x: run.rand() < 0.5 ? 4e-6 : run.bounds.w - 4e-6, y: run.rand() * run.bounds.h };
   }
-  return { x: run.rand() * ARENA_W, y: run.rand() < 0.5 ? 4e-6 : ARENA_H - 4e-6 };
+  return { x: run.rand() * run.bounds.w, y: run.rand() < 0.5 ? 4e-6 : run.bounds.h - 4e-6 };
 }
 
 function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity {
@@ -318,7 +358,8 @@ function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity
 
 export function newMotif(run: Run, anywhere = false): Entity {
   const at = anywhere
-    ? { x: 0.08 * ARENA_W + run.rand() * 0.84 * ARENA_W, y: 0.08 * ARENA_H + run.rand() * 0.84 * ARENA_H }
+    ? { x: 0.08 * run.bounds.w + run.rand() * 0.84 * run.bounds.w,
+        y: 0.08 * run.bounds.h + run.rand() * 0.84 * run.bounds.h }
     : edge(run);
   const e = blank(run, "motif", at);
   e.parts = [run.world.pool[Math.floor(run.rand() * run.world.pool.length)]];
@@ -383,7 +424,7 @@ export function step(run: Run, input: Input, dt: number): void {
     : aimFor(you, w, 0, 0);
   run.aim.x = trap.x;
   run.aim.y = trap.y;
-  carry(you, w, dt, run.world.current, ARENA_W, ARENA_H);
+  carry(you, w, dt, run.world.current, run.bounds.w, run.bounds.h);
 
   if (run.iframe > 0) run.iframe -= dt;
   if (!alive) { drift(run, dt); return; }
@@ -460,8 +501,8 @@ function drift(run: Run, dt: number): void {
       dy += uStream * Math.sin(e.ang);
     }
 
-    const ca = (Math.PI * e.x) / ARENA_W;
-    const cb = (Math.PI * e.y) / ARENA_H;
+    const ca = (Math.PI * e.x) / run.bounds.w;
+    const cb = (Math.PI * e.y) / run.bounds.h;
     dx += run.world.current * Math.sin(ca) * Math.cos(cb);
     dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
 
@@ -494,9 +535,9 @@ function drift(run: Run, dt: number): void {
 
     const rad = p.radius;
     if (e.x < rad) { e.x = rad; e.ang = Math.PI - e.ang; }
-    if (e.x > ARENA_W - rad) { e.x = ARENA_W - rad; e.ang = Math.PI - e.ang; }
+    if (e.x > run.bounds.w - rad) { e.x = run.bounds.w - rad; e.ang = Math.PI - e.ang; }
     if (e.y < rad) { e.y = rad; e.ang = -e.ang; }
-    if (e.y > ARENA_H - rad) { e.y = ARENA_H - rad; e.ang = -e.ang; }
+    if (e.y > run.bounds.h - rad) { e.y = run.bounds.h - rad; e.ang = -e.ang; }
 
     e.trail.push(e.x, e.y);
     while (e.trail.length > 18) e.trail.shift();
@@ -574,8 +615,8 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
  */
 export function capturedAt(w: Wave, x: number, y: number, p: Particle): boolean {
   if (localAmplitude(w, x, y) < HOLD_PRESSURE) return false;
-  const nx = nearest(trapPositions(axisX(w), p, ARENA_W), x);
-  const ny = nearest(trapPositions(axisY(w), p, ARENA_H), y);
+  const nx = nearest(trapPositions(axisX(w), p, CHANNEL_W), x);
+  const ny = nearest(trapPositions(axisY(w), p, CHANNEL_H), y);
   if (nx === null || ny === null) return false;
   return Math.hypot(nx - x, ny - y) < captureRadius(w.pitch) + p.radius * 0.5;
 }
@@ -731,6 +772,7 @@ export function latticePitch(run: Run): number {
 export function reshape(run: Run): void {
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
+  run.bounds = boundsFor(run.bodies[0]?.cells.length ?? 0);
   for (const b of run.bodies) {
     const zs = reaches(b, pitch);
     for (const c of b.cells) c.serves = zs;
@@ -778,7 +820,7 @@ function walkBodies(run: Run, dt: number): void {
     const mine = new Set(body.cells);
     const ok = body.cells.every((c) => {
       const nx = c.x + dx, ny = c.y + dy;
-      if (nx < 0 || nx > ARENA_W || ny < 0 || ny > ARENA_H) return false;
+      if (nx < 0 || nx > run.bounds.w || ny < 0 || ny > run.bounds.h) return false;
       if (onThrone(run, nx, ny)) return false;
       return !run.structures.some(
         (o) => !mine.has(o) && o.layer === c.layer
@@ -800,6 +842,7 @@ export function retune(run: Run): void {
   run.gap = gapOf(run.crystal);
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
+  run.bounds = boundsFor(run.bodies[0]?.cells.length ?? 0);
 
   // WHAT A LEG IS FOR. A body that hangs a limb onto another plane can work
   // there, and every cell of it can — which is the first thing an organism does
@@ -902,7 +945,7 @@ export function placeCell(run: Run, index: number): PlaceResult {
   // ON THE LATTICE, not where you were standing. A crystal is a lattice and a
   // motif; freehand placements are a heap.
   const at = snap(run.you.x, run.you.y, latticePitch(run));
-  if (at.x < 0 || at.x > ARENA_W || at.y < 0 || at.y > ARENA_H) return "too-close";
+  if (at.x < 0 || at.x > run.bounds.w || at.y < 0 || at.y > run.bounds.h) return "too-close";
   for (const s of run.structures) {
     if (Math.hypot(s.x - at.x, s.y - at.y) < latticePitch(run) * 0.5) return "occupied";
   }
@@ -1138,8 +1181,8 @@ function reign(run: Run, dt: number): void {
     dx += (moved.x - k.x) / dt;
     dy += (moved.y - k.y) / dt;
   }
-  k.x = Math.max(30e-6, Math.min(ARENA_W - 30e-6, k.x + dx * dt));
-  k.y = Math.max(30e-6, Math.min(ARENA_H - 30e-6, k.y + dy * dt));
+  k.x = Math.max(30e-6, Math.min(run.bounds.w - 30e-6, k.x + dx * dt));
+  k.y = Math.max(30e-6, Math.min(run.bounds.h - 30e-6, k.y + dy * dt));
 
   // YOUR HAND, WHICH IS THE LAST THING YOU HAVE. Worked on by the drive like
   // anything else in the water, it comes apart — slowly, and only if you gave
@@ -1187,8 +1230,8 @@ function reign(run: Run, dt: number): void {
     b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
   }
   run.bolts = run.bolts.filter(
-    (b) => b.life > 0 && b.x > -20e-6 && b.x < ARENA_W + 20e-6
-      && b.y > -20e-6 && b.y < ARENA_H + 20e-6);
+    (b) => b.life > 0 && b.x > -20e-6 && b.x < run.bounds.w + 20e-6
+      && b.y > -20e-6 && b.y < run.bounds.h + 20e-6);
 }
 
 // ── being hit ───────────────────────────────────────────────────────────────
@@ -1303,7 +1346,7 @@ export function enterWorld(run: Run): void {
 
   run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
   run.bound = newBound(w.pitch, w.medium,
-    ARENA_W * (0.2 + run.rand() * 0.6), ARENA_H * (0.2 + run.rand() * 0.6));
+    run.bounds.w * (0.2 + run.rand() * 0.6), run.bounds.h * (0.2 + run.rand() * 0.6));
   run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
   retune(run);
   run.bolts = [];

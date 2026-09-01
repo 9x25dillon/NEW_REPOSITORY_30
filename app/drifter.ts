@@ -204,6 +204,15 @@ export class Game {
   private hitstop = 0;
   private lastRefusal = -99;
   /**
+   * Where the window is, in metres.
+   *
+   * The water is bigger than the screen now and opens further as the organism
+   * grows, so the view follows you and stops at the glass. It lags a little on
+   * purpose: a camera pinned exactly to a body that is being dragged about by a
+   * standing wave is unreadable.
+   */
+  private cam = { x: 0, y: 0 };
+  /**
    * The pointer, in metres, and whether it is steering.
    *
    * The movement this game wants is a DIRECTION WITH A MAGNITUDE — it is the
@@ -296,9 +305,14 @@ export class Game {
       };
     };
 
+    // THROUGH THE CAMERA. The window is not the water any more, so a pointer
+    // in view pixels is not a place — it has to be put back through the camera
+    // or steering would aim at wherever that point USED to be before the view
+    // scrolled, which is a fault that only appears once you have built enough
+    // to open the map.
     this.canvas.addEventListener("pointermove", (e) => {
       const { sx, sy } = world(e);
-      this.pointer = { x: mx(sx), y: mx(sy) };
+      this.pointer = { x: mx(this.cam.x + sx), y: mx(this.cam.y + sy) };
       this.steering = true;
     });
     this.canvas.addEventListener("pointerleave", () => { this.steering = false; });
@@ -314,7 +328,7 @@ export class Game {
       const slot = this.slotAt(sx, sy);
       if (slot >= 0) { this.selected = slot; this.spend(slot); return; }
 
-      this.pointer = { x: mx(sx), y: mx(sy) };
+      this.pointer = { x: mx(this.cam.x + sx), y: mx(this.cam.y + sy) };
       this.steering = true;
       if (e.button === 0) this.mouseGrip = true;
       if (e.button === 2) this.mouseDash = true;
@@ -747,10 +761,24 @@ export class Game {
     g.fillStyle = "#05070e";
     g.fillRect(0, 0, VIEW_W, VIEW_H);
 
+    // Follow, clamped to the water. When the water is smaller than the window
+    // it is centred instead, which is the game as it has always looked.
+    const b = this.run.bounds;
+    const want = {
+      x: px(b.w) <= VIEW_W ? (px(b.w) - VIEW_W) / 2
+        : Math.max(0, Math.min(px(b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
+      y: px(b.h) <= VIEW_H ? (px(b.h) - VIEW_H) / 2
+        : Math.max(0, Math.min(px(b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2)),
+    };
+    this.cam.x += (want.x - this.cam.x) * 0.12;
+    this.cam.y += (want.y - this.cam.y) * 0.12;
+
     g.save();
     if (this.shake > 0) {
       g.translate((Math.random() * 2 - 1) * this.shake, (Math.random() * 2 - 1) * this.shake);
     }
+    g.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
+    this.drawWalls();
     this.drawField();
     this.drawLattice();
     this.drawSites();
@@ -765,11 +793,11 @@ export class Game {
     this.drawSparks();
     this.drawRings();
     this.drawYou();
+    this.drawPopups();
     g.restore();
 
     g.fillStyle = this.vignette;
     g.fillRect(0, 0, VIEW_W, VIEW_H);
-    this.drawPopups();
 
     if (this.screen === "title") this.drawTitle();
     else {
@@ -788,6 +816,18 @@ export class Game {
     }
   }
 
+  /** The glass. The water you can drive stops here, and it opens as you build. */
+  private drawWalls(): void {
+    const g = this.ctx;
+    const b = this.run.bounds;
+    g.strokeStyle = "rgba(120,225,245,0.16)";
+    g.lineWidth = 2;
+    g.strokeRect(0, 0, px(b.w), px(b.h));
+    g.strokeStyle = "rgba(120,225,245,0.05)";
+    g.lineWidth = 1;
+    g.strokeRect(-6, -6, px(b.w) + 12, px(b.h) + 12);
+  }
+
   /** Both the pressure of crossed standing waves and the Gaussian focus are
    *  separable, so the wash costs two rows of trigonometry, not a grid. */
   private drawField(): void {
@@ -800,13 +840,13 @@ export class Game {
     const f2 = 2 * w.focus * w.focus;
 
     for (let i = 0; i < WASH_W; i++) {
-      const u = mx(((i + 0.5) / WASH_W) * VIEW_W);
+      const u = mx(this.cam.x + ((i + 0.5) / WASH_W) * VIEW_W);
       this.cosX[i] = Math.cos(k * u + phx);
       const d = u - w.aimX;
       this.envX[i] = Math.exp(-(d * d) / f2);
     }
     for (let j = 0; j < WASH_H; j++) {
-      const u = mx(((j + 0.5) / WASH_H) * VIEW_H);
+      const u = mx(this.cam.y + ((j + 0.5) / WASH_H) * VIEW_H);
       this.cosY[j] = Math.cos(k * u + phy);
       const d = u - w.aimY;
       this.envY[j] = Math.exp(-(d * d) / f2);
@@ -831,7 +871,9 @@ export class Game {
     }
     this.washCtx.putImageData(this.wash, 0, 0);
     g.imageSmoothingEnabled = true;
-    g.drawImage(this.washCanvas, 0, 0, VIEW_W, VIEW_H);
+    // Sampled in WINDOW coordinates, so it is laid down where the window is —
+    // the canvas is translated by the camera and the wash must not be.
+    g.drawImage(this.washCanvas, Math.round(this.cam.x), Math.round(this.cam.y), VIEW_W, VIEW_H);
 
     const med = this.run.world.medium;
     const cool = { radius: 6e-6, rho: med.rho + 110, c: med.c + 80 };

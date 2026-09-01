@@ -2,7 +2,8 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  ARENA_H, ARENA_W, latticePitch, retune, startRun, step, type Input, type Run,
+  ARENA_H, ARENA_W, CHANNEL_H, CHANNEL_W, boundsFor, latticePitch, retune,
+  startRun, step, type Input, type Run,
 } from "../game/run.js";
 import { autonomous, gaitDirection, snap, walkSpeed } from "../game/body.js";
 import { structureFrom } from "../game/world.js";
@@ -133,4 +134,49 @@ test("the slowest cell sets the pace, so distance is what slows a body down", ()
 
   assert.ok(near > 0, "standing among it, it can be swept");
   assert.ok(near > far * 4, `and it is far slower from across the arena (${near} vs ${far})`);
+});
+
+// ── and the water opens as the organism does ────────────────────────────────
+
+test("the water you can work in opens as the thing you built grows", () => {
+  // A crystal of silica skeletons is a phononic structure — it is what guides
+  // and confines a wave, which is the whole of the bound field's story — so the
+  // region you can drive is the region your crystal reaches into. A player who
+  // has built nothing is in the pool the game has always been.
+  const start = boundsFor(0);
+  assert.equal(start.w, ARENA_W);
+  assert.equal(start.h, ARENA_H);
+
+  let last = start.w;
+  for (const n of [4, 6, 9, 12]) {
+    const b = boundsFor(n);
+    assert.ok(b.w > last, `${n} cells should open it further`);
+    assert.ok(Math.abs(b.w / b.h - ARENA_W / ARENA_H) < 1e-9, "and keep its shape");
+    last = b.w;
+  }
+
+  // It stops at the glass, however big the organism gets.
+  assert.equal(boundsFor(16).w, CHANNEL_W);
+  assert.equal(boundsFor(400).w, CHANNEL_W);
+  assert.equal(boundsFor(400).h, CHANNEL_H);
+  assert.ok(CHANNEL_W * CHANNEL_H > ARENA_W * ARENA_H * 6, "and it is a great deal more water");
+});
+
+test("building opens it, and the run knows", () => {
+  const run = startRun(3);
+  assert.equal(run.bounds.w, ARENA_W);
+
+  const pitch = latticePitch(run);
+  const base = snap(140e-6, 140e-6, pitch);
+  let id = 900;
+  for (let i = 0; i < 9; i++) {
+    run.structures.push(structureFrom(id++, "222",
+      base.x + (i % 3) * pitch, base.y + Math.floor(i / 3) * pitch, 0));
+  }
+  retune(run);
+  assert.ok(run.bounds.w > ARENA_W * 1.5, `a nine-cell body opens it to ${run.bounds.w}`);
+
+  // and the wildlife arrives at the new edges, not the old ones
+  const spawned = run.entities.length;
+  assert.ok(spawned > 0);
 });

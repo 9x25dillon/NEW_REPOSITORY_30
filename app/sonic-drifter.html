@@ -1609,6 +1609,15 @@
   // game/run.ts
   var ARENA_W = 9e-4;
   var ARENA_H = 66e-5;
+  var CHANNEL_W = 26e-4;
+  var CHANNEL_H = 19e-4;
+  function boundsFor(cells) {
+    const grow = 1 + Math.max(0, cells - 2) * 0.14;
+    return {
+      w: Math.min(CHANNEL_W, ARENA_W * grow),
+      h: Math.min(CHANNEL_H, ARENA_H * grow)
+    };
+  }
   var MAX_AMPLITUDE = 2e5;
   function focusFor(pitch) {
     return pitch * 0.62;
@@ -1635,6 +1644,7 @@
       gap: null,
       spacing: null,
       bodies: [],
+      bounds: boundsFor(0),
       phase: "settle",
       entities: [],
       structures: [],
@@ -1681,9 +1691,9 @@
   }
   function edge(run) {
     if (run.rand() < 0.5) {
-      return { x: run.rand() < 0.5 ? 4e-6 : ARENA_W - 4e-6, y: run.rand() * ARENA_H };
+      return { x: run.rand() < 0.5 ? 4e-6 : run.bounds.w - 4e-6, y: run.rand() * run.bounds.h };
     }
-    return { x: run.rand() * ARENA_W, y: run.rand() < 0.5 ? 4e-6 : ARENA_H - 4e-6 };
+    return { x: run.rand() * run.bounds.w, y: run.rand() < 0.5 ? 4e-6 : run.bounds.h - 4e-6 };
   }
   function blank(run, faction, at) {
     return {
@@ -1709,7 +1719,10 @@
     };
   }
   function newMotif(run, anywhere = false) {
-    const at = anywhere ? { x: 0.08 * ARENA_W + run.rand() * 0.84 * ARENA_W, y: 0.08 * ARENA_H + run.rand() * 0.84 * ARENA_H } : edge(run);
+    const at = anywhere ? {
+      x: 0.08 * run.bounds.w + run.rand() * 0.84 * run.bounds.w,
+      y: 0.08 * run.bounds.h + run.rand() * 0.84 * run.bounds.h
+    } : edge(run);
     const e = blank(run, "motif", at);
     e.parts = [run.world.pool[Math.floor(run.rand() * run.world.pool.length)]];
     return e;
@@ -1738,7 +1751,7 @@
     const trap = alive ? aimFor(you, w, input.move.x, input.move.y) : aimFor(you, w, 0, 0);
     run.aim.x = trap.x;
     run.aim.y = trap.y;
-    carry(you, w, dt, run.world.current, ARENA_W, ARENA_H);
+    carry(you, w, dt, run.world.current, run.bounds.w, run.bounds.h);
     if (run.iframe > 0) run.iframe -= dt;
     if (!alive) {
       drift(run, dt);
@@ -1793,8 +1806,8 @@
         dx += uStream * Math.cos(e.ang);
         dy += uStream * Math.sin(e.ang);
       }
-      const ca = Math.PI * e.x / ARENA_W;
-      const cb = Math.PI * e.y / ARENA_H;
+      const ca = Math.PI * e.x / run.bounds.w;
+      const cb = Math.PI * e.y / run.bounds.h;
       dx += run.world.current * Math.sin(ca) * Math.cos(cb);
       dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
       if (e.faction === "beast" && run.phase !== "birth") {
@@ -1824,16 +1837,16 @@
         e.x = rad;
         e.ang = Math.PI - e.ang;
       }
-      if (e.x > ARENA_W - rad) {
-        e.x = ARENA_W - rad;
+      if (e.x > run.bounds.w - rad) {
+        e.x = run.bounds.w - rad;
         e.ang = Math.PI - e.ang;
       }
       if (e.y < rad) {
         e.y = rad;
         e.ang = -e.ang;
       }
-      if (e.y > ARENA_H - rad) {
-        e.y = ARENA_H - rad;
+      if (e.y > run.bounds.h - rad) {
+        e.y = run.bounds.h - rad;
         e.ang = -e.ang;
       }
       e.trail.push(e.x, e.y);
@@ -1878,8 +1891,8 @@
   }
   function capturedAt(w, x, y, p) {
     if (localAmplitude(w, x, y) < HOLD_PRESSURE) return false;
-    const nx = nearest(trapPositions(axisX(w), p, ARENA_W), x);
-    const ny = nearest(trapPositions(axisY(w), p, ARENA_H), y);
+    const nx = nearest(trapPositions(axisX(w), p, CHANNEL_W), x);
+    const ny = nearest(trapPositions(axisY(w), p, CHANNEL_H), y);
     if (nx === null || ny === null) return false;
     return Math.hypot(nx - x, ny - y) < captureRadius(w.pitch) + p.radius * 0.5;
   }
@@ -2021,6 +2034,7 @@
   function reshape(run) {
     const pitch = latticePitch(run);
     run.bodies = bodiesOf(run.structures, pitch);
+    run.bounds = boundsFor(run.bodies[0]?.cells.length ?? 0);
     for (const b of run.bodies) {
       const zs = reaches(b, pitch);
       for (const c of b.cells) c.serves = zs;
@@ -2046,7 +2060,7 @@
       const mine = new Set(body.cells);
       const ok = body.cells.every((c) => {
         const nx = c.x + dx, ny = c.y + dy;
-        if (nx < 0 || nx > ARENA_W || ny < 0 || ny > ARENA_H) return false;
+        if (nx < 0 || nx > run.bounds.w || ny < 0 || ny > run.bounds.h) return false;
         if (onThrone(run, nx, ny)) return false;
         return !run.structures.some(
           (o) => !mine.has(o) && o.layer === c.layer && Math.hypot(o.x - nx, o.y - ny) < pitch * 0.5
@@ -2068,6 +2082,7 @@
     run.gap = gapOf(run.crystal);
     const pitch = latticePitch(run);
     run.bodies = bodiesOf(run.structures, pitch);
+    run.bounds = boundsFor(run.bodies[0]?.cells.length ?? 0);
     for (const b of run.bodies) {
       const zs = reaches(b, pitch);
       for (const c of b.cells) c.serves = zs;
@@ -2116,7 +2131,7 @@
     if (!c) return "none";
     if (onThrone(run, run.you.x, run.you.y)) return "too-close";
     const at = snap(run.you.x, run.you.y, latticePitch(run));
-    if (at.x < 0 || at.x > ARENA_W || at.y < 0 || at.y > ARENA_H) return "too-close";
+    if (at.x < 0 || at.x > run.bounds.w || at.y < 0 || at.y > run.bounds.h) return "too-close";
     for (const s2 of run.structures) {
       if (Math.hypot(s2.x - at.x, s2.y - at.y) < latticePitch(run) * 0.5) return "occupied";
     }
@@ -2239,8 +2254,8 @@
       dx += (moved.x - k.x) / dt;
       dy += (moved.y - k.y) / dt;
     }
-    k.x = Math.max(3e-5, Math.min(ARENA_W - 3e-5, k.x + dx * dt));
-    k.y = Math.max(3e-5, Math.min(ARENA_H - 3e-5, k.y + dy * dt));
+    k.x = Math.max(3e-5, Math.min(run.bounds.w - 3e-5, k.x + dx * dt));
+    k.y = Math.max(3e-5, Math.min(run.bounds.h - 3e-5, k.y + dy * dt));
     if (wearing(run)) {
       k.hp = Math.max(0, k.hp - wearRate(k) * dt);
       if (run.rand() < dt * 6) run.events.push({ kind: "wearing", x: k.x, y: k.y });
@@ -2291,7 +2306,7 @@
       b.life -= dt;
     }
     run.bolts = run.bolts.filter(
-      (b) => b.life > 0 && b.x > -2e-5 && b.x < ARENA_W + 2e-5 && b.y > -2e-5 && b.y < ARENA_H + 2e-5
+      (b) => b.life > 0 && b.x > -2e-5 && b.x < run.bounds.w + 2e-5 && b.y > -2e-5 && b.y < run.bounds.h + 2e-5
     );
   }
   var TOUCH = 17e-6;
@@ -2380,8 +2395,8 @@
     run.bound = newBound(
       w.pitch,
       w.medium,
-      ARENA_W * (0.2 + run.rand() * 0.6),
-      ARENA_H * (0.2 + run.rand() * 0.6)
+      run.bounds.w * (0.2 + run.rand() * 0.6),
+      run.bounds.h * (0.2 + run.rand() * 0.6)
     );
     run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
     retune(run);
@@ -2904,6 +2919,15 @@
       __publicField(this, "hitstop", 0);
       __publicField(this, "lastRefusal", -99);
       /**
+       * Where the window is, in metres.
+       *
+       * The water is bigger than the screen now and opens further as the organism
+       * grows, so the view follows you and stops at the glass. It lags a little on
+       * purpose: a camera pinned exactly to a body that is being dragged about by a
+       * standing wave is unreadable.
+       */
+      __publicField(this, "cam", { x: 0, y: 0 });
+      /**
        * The pointer, in metres, and whether it is steering.
        *
        * The movement this game wants is a DIRECTION WITH A MAGNITUDE — it is the
@@ -2996,7 +3020,7 @@
       };
       this.canvas.addEventListener("pointermove", (e) => {
         const { sx, sy } = world(e);
-        this.pointer = { x: mx(sx), y: mx(sy) };
+        this.pointer = { x: mx(this.cam.x + sx), y: mx(this.cam.y + sy) };
         this.steering = true;
       });
       this.canvas.addEventListener("pointerleave", () => {
@@ -3022,7 +3046,7 @@
           this.spend(slot);
           return;
         }
-        this.pointer = { x: mx(sx), y: mx(sy) };
+        this.pointer = { x: mx(this.cam.x + sx), y: mx(this.cam.y + sy) };
         this.steering = true;
         if (e.button === 0) this.mouseGrip = true;
         if (e.button === 2) this.mouseDash = true;
@@ -3428,10 +3452,19 @@
       const g2 = this.ctx;
       g2.fillStyle = "#05070e";
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
+      const b = this.run.bounds;
+      const want = {
+        x: px(b.w) <= VIEW_W ? (px(b.w) - VIEW_W) / 2 : Math.max(0, Math.min(px(b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
+        y: px(b.h) <= VIEW_H ? (px(b.h) - VIEW_H) / 2 : Math.max(0, Math.min(px(b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2))
+      };
+      this.cam.x += (want.x - this.cam.x) * 0.12;
+      this.cam.y += (want.y - this.cam.y) * 0.12;
       g2.save();
       if (this.shake > 0) {
         g2.translate((Math.random() * 2 - 1) * this.shake, (Math.random() * 2 - 1) * this.shake);
       }
+      g2.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
+      this.drawWalls();
       this.drawField();
       this.drawLattice();
       this.drawSites();
@@ -3446,10 +3479,10 @@
       this.drawSparks();
       this.drawRings();
       this.drawYou();
+      this.drawPopups();
       g2.restore();
       g2.fillStyle = this.vignette;
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
-      this.drawPopups();
       if (this.screen === "title") this.drawTitle();
       else {
         this.drawHud();
@@ -3463,6 +3496,17 @@
         g2.fillRect(0, 0, VIEW_W, VIEW_H);
       }
     }
+    /** The glass. The water you can drive stops here, and it opens as you build. */
+    drawWalls() {
+      const g2 = this.ctx;
+      const b = this.run.bounds;
+      g2.strokeStyle = "rgba(120,225,245,0.16)";
+      g2.lineWidth = 2;
+      g2.strokeRect(0, 0, px(b.w), px(b.h));
+      g2.strokeStyle = "rgba(120,225,245,0.05)";
+      g2.lineWidth = 1;
+      g2.strokeRect(-6, -6, px(b.w) + 12, px(b.h) + 12);
+    }
     /** Both the pressure of crossed standing waves and the Gaussian focus are
      *  separable, so the wash costs two rows of trigonometry, not a grid. */
     drawField() {
@@ -3474,13 +3518,13 @@
       const phy = -w.phaseY / 2;
       const f22 = 2 * w.focus * w.focus;
       for (let i = 0; i < WASH_W; i++) {
-        const u = mx((i + 0.5) / WASH_W * VIEW_W);
+        const u = mx(this.cam.x + (i + 0.5) / WASH_W * VIEW_W);
         this.cosX[i] = Math.cos(k * u + phx);
         const d = u - w.aimX;
         this.envX[i] = Math.exp(-(d * d) / f22);
       }
       for (let j = 0; j < WASH_H; j++) {
-        const u = mx((j + 0.5) / WASH_H * VIEW_H);
+        const u = mx(this.cam.y + (j + 0.5) / WASH_H * VIEW_H);
         this.cosY[j] = Math.cos(k * u + phy);
         const d = u - w.aimY;
         this.envY[j] = Math.exp(-(d * d) / f22);
@@ -3506,7 +3550,7 @@
       }
       this.washCtx.putImageData(this.wash, 0, 0);
       g2.imageSmoothingEnabled = true;
-      g2.drawImage(this.washCanvas, 0, 0, VIEW_W, VIEW_H);
+      g2.drawImage(this.washCanvas, Math.round(this.cam.x), Math.round(this.cam.y), VIEW_W, VIEW_H);
       const med = this.run.world.medium;
       const cool = { radius: 6e-6, rho: med.rho + 110, c: med.c + 80 };
       const warm = { radius: 6e-6, rho: med.rho - 85, c: med.c - 50 };

@@ -478,6 +478,29 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### The water opens as the organism grows
+
+The arena was 900 × 660 µm and the window showed all of it. The channel is now
+**2600 × 1900 µm** — a real chip, since acoustofluidic devices are centimetres of
+glass with channels a millimetre or two across — and the view follows you,
+stopping at the glass.
+
+What you can work in is not the whole channel at once. A crystal of silica
+skeletons is a phononic structure: it is what guides and confines a wave, which
+is the entire story of the bound field, so **the region you can drive is the
+region your crystal reaches into**. A player who has built nothing is in the
+pool the game has always been.
+
+```
+ 0 cells ->  900 x  660 um     the game as it was
+ 4 cells -> 1152 x  845
+ 9 cells -> 1782 x 1307
+16 cells -> 2600 x 1900        the whole channel, 8.3x the area
+```
+
+Wildlife arrives at the new edges rather than the old ones, the sovereign walks
+in the larger water, and a body can walk further before it runs out of room.
+
 ### And it walks
 
 `src/trajectory.ts` has said this since it was written and nothing had ever
@@ -823,7 +846,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                252 tests: what the modules above are actually claiming
+test/                254 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
