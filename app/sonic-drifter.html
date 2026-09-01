@@ -1048,7 +1048,7 @@
       name: "THE FIRST WATER",
       medium,
       pitch: 88e-6,
-      pool: ["a2", "g"],
+      pool: ["a2", "a2", "a2", "g", "d"],
       wildlife: wildlifeFor(medium, 1, 0),
       current: 1e-5,
       inheritance: 0
@@ -1074,9 +1074,8 @@
   }
   function poolFor(s, aeon) {
     const axial = s.mass >= 26 ? "a6" : s.mass >= 16 ? "a4" : s.mass >= 8 ? "a3" : "a2";
-    const out = [axial, axial, axial];
-    if (s.mass >= 6) out.push("g", "g");
-    if (s.mass >= 18) out.push("d");
+    const out = [axial, axial, axial, "g", "g"];
+    if (axial === "a2" || axial === "a4") out.push("d");
     if (aeon >= 3) out.push("a5");
     return out;
   }

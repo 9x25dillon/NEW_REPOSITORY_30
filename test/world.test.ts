@@ -5,7 +5,7 @@ import {
   cadence, emptyThrone, epitaphFor, feed, firstWorld, holdPoints, poolFor,
   reachOf, sovereignInertia, sovereignParticle, structureFrom, volley, worldFrom,
 } from "../game/world.js";
-import { BUILDABLE, cellFor } from "../game/lattice.js";
+import { BUILDABLE, cellFor, motif, recipesFrom } from "../game/lattice.js";
 import { YOU } from "../game/pilot.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { lobeCount } from "../game/shape.js";
@@ -147,4 +147,66 @@ test("no king can leave behind a water that will not carry you", () => {
   }
   assert.ok(worst >= 0.02,
     `a king can strand you: phi ${worst.toFixed(4)} via ${via}`);
+});
+
+// ── the opening ─────────────────────────────────────────────────────────────
+
+test("the first water is a choice, and one of them is cubic", () => {
+  // It used to hold a dimer and a girdle, which make a 222 and nothing else, so
+  // the opening had no decision in it at all: you gathered what drifted past and
+  // got the one cell there was. A single diagonal opens three off one axis.
+  const w = firstWorld();
+  const offered = recipesFrom(w.pool);
+  assert.ok(offered.length >= 3, `the opening offers ${offered}`);
+  assert.deepEqual(offered, ["2", "222", "23"]);
+
+  // And they are genuinely different things, not three names for one cell.
+  const orders = offered.map((hm) => cellFor(hm).structure);
+  assert.equal(new Set(orders).size, 3, "three distinct orders");
+  assert.ok(cellFor("23").structure > cellFor("222").structure * 2,
+    "the cubic one is worth chasing");
+
+  // The harder cell is harder because its second part is harder to hold: a
+  // girdle is five and a half microns and a diagonal is 1.6, barely over the
+  // streaming crossover. Nobody set a difficulty on it.
+  assert.ok(motif("d").particle.radius < motif("g").particle.radius / 3);
+
+  // Still exactly one principal axis. Two would refuse to bind and the water
+  // would be full of matter that cannot be used together.
+  const axials = new Set(w.pool.filter((m) => m.startsWith("a")));
+  assert.equal(axials.size, 1);
+});
+
+test("no water a king can leave is narrower than the one it was born in", () => {
+  // The girdle used to arrive at mass six and the diagonal at eighteen, so a
+  // king fed a single 222 left a water of pure dimers with ONE recipe in it — a
+  // world that got narrower the longer you survived.
+  for (const a of BUILDABLE) {
+    for (const b of ["", ...BUILDABLE]) {
+      const k = emptyThrone(0, 0);
+      feed(k, cellFor(a));
+      if (b) feed(k, cellFor(b));
+      for (const aeon of [2, 3, 6]) {
+        const pool = poolFor(k, aeon);
+        const offered = recipesFrom(pool);
+        assert.ok(offered.length >= 2,
+          `${a}${b ? `+${b}` : ""} at aeon ${aeon} leaves ${offered.length} recipes: [${pool}]`);
+      }
+    }
+  }
+});
+
+test("a diagonal is only dissolved where the axis can use it", () => {
+  // Of the eleven chiral groups exactly two are cubic — 23 off a two-fold and
+  // 432 off a four-fold — so a diagonal in a threefold water builds nothing and
+  // is only something to gather by mistake.
+  for (const fed of [["2"], ["222"], ["23"], ["422", "422"], ["622", "622", "432"]]) {
+    const k = emptyThrone(0, 0);
+    for (const hm of fed) feed(k, cellFor(hm));
+    const pool = poolFor(k, 2);
+    const axis = pool.find((m) => m.startsWith("a") && m !== "a5");
+    const usable = axis === "a2" || axis === "a4";
+    assert.equal(pool.includes("d"), usable,
+      `[${pool}] carries a diagonal its ${axis} cannot build with`);
+  }
 });

@@ -279,3 +279,17 @@ const BLURB: Readonly<Record<Ability, string>> = {
 
 /** The eleven, in build order. */
 export const BUILDABLE: readonly string[] = RECIPES.map((r) => r.group);
+
+/**
+ * Every cell a given water can actually produce.
+ *
+ * A recipe needs its exact set of DISTINCT motifs and a total mass of four, and
+ * any part may be repeated to make the mass up — three dimers and one girdle is
+ * a 222 — so what a pool offers is every recipe whose parts it contains. One
+ * scarce motif is enough to open a whole group, which is what makes a water
+ * with three things dissolved in it a decision rather than a queue.
+ */
+export function recipesFrom(pool: readonly string[]): string[] {
+  const have = new Set(pool);
+  return RECIPES.filter((r) => r.parts.every((part) => have.has(part))).map((r) => r.group);
+}

@@ -4,11 +4,11 @@ import { test } from "node:test";
 import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
-  LOBE_RANGE, VOLLEY_WIND, bearsOn, placeCell, readoutFor, wearRate,
+  DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, placeCell, readoutFor, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
-import { cellFor } from "../game/lattice.js";
+import { cellFor, motif } from "../game/lattice.js";
 import { lobes } from "../game/shape.js";
 import { cadence, emptyThrone, feed, structureFrom, volley } from "../game/world.js";
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
@@ -474,6 +474,39 @@ test("the hand is far worse than a building, which is why you build", () => {
   assert.ok(rate > 0);
   assert.ok(instant / rate > 4,
     `a discharge should be worth several seconds of hand (${(instant / rate).toFixed(1)}s)`);
+});
+
+test("the cubic cell is the best gun there is and the worst thing to crown", () => {
+  // The decision the opening exists to create, and both halves of it are exact.
+  // A dimer plus a diagonal is a 23: order twelve, four in-plane directions, and
+  // one lonely independent piezoelectric component.
+  const king = (fed: string[]) => {
+    const k = emptyThrone(0, 0);
+    for (const hm of fed) feed(k, cellFor(hm));
+    return k;
+  };
+  const cubic = king(["23"]);
+  const plain = king(["222"]);
+
+  // CROWN IT and it is worse for you in every direction at once.
+  assert.ok(cubic.maxHp > plain.maxHp * 2, "twice the health");
+  assert.ok(volley(cubic).length > volley(plain).length, "twice the arms");
+  assert.ok(cadence(cubic) < cadence(plain), "and it throws them more often");
+  assert.ok(wearRate(cubic) < wearRate(plain) / 2, "and your bare hand barely marks it");
+
+  // BUILD WITH IT and it is the strongest thing you can put on the ground: it
+  // kills the cubic king in two aligned arms where a 222 needs five, and it has
+  // four directions to align rather than two.
+  const shots = (gun: string, k: typeof cubic): number =>
+    Math.ceil(k.maxHp / (structureFrom(1, gun, 0, 0).strength * DISCHARGE_GAIN));
+  assert.equal(shots("23", cubic), 2);
+  assert.equal(shots("222", cubic), 5);
+  assert.ok(lobes("23").length > lobes("222").length);
+
+  // So one cell cannot do both jobs, and the diagonal that makes it is 1.6
+  // microns — barely over the streaming crossover, and the hardest thing in the
+  // first water to hold on to. That is the whole opening.
+  assert.ok(motif("d").particle.radius < CROSSOVER_RADIUS_ORDER * 1.2);
 });
 
 // ── birth ───────────────────────────────────────────────────────────────────

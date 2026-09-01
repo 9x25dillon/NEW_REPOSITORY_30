@@ -466,6 +466,39 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### The opening is a choice, and one of them is cubic
+
+The first water used to hold a dimer and a girdle. A dimer plus a girdle is a
+222 and nothing else, so the first aeon had no decision in it: you gathered what
+drifted past and got the one cell there was. It now carries a **diagonal** too —
+still one principal axis, because two would refuse to bind — and that single
+addition opens three cells off one axis:
+
+| | | |
+| --- | --- | --- |
+| four dimers | **2** | order 2, and eight free components |
+| dimers with a girdle | **222** | order 4 |
+| dimers with a **diagonal** | **23** | order 12, cubic, one free component |
+
+It is a real choice because the two second parts are not alike: a girdle is 5.5
+µm of lipid that sits in your antinodes, and a diagonal is 1.6 µm — barely over
+the streaming crossover, so the field can hardly hold it and it has to be
+chased. **The better cell is the one that is harder to gather**, and one of them
+in a cluster of four is enough. A cluster holding all three refuses, which is
+the trap, and it says so.
+
+What that opens is the decision the whole game is about, and both halves of it
+are exact. **The same cell is the best gun there is and the worst thing to
+crown**: a 23 structure kills a cubic king in two aligned arms where a 222 needs
+five, and it has four directions to align rather than two — but feed that 23 to
+the throne instead and you get the king no bot has yet beaten, and a water with
+a three-fold axis dissolved in it afterwards. One cell cannot do both jobs.
+
+Three dimers to one girdle to one diagonal is the weighting, and it was measured
+rather than picked: against the old two-motif water it builds the same number of
+cells, refuses *less* often, and turns eleven cubic cells in ten runs into
+thirty-three.
+
 ### Settle, crown, reign, birth
 
 You gather motifs and crystallise them into cells; a placed cell is a
@@ -554,21 +587,19 @@ the corpse. Writing it that way found things no unit test would have:
   reachable world is now checked against that.
 
 The same test used to check the game's central trade by *playing* it — one
-helping against two, same policy, same seeds — and reported a gap. That gap was
-noise. Measured properly, as reigns won out of reigns entered over ten seeds,
-one helping wins 58% and two wins 60%, and **there is no gradient there to
-find.** The reason is worth keeping: the first water's pool is a dimer and a
-girdle, a dimer plus a girdle is a 222 and nothing else, so at the first aeon a
-second helping can only be *more of the same cell*. It buys mass, mass buys
-health and a slightly quicker beat, and that is not much.
+helping against two — and reported a gap that turned out to be noise: measured
+as reigns won out of reigns entered, one helping wins 58% and two wins 60%.
+**The trade does not turn on quantity.** It turns on symmetry, and until the
+opening was fixed there was no symmetry to choose from — a dimer and a girdle
+make a 222 and nothing else, so a second helping could only ever be more of the
+same cell.
 
-What the trade actually turns on is **symmetry, not quantity**, and every part
-of that is exact rather than statistical: a more symmetric king has more health,
-a faster cadence, more arms, and — because order and freedom pull against each
-other — fewer ways for a field to drive it, so it comes apart in your hand more
-slowly. That is asserted directly. Whether it beats a particular player is not
-something ten seeds of one bot can settle, and the test no longer pretends
-otherwise.
+With three cells in the first water it has teeth, and they are sharp. Over
+fifteen seeds the same bot wins **five of six reigns against a 222 king and none
+of six against a cubic one**: a 23 has twice the health, twice the arms, a
+faster beat, and one independent piezoelectric component against three, so your
+bare hand barely marks it. The parts of that which are arithmetic are asserted
+directly rather than played for.
 
 The physics is not pasted into the page. `app/build-drifter.mjs` bundles
 `app/drifter.ts → game/pilot.ts → game/wave.ts → src/fields.ts → src/gorkov.ts`,
@@ -616,7 +647,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                205 tests: what the modules above are actually claiming
+test/                209 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
