@@ -215,9 +215,36 @@ test("it says out loud what the browser is reporting", () => {
   const gp = pad([0.5, -0.25], "");
   press(gp, 7);
   pads = [gp];
+
+  // Before any input has arrived it says so, rather than printing zeroes that
+  // look like a working pad reporting nothing.
+  assert.match(p.describe(), /NOTHING RECEIVED YET/);
+  p.read();
   const line = p.describe();
   assert.match(line, /Xbox Wireless Controller/);
-  assert.match(line, /MAPPING \(none\)/, "an unrecognised mapping must be visible");
+  assert.match(line, /\(none\)/, "an unrecognised mapping must be visible");
   assert.match(line, /0\.50/);
   assert.match(line, /DOWN 7/);
+});
+
+test("a page without focus is named as the reason, because it always is", () => {
+  // A browser stops updating gamepad state for an unfocused page: getGamepads
+  // keeps handing back the snapshot it had, so a controller that enumerated
+  // perfectly delivers nothing but zeroes forever, with no error anywhere. It
+  // is indistinguishable from a broken mapping unless the page says which.
+  const p = new Pad();
+  const gp = pad();
+  press(gp, 0);
+  pads = [gp];
+  p.read();
+  assert.doesNotMatch(p.describe(), /CLICK THE GAME/, "focused, so no complaint");
+
+  Object.defineProperty(globalThis, "document", {
+    value: { hasFocus: () => false }, configurable: true,
+  });
+  assert.match(p.describe(), /CLICK THE GAME/);
+  Object.defineProperty(globalThis, "document", {
+    value: { hasFocus: () => true }, configurable: true,
+  });
+  assert.doesNotMatch(p.describe(), /CLICK THE GAME/);
 });

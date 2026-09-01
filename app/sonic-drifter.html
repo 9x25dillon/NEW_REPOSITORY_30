@@ -2255,6 +2255,16 @@
       __publicField(this, "prev", []);
       __publicField(this, "prevKeys", /* @__PURE__ */ new Set());
       __publicField(this, "index", -1);
+      /**
+       * Whether any pad input has EVER arrived.
+       *
+       * A browser will not update gamepad state for a page that does not have
+       * focus: getGamepads keeps returning the snapshot it had, so a pad that
+       * enumerated perfectly at connect time delivers nothing but zeroes forever,
+       * with no error anywhere. It is indistinguishable from a broken mapping
+       * unless you ask this question, and the answer changes the advice entirely.
+       */
+      __publicField(this, "everMoved", false);
       window.addEventListener("keydown", (e) => {
         if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
         this.keys.add(e.code);
@@ -2324,6 +2334,10 @@
         out.pause = anyHit(m.pause);
         out.mute = anyHit(m.mute);
         this.prev = [...gp.buttons].map((_, i) => down(i));
+        if (!this.everMoved && (out.grip || out.dash || out.place || out.crownDown || out.confirm || Math.hypot(gp.axes[0] ?? 0, gp.axes[1] ?? 0) > DEADZONE)) {
+          this.everMoved = true;
+          console.log("[pad] first input received");
+        }
       } else {
         this.prev = [];
       }
@@ -2365,9 +2379,14 @@
       const found = [...raw].filter((p) => p);
       if (found.length === 0) return "NO CONTROLLER SEEN - PRESS A BUTTON ON IT";
       const gp = found[0];
+      const focused = typeof document === "undefined" ? true : document.hasFocus?.() ?? true;
+      if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
+      if (!this.everMoved) {
+        return `${gp.id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
+      }
       const ax = [...gp.axes].slice(0, 4).map((v) => v.toFixed(2)).join(" ");
       const pressed = [...gp.buttons].map((b, i) => b.pressed || b.value > TRIGGER ? i : -1).filter((i) => i >= 0);
-      return `${gp.id.slice(0, 34)} | MAPPING ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
+      return `${gp.id.slice(0, 30)} | ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
     }
     /** A number key held this frame, 1..9, or zero. Placing a specific cell is
      *  the one thing a keyboard does better than a pad. */

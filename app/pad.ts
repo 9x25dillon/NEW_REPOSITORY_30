@@ -95,6 +95,16 @@ export class Pad {
   private prev: boolean[] = [];
   private prevKeys = new Set<string>();
   private index = -1;
+  /**
+   * Whether any pad input has EVER arrived.
+   *
+   * A browser will not update gamepad state for a page that does not have
+   * focus: getGamepads keeps returning the snapshot it had, so a pad that
+   * enumerated perfectly at connect time delivers nothing but zeroes forever,
+   * with no error anywhere. It is indistinguishable from a broken mapping
+   * unless you ask this question, and the answer changes the advice entirely.
+   */
+  private everMoved = false;
 
   constructor() {
     window.addEventListener("keydown", (e) => {
@@ -175,6 +185,12 @@ export class Pad {
       out.mute = anyHit(m.mute);
 
       this.prev = [...gp.buttons].map((_, i) => down(i));
+      if (!this.everMoved
+        && (out.grip || out.dash || out.place || out.crownDown || out.confirm
+          || Math.hypot(gp.axes[0] ?? 0, gp.axes[1] ?? 0) > DEADZONE)) {
+        this.everMoved = true;
+        console.log("[pad] first input received");
+      }
     } else {
       this.prev = [];
     }
@@ -228,11 +244,23 @@ export class Pad {
     if (found.length === 0) return "NO CONTROLLER SEEN - PRESS A BUTTON ON IT";
 
     const gp = found[0] as Gamepad;
+    const focused = typeof document === "undefined" ? true : (document.hasFocus?.() ?? true);
+
+    // THE QUESTION THAT DECIDES EVERYTHING. A pad that enumerated fine and
+    // delivers nothing but zeroes is, nine times in ten, a page that does not
+    // have focus — the browser simply stops updating gamepad state, silently
+    // and forever. Saying "no mapping" or "press a button" at that point sends
+    // somebody chasing the wrong thing.
+    if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
+    if (!this.everMoved) {
+      return `${gp.id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
+    }
+
     const ax = [...gp.axes].slice(0, 4).map((v) => v.toFixed(2)).join(" ");
     const pressed = [...gp.buttons]
       .map((b, i) => (b.pressed || b.value > TRIGGER ? i : -1))
       .filter((i) => i >= 0);
-    return `${gp.id.slice(0, 34)} | MAPPING ${gp.mapping || "(none)"} `
+    return `${gp.id.slice(0, 30)} | ${gp.mapping || "(none)"} `
       + `| AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
   }
 
