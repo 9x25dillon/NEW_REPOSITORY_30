@@ -891,11 +891,18 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                260 tests: what the modules above are actually claiming
+test/                262 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
-`game/` reads `src/` and nothing else of the three.
+`game/` reads `src/` and nothing else of the three — **and `src/` does not know
+`game/` exists.** That direction is the one that matters: the game is built on
+the instrument, which is the point of it, but nothing in the instrument may be
+shaped by what a game needed, because the moment a constant is tuned for
+playability it stops being a measurement and starts being a preference wearing
+one. The bench and the game are likewise two applications over one library and
+share nothing above it — a bench screen importing a game constant would report a
+balance decision as a result.
 The physics stays a pure function of its arguments; the subject record and the
 tonal layer stay labels on the work rather than terms in it. Otherwise a
 prediction would stop being falsifiable, which is the only thing making any of

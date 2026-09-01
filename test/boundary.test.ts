@@ -107,6 +107,62 @@ test("the game builds on the physics half and never on the personal half", () =>
     "and it really must use the physics, rather than be separate by using nothing");
 });
 
+test("the instrument does not know the game exists", () => {
+  // THE THIRD SEPARATION, and it runs the other way from the first two.
+  //
+  // src/ is an instrument: a point-group classifier, a Gor'kov potential, a
+  // band solver, the 65 Sohncke groups. Every one of those is answerable by an
+  // experiment, and that is the whole of its value. The game is built ON it —
+  // that is the point of the game — but nothing in the instrument may ever be
+  // shaped by what a game needed, because the moment a constant is tuned for
+  // playability it stops being a measurement and starts being a preference
+  // wearing one.
+  //
+  // So the dependency is one-way and this is the direction that must stay
+  // empty. game/ may read src/ all it likes; src/ may not know game/ is there.
+  for (const { file, text } of sourcesIn("src")) {
+    for (const spec of importsOf(text)) {
+      assert.ok(!spec.includes("game/"),
+        `${file} imports ${spec}: the instrument must not be shaped by the game`);
+    }
+  }
+});
+
+test("the bench and the game do not reach for each other", () => {
+  // Two applications over one library, and they are different claims. The bench
+  // answers "can this substrate carry the wave" and "where will the cells go",
+  // in provenance the user can audit. The game answers "is this fun". They
+  // share the physics underneath and nothing above it: a bench screen that
+  // imported a game constant would be reporting a balance decision as a result,
+  // and a game that imported the bench's provenance machinery would be dressing
+  // a score up as a measurement.
+  const bench = ["app/main.ts", "app/field.ts", "app/listen.ts"];
+  const game = ["app/drifter.ts", "app/pad.ts", "app/sfx.ts"];
+
+  for (const entry of bench) {
+    const text = readFileSync(join(root, entry), "utf8");
+    for (const spec of importsOf(text)) {
+      assert.ok(!spec.includes("game/"),
+        `${entry} imports ${spec}: the bench must not report the game's numbers`);
+      for (const other of game) {
+        assert.ok(!spec.includes(other.replace("app/", "").replace(".ts", "")),
+          `${entry} imports ${spec}: the bench must not depend on the game's surface`);
+      }
+    }
+  }
+
+  for (const entry of game) {
+    const text = readFileSync(join(root, entry), "utf8");
+    for (const spec of importsOf(text)) {
+      for (const other of bench) {
+        const name = other.replace("app/", "").replace(".ts", "");
+        assert.ok(!new RegExp(`(^|/)${name}\\.js$`).test(spec),
+          `${entry} imports ${spec}: the game must not borrow the bench's surface`);
+      }
+    }
+  }
+});
+
 test("the game's surface is as separate as the other two", () => {
   // app/drifter.ts draws the game; app/sfx.ts makes its noises. Those noises
   // are UI sound at a few hundred hertz and the field is at ten megahertz —
