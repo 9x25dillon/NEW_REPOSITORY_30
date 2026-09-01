@@ -47,15 +47,21 @@ test("an organism big enough to work alone follows you", () => {
   const { pitch, base } = organism(run, BLOCK);
   assert.ok(autonomous(run.bodies[0]), "six joined cells is an organism");
 
+  // Called from beyond where it will stop, but inside what the drive can reach:
+  // it comes to its own edge plus a clear site and no closer, so there is always
+  // somewhere left to put the next cell down.
   const x0 = run.bodies[0].x;
-  const steps = watch(run, base.x + 4 * pitch, base.y, 8);
+  const steps = watch(run, base.x + 5 * pitch, base.y, 10);
   assert.ok(steps > 0, "it should come to you");
   assert.ok(run.bodies[0].x > x0 + pitch * 0.9, "and end up nearer than it started");
 
-  // and it stops when it arrives rather than walking through you
+  // and it stops short rather than standing on you: a body that follows onto
+  // your own lattice site takes away every place you could build.
   const arrived = run.bodies[0].x;
-  watch(run, base.x + 4 * pitch, base.y, 6);
-  assert.ok(Math.abs(run.bodies[0].x - arrived) < pitch * 1.5, "it does not overshoot forever");
+  watch(run, base.x + 5 * pitch, base.y, 8);
+  const gap = Math.abs(run.bodies[0].x - (base.x + 5 * pitch));
+  assert.ok(gap > pitch * 1.5, `it stopped ${gap / pitch} sites away, which is too close`);
+  assert.ok(Math.abs(run.bodies[0].x - arrived) < pitch * 3, "and settles rather than orbiting");
 });
 
 test("a scatter that is not a body does not walk", () => {
@@ -63,7 +69,7 @@ test("a scatter that is not a body does not walk", () => {
   const { pitch, base } = organism(run, [[0, 0], [1, 0]]);
   assert.ok(!autonomous(run.bodies[0]));
   const x0 = run.bodies[0].x;
-  assert.equal(watch(run, base.x + 4 * pitch, base.y, 6), 0);
+  assert.equal(watch(run, base.x + 5 * pitch, base.y, 6), 0);
   assert.equal(run.bodies[0].x, x0, "two cells stay where they were put");
 });
 
@@ -159,7 +165,7 @@ test("the water you can work in opens as the thing you built grows", () => {
   }
 
   // It stops at the glass, however big the organism gets.
-  assert.equal(boundsFor(16).w, CHANNEL_W);
+  assert.equal(boundsFor(30).w, CHANNEL_W);
   assert.equal(boundsFor(400).w, CHANNEL_W);
   assert.equal(boundsFor(400).h, CHANNEL_H);
   assert.ok(CHANNEL_W * CHANNEL_H > ARENA_W * ARENA_H * 6, "and it is a great deal more water");

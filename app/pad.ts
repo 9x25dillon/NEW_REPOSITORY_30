@@ -32,6 +32,8 @@ export interface Intent {
   /** One-shot: true only on the frame the button went down. */
   dash: boolean;
   place: boolean;
+  /** Take the building you are standing on back into your hand. One-shot. */
+  lift: boolean;
   crown: boolean;
   /** The throne button, HELD rather than tapped. Tap it to feed, hold it to
    *  crown: an act you cannot undo should not be the same gesture as one you
@@ -49,7 +51,7 @@ export interface Intent {
 }
 
 const NOTHING: Intent = {
-  move: { x: 0, y: 0 }, grip: false, dash: false, place: false,
+  move: { x: 0, y: 0 }, grip: false, dash: false, place: false, lift: false,
   crown: false, crownDown: false, cycle: 0, confirm: false, pause: false,
   depth: 0, mute: false,
 };
@@ -58,14 +60,14 @@ const NOTHING: Intent = {
 const A = 0, B = 1, X = 2, Y = 3, LB = 4, RB = 5, LT = 6, RT = 7, BACK = 8, START = 9;
 
 interface Layout {
-  grip: number[]; dash: number[]; place: number[]; crown: number[];
+  grip: number[]; dash: number[]; place: number[]; lift: number[]; crown: number[];
   prev: number[]; next: number[]; confirm: number[]; pause: number[];
   up: number[]; down: number[]; mute: number[];
 }
 
 const STANDARD: Layout = {
-  grip: [RT, RB], dash: [A, LT], place: [X], crown: [Y],
-  prev: [LB], next: [B], confirm: [START, A], pause: [START],
+  grip: [RT, RB], dash: [A, LT], place: [X], lift: [LB], crown: [Y],
+  prev: [], next: [B], confirm: [START, A], pause: [START],
   up: [12], down: [13], mute: [BACK],
 };
 
@@ -85,8 +87,8 @@ const STANDARD: Layout = {
  * and the live axes so that can be worked out at all.
  */
 const LOOSE: Layout = {
-  grip: [4, 5, 6, 7], dash: [0, 1], place: [2], crown: [3],
-  prev: [4], next: [5], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8],
+  grip: [4, 5, 6, 7], dash: [0, 1], place: [2], lift: [4], crown: [3],
+  prev: [], next: [5], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8],
   up: [12], down: [13], mute: [8],
 };
 
@@ -182,6 +184,7 @@ export class Pad {
       out.grip = anyDown(m.grip);
       out.dash = anyHit(m.dash);
       out.place = anyHit(m.place);
+      out.lift = anyHit(m.lift);
       out.crown = anyHit(m.crown);
       out.crownDown = anyDown(m.crown);
       out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
@@ -220,6 +223,7 @@ export class Pad {
     if (k("Space") || k("ShiftLeft") || k("ShiftRight")) out.grip = true;
     if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
     if (tap("KeyE") || tap("Enter")) out.place = true;
+    if (tap("KeyF")) out.lift = true;
     if (tap("KeyC")) out.crown = true;
     if (k("KeyC")) out.crownDown = true;
     if (tap("KeyQ")) out.cycle = -1;
@@ -295,13 +299,13 @@ export class Pad {
 export const GLYPH = {
   pad: {
     move: "L STICK", grip: "RT", dash: "A", place: "X", crown: "Y",
-    cycle: "LB / B", confirm: "START", pause: "START", depth: "D-PAD", mute: "BACK",
+    lift: "LB", cycle: "B", confirm: "START", pause: "START", depth: "D-PAD", mute: "BACK",
   },
   // Mouse first, because the movement this game wants is a direction WITH a
   // magnitude and a pointer gives both continuously, where WASD gives eight
   // directions at full deflection.
   keys: {
     move: "MOUSE", grip: "L-CLICK", dash: "R-CLICK", place: "E / 1-9", crown: "C",
-    cycle: "Q", confirm: "SPACE", pause: "ESC / P", depth: "WHEEL", mute: "M",
+    lift: "F", cycle: "Q", confirm: "SPACE", pause: "ESC / P", depth: "WHEEL", mute: "M",
   },
 } as const;

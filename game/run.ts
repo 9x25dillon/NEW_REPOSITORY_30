@@ -69,8 +69,8 @@ export const ARENA_H = 660e-6;
  * centimetres of glass with channels a millimetre or two across — and at one
  * pixel to the micron it is about three screens wide and three deep.
  */
-export const CHANNEL_W = 2600e-6;
-export const CHANNEL_H = 1900e-6;
+export const CHANNEL_W = 4200e-6;
+export const CHANNEL_H = 3000e-6;
 
 /**
  * How much of the channel you can work in, given what you have built.
@@ -94,7 +94,7 @@ export const START = {
 };
 
 export function boundsFor(cells: number): Bounds {
-  const grow = 1 + Math.max(0, cells - 2) * 0.14;
+  const grow = 1 + Math.max(0, cells - 2) * 0.16;
   const w = Math.min(CHANNEL_W, ARENA_W * grow);
   const h = Math.min(CHANNEL_H, ARENA_H * grow);
   // CENTRED IN THE CHANNEL, opening outward from where you started. Anchored at
@@ -225,6 +225,7 @@ export type Ev =
   | { kind: "tuned"; caught: boolean }
   | { kind: "retune"; mode: number; layer: number }
   | { kind: "step"; x: number; y: number; cells: number }
+  | { kind: "lift"; x: number; y: number; group: string }
   | { kind: "freed"; x: number; y: number }
   | { kind: "dash"; x: number; y: number }
   | { kind: "coil"; x: number; y: number; species: string }
@@ -837,7 +838,15 @@ function walkBodies(run: Run, dt: number): void {
 
     const dir = gaitDirection(body, run.you.x, run.you.y);
     if (!dir) continue;
-    if (Math.hypot(run.you.x - body.x, run.you.y - body.y) < pitch) continue;
+
+    // IT KEEPS ITS DISTANCE. It followed to within one site, which meant a
+    // sixteen-cell organism stood on every lattice site around you for the rest
+    // of the run — and since a cell can only be placed on a free site, building
+    // simply stopped working once you had something that walked. It stops at
+    // its own edge plus a clear site, so there is always somewhere to put the
+    // next one down.
+    const clear = body.extent + pitch * 2;
+    if (Math.hypot(run.you.x - body.x, run.you.y - body.y) < clear) continue;
 
     const dx = Math.round(dir[0]) * pitch;
     const dy = Math.round(dir[1]) * pitch;
@@ -1006,6 +1015,42 @@ export function placeCell(run: Run, index: number): PlaceResult {
   run.events.push({ kind: "place", x: s.x, y: s.y, group: s.hm });
   retune(run);
   return "placed";
+}
+
+export type LiftResult = "lifted" | "nothing-there" | "wrong-phase";
+
+/** How near a building you must be to take it back up, m. */
+export const LIFT_RADIUS = 46e-6;
+
+/**
+ * Take a building back into your hand.
+ *
+ * Your trap can hold a body — that is the whole game — and a placed cell is a
+ * body. There was never a reason you could put one down and not pick it up
+ * again, and without it a mistake was permanent: a cell on the wrong site
+ * stayed on the wrong site, and a crystal at the wrong spacing could only be
+ * fixed by discharging your own buildings at nothing.
+ *
+ * It comes back as the cell it was, so nothing is lost but the time. The
+ * skeleton redissolves; the lattice does not care.
+ */
+export function liftCell(run: Run): LiftResult {
+  if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
+
+  let best: Structure | null = null;
+  let bestD = LIFT_RADIUS;
+  for (const s of run.structures) {
+    if (!together(s.layer, run.layer)) continue;
+    const d = Math.hypot(s.x - run.you.x, s.y - run.you.y);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  if (!best) return "nothing-there";
+
+  run.structures = run.structures.filter((s) => s !== best);
+  run.cells.push(cellFor(best.hm));
+  run.events.push({ kind: "lift", x: best.x, y: best.y, group: best.hm });
+  retune(run);
+  return "lifted";
 }
 
 export type CrownResult = "crowned" | "nothing-fed" | "wrong-phase";

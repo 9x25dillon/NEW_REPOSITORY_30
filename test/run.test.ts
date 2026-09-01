@@ -5,7 +5,7 @@ import {
   ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
-  latticePitch, placeCell, readoutFor, wearRate,
+  latticePitch, liftCell, placeCell, readoutFor, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
@@ -587,6 +587,32 @@ test("the cubic cell is the best gun there is and the worst thing to crown", () 
   // microns — barely over the streaming crossover, and the hardest thing in the
   // first water to hold on to. That is the whole opening.
   assert.ok(motif("d").particle.radius < CROSSOVER_RADIUS_ORDER * 1.2);
+});
+
+test("a building can be taken back into your hand", () => {
+  // Your trap holds bodies and a placed cell is a body, so there was never a
+  // reason a mistake had to be permanent — and one report came back saying the
+  // player could not build at all any more, because the organism they had made
+  // followed them and stood on every lattice site they might have used.
+  const run = startRun(53);
+  grant(run, ["222"]);
+  stand(run, START.x + 200e-6, START.y + 200e-6);
+  assert.equal(placeCell(run, 0), "placed");
+  assert.equal(run.structures.length, 1);
+  assert.equal(run.cells.length, 0);
+
+  const put = run.structures[0];
+  stand(run, put.x, put.y);
+  assert.equal(liftCell(run), "lifted");
+  assert.equal(run.structures.length, 0, "it is off the ground");
+  assert.deepEqual(run.cells.map((c) => c.group.hm), ["222"], "and back in your hand as itself");
+
+  // Nothing to take, and it says so rather than doing something else.
+  assert.equal(liftCell(run), "nothing-there");
+  stand(run, START.x + 600e-6, START.y + 600e-6);
+  placeCell(run, 0);
+  stand(run, START.x + 200e-6, START.y + 200e-6);
+  assert.equal(liftCell(run), "nothing-there", "and not from across the water");
 });
 
 // ── birth ───────────────────────────────────────────────────────────────────

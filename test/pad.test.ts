@@ -94,8 +94,11 @@ test("place, crown and the rack are one-shots", () => {
   assert.ok(p.read().crown);
   press(gp, Y, false);
 
+  // LB takes a building back into your hand rather than stepping the rack —
+  // an organism that follows you stands on every site you would build on, so
+  // being able to undo a placement matters more than a second way to cycle.
   press(gp, LB);
-  assert.equal(p.read().cycle, -1);
+  assert.ok(p.read().lift);
   press(gp, LB, false);
   press(gp, B);
   assert.equal(p.read().cycle, 1);

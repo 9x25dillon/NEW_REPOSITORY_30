@@ -21,6 +21,7 @@ import {
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
   CHANNEL_H, beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
+  liftCell,
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
   startRun, step,
 } from "../game/run.js";
@@ -415,6 +416,14 @@ export class Game {
     if (key > 0 && run.cells[key - 1]) { this.selected = key - 1; this.spend(key - 1); }
     else if (it.place) this.spend(this.selected);
 
+    // TAKE IT BACK UP. Your trap holds bodies and a placed cell is a body, so
+    // there was never a reason a mistake had to be permanent.
+    if (it.lift) {
+      const r = liftCell(run);
+      if (r === "nothing-there") this.say("NOTHING OF YOURS WITHIN REACH");
+      if (r === "wrong-phase") this.say("NOT NOW");
+    }
+
     // TAP TO FEED, HOLD TO CROWN. Feeding used to be the building button,
     // told apart by where you happened to be standing, and the throne is at
     // the centre of the arena where people build: the first run to reach it fed
@@ -677,6 +686,11 @@ export class Game {
           this.ring(ev.x, ev.y, 8, 300, 1.1, JADE);
           this.sfx.capture(6);
           this.say("IT IS OUT");
+          break;
+        case "lift":
+          this.sfx.invert(false);
+          this.burst(ev.x, ev.y, 8, JADE);
+          this.say(`TOOK BACK A ${ev.group}`);
           break;
         case "step":
           this.teach("walk");
@@ -2097,6 +2111,7 @@ export class Game {
       `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
       `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
       `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
+      `${pad(G.lift)}TAKE THE BUILDING YOU ARE STANDING ON BACK INTO YOUR HAND.`,
       `${pad(G.cycle)}CHOOSE WHICH CELL.`,
       `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
       `${pad(G.depth)}RETUNE THE CHANNEL. THE ONLY WAY ANYTHING MOVES IN DEPTH.`,

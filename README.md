@@ -405,6 +405,7 @@ under.
 | **RT** | grip | apodisation. The drive concentrates from 1.9 trap pitches down to 0.62, which is the difference between a weak lattice everywhere and one trap under your hand. Costs stamina as amplitude squared. |
 | **A** | burst | the amplifier's peak rating against its continuous one. Twice the drive for 120 ms, and force goes as pressure squared, so four times the speed — about 200 µm, and every other body in the water lurches with you. |
 | **X** | build | a cell onto the ground. It never feeds the throne. |
+| **LB** | lift | take the building you are standing on back into your hand, as the cell it was. |
 | **Y** | tap to feed, **hold** to crown | the throne is at the centre of the arena, which is where you build — so an act you cannot undo does not share a button with one you make sixty times a run. |
 | **START** | stop the world | and the pause screen carries the verbs, because that is the screen you open when you cannot remember what the game lets you do. |
 
@@ -515,8 +516,8 @@ never strands the player, so it is checked rather than assumed.
 
 ### The water opens as the organism grows
 
-The arena was 900 × 660 µm and the window showed all of it. The channel is now
-**2600 × 1900 µm** — a real chip, since acoustofluidic devices are centimetres of
+The arena was 900 × 660 µm and the window showed all of it. The channel is
+**4200 × 3000 µm** — a real chip, since acoustofluidic devices are centimetres of
 glass with channels a millimetre or two across — and the view follows you,
 stopping at the glass.
 
@@ -528,10 +529,18 @@ pool the game has always been.
 
 ```
  0 cells ->  900 x  660 um     the game as it was
- 4 cells -> 1152 x  845
- 9 cells -> 1782 x 1307
-16 cells -> 2600 x 1900        the whole channel, 8.3x the area
+ 6 cells -> 1476 x 1082
+16 cells -> 2916 x 2138
+30 cells -> 4200 x 3000        the whole channel, 21x the area
 ```
+
+A body that follows you also **stops short of you** — at its own edge plus a
+clear site. It used to come to within one site, which meant a sixteen-cell
+organism stood on every lattice site around you for the rest of the run and
+building simply stopped working once you had made something that walked. And a
+building can now be **taken back into your hand**: your trap holds bodies and a
+placed cell is a body, so there was never a reason a mistake had to be
+permanent.
 
 Wildlife arrives at the new edges rather than the old ones, the sovereign walks
 in the larger water, and a body can walk further before it runs out of room.
@@ -882,7 +891,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                259 tests: what the modules above are actually claiming
+test/                260 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
