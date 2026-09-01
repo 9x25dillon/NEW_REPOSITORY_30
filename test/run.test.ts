@@ -64,7 +64,7 @@ function seedMotif(run: Run, parts: string[], x: number, y: number): Entity {
   const e: Entity = {
     id: run.nextId++, faction: "motif", species: "", parts,
     x, y, ang: 0, held: 0, dwell: 0, partner: -1, flash: 0, spin: 0, trail: [],
-    wind: 0, strike: 0, sx: 0, sy: 0, cool: 0,
+    wind: 0, strike: 0, sx: 0, sy: 0, cool: 0, layer: 0,
   };
   run.entities.push(e);
   return e;

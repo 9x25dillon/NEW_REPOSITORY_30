@@ -478,6 +478,45 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### The third dimension was the other half of the library
+
+The game only ever used half of `src/fields.ts`. The SSAW half puts a lattice
+across the **floor** of the channel, which is the plane you play on. The BAW half
+puts a standing wave across its **height**, and nothing had ever been allowed to
+move in it.
+
+A BAW resonance is geometry, not a setting: hard walls are pressure antinodes,
+so a resonance needs a whole number of half wavelengths across the channel, and
+mode *n* puts **exactly n node planes** in the fluid, evenly spaced, the
+outermost half a spacing from each wall. Nothing ever stands on a wall, because
+a wall is an antinode and an antinode is where a cell will not go.
+
+**So the third dimension is an integer**, and it is the harmonic the channel is
+driven at:
+
+```
+mode 1   one plane at 100 um             3.74 MHz   — the first water, flat
+mode 3   planes at 33, 100, 167 um      11.25 MHz
+mode 4   planes at 25, 75, 125, 175 um  17.20 MHz
+```
+
+**And moving in it moves everything.** There is no swimming up: a trapped body
+sits on a node and stays there, so the only way to another height is to put the
+node somewhere else — which re-seats every body in the fluid at once. Stepping
+up a harmonic pushes the planes apart; stepping down **merges** them, and two
+things that were on separate levels find themselves sharing one. That is a real
+manoeuvre on a real device, it is on the mouse wheel, and it is a decision
+rather than a jump button because it is never only about you.
+
+Things on another plane are tens of microns away in z — further than anything
+here can reach — so they cannot touch you, cannot merge with you, and cannot be
+held by your hand, which is a spot in three dimensions centred on your own
+plane. They are drawn as something seen through the fluid.
+
+The first water is driven at its fundamental and is therefore flat. Depth
+arrives the way everything else in this game does: as a consequence of what
+somebody crowned.
+
 ### What you build is an organism, and it has a name
 
 A placed cell already worked without you — it projects holding points along its
@@ -713,6 +752,7 @@ game/shape.ts        what a point group looks like from directly above it
 game/world.ts        worlds, sovereigns, and what is born out of a body
 game/bound.ts        the other field, and the band gap that will not carry it
 game/body.ts         the lattice, what is joined to what, and its space group
+game/depth.ts        the channel's harmonics, and the planes they put in the water
 game/run.ts          the aeon: settle, crown, reign, birth
 app/drifter.ts       SONIC DRIFTER: the game surface, canvas and rendering
 app/pad.ts           the controller, and the keyboard standing in for one
@@ -723,7 +763,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                231 tests: what the modules above are actually claiming
+test/                239 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

@@ -43,13 +43,15 @@ export interface Intent {
   confirm: boolean;
   /** Stop the world. One-shot. */
   pause: boolean;
+  /** -1, 0 or +1: step the channel's harmonic. One-shot. The third dimension. */
+  depth: number;
   mute: boolean;
 }
 
 const NOTHING: Intent = {
   move: { x: 0, y: 0 }, grip: false, dash: false, place: false,
   crown: false, crownDown: false, cycle: 0, confirm: false, pause: false,
-  mute: false,
+  depth: 0, mute: false,
 };
 
 /** Buttons in the standard mapping, by the name written on an Xbox pad. */
@@ -57,12 +59,14 @@ const A = 0, B = 1, X = 2, Y = 3, LB = 4, RB = 5, LT = 6, RT = 7, BACK = 8, STAR
 
 interface Layout {
   grip: number[]; dash: number[]; place: number[]; crown: number[];
-  prev: number[]; next: number[]; confirm: number[]; pause: number[]; mute: number[];
+  prev: number[]; next: number[]; confirm: number[]; pause: number[];
+  up: number[]; down: number[]; mute: number[];
 }
 
 const STANDARD: Layout = {
   grip: [RT, RB], dash: [A, LT], place: [X], crown: [Y],
-  prev: [LB], next: [B], confirm: [START, A], pause: [START], mute: [BACK],
+  prev: [LB], next: [B], confirm: [START, A], pause: [START],
+  up: [12], down: [13], mute: [BACK],
 };
 
 /**
@@ -82,7 +86,8 @@ const STANDARD: Layout = {
  */
 const LOOSE: Layout = {
   grip: [4, 5, 6, 7], dash: [0, 1], place: [2], crown: [3],
-  prev: [4], next: [5], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8], mute: [8],
+  prev: [4], next: [5], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8],
+  up: [12], down: [13], mute: [8],
 };
 
 export class Pad {
@@ -182,6 +187,7 @@ export class Pad {
       out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
       out.confirm = anyHit(m.confirm);
       out.pause = anyHit(m.pause);
+      out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
       out.mute = anyHit(m.mute);
 
       this.prev = [...gp.buttons].map((_, i) => down(i));
@@ -289,13 +295,13 @@ export class Pad {
 export const GLYPH = {
   pad: {
     move: "L STICK", grip: "RT", dash: "A", place: "X", crown: "Y",
-    cycle: "LB / B", confirm: "START", pause: "START", mute: "BACK",
+    cycle: "LB / B", confirm: "START", pause: "START", depth: "D-PAD", mute: "BACK",
   },
   // Mouse first, because the movement this game wants is a direction WITH a
   // magnitude and a pointer gives both continuously, where WASD gives eight
   // directions at full deflection.
   keys: {
     move: "MOUSE", grip: "L-CLICK", dash: "R-CLICK", place: "E / 1-9", crown: "C",
-    cycle: "Q", confirm: "SPACE", pause: "ESC / P", mute: "M",
+    cycle: "Q", confirm: "SPACE", pause: "ESC / P", depth: "WHEEL", mute: "M",
   },
 } as const;

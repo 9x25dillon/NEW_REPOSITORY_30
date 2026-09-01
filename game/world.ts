@@ -29,6 +29,7 @@
 // becomes.
 
 import { BEASTS } from "./beasts.js";
+import { modeFor } from "./depth.js";
 import { type Cell, cellFor, motif } from "./lattice.js";
 import { YOU } from "./pilot.js";
 import { type Dir, lobes } from "./shape.js";
@@ -38,6 +39,8 @@ import { pointGroup } from "../src/pointgroups.js";
 // ── structures: the part that stays ─────────────────────────────────────────
 
 export interface Structure {
+  /** Which node plane it is built on. */
+  layer: number;
   id: number;
   /** The group of the cell that was placed. */
   hm: string;
@@ -61,9 +64,11 @@ export function reachOf(hm: string): number {
   return 34e-6 + pointGroup(hm).order * 2.2e-6;
 }
 
-export function structureFrom(id: number, hm: string, x: number, y: number): Structure {
+export function structureFrom(
+  id: number, hm: string, x: number, y: number, layer = 0,
+): Structure {
   return {
-    id, hm, x, y,
+    id, hm, x, y, layer,
     lobes: lobes(hm),
     reach: reachOf(hm),
     strength: pointGroup(hm).order,
@@ -214,6 +219,16 @@ export interface World {
    * is somebody's corpse and grants almost none.
    */
   calm: number;
+  /**
+   * Which harmonic the channel is driven at, and therefore HOW MANY PLANES
+   * there are to stand on.
+   *
+   * Hard walls are pressure antinodes, so a resonance needs a whole number of
+   * half wavelengths across the channel height, and mode n puts exactly n node
+   * planes in the fluid. The third dimension of this game is that integer. The
+   * first water is driven at its fundamental and is flat.
+   */
+  mode: number;
   /** Circulation, m/s. */
   current: number;
   /** How much of the previous world's building survived, 0..1. */
@@ -347,6 +362,7 @@ export function firstWorld(): World {
     wildlife: wildlifeFor(medium, 1, 0),
     density: 30,
     calm: 40,
+    mode: 1,
     current: 1.0e-5,
     inheritance: 0,
   };
@@ -392,6 +408,7 @@ export function worldFrom(s: Sovereign, aeon: number): World {
     // A richer body leaves more of itself suspended, and less peace.
     density: Math.min(40, 26 + Math.round(s.mass / 3)),
     calm: Math.max(4, 14 - aeon * 2),
+    mode: modeFor(s.mass, aeon),
     current: 0.9e-5 + aeon * 1.4e-6,
     // A richer king leaves more of the old world standing.
     inheritance: Math.min(0.6, 0.12 + s.mass * 0.016),

@@ -26,6 +26,7 @@
 
 import { beast } from "./beasts.js";
 import { type Body, bodiesOf, snap } from "./body.js";
+import { MAX_MODE, planes, reseat, together } from "./depth.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
 } from "./bound.js";
@@ -140,6 +141,8 @@ export interface Entity {
   sy: number;
   /** Seconds before it may gather again. */
   cool: number;
+  /** Which node plane is holding it up. The third dimension is an integer. */
+  layer: number;
 }
 
 /** A volley arm in flight. */
@@ -169,6 +172,7 @@ export type Ev =
   | { kind: "wearing"; x: number; y: number }
   | { kind: "birth"; aeon: number; name: string }
   | { kind: "tuned"; caught: boolean }
+  | { kind: "retune"; mode: number; layer: number }
   | { kind: "freed"; x: number; y: number }
   | { kind: "dash"; x: number; y: number }
   | { kind: "coil"; x: number; y: number; species: string }
@@ -214,6 +218,8 @@ export interface Run {
   t: number;
   spawnIn: number;
   events: Ev[];
+  /** Which plane you are standing on. */
+  layer: number;
   /** Where the lattice is currently pointed — a quarter pitch off your body,
    *  in the direction you are driving. Derived, never set from outside. */
   aim: { x: number; y: number };
@@ -245,6 +251,7 @@ export function startRun(seed = 1): Run {
     aeonsSurvived: 0,
     t: 0,
     spawnIn: 3,
+    layer: 0,
     events: [],
     aim: { x: ARENA_W * 0.3, y: ARENA_H * 0.3 },
     rand: rng(seed),
@@ -302,6 +309,7 @@ function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity
     x: at.x, y: at.y, ang: run.rand() * Math.PI * 2,
     held: 0, dwell: 0, partner: -1, flash: 0, spin: run.rand() * 6.28, trail: [],
     wind: 0, strike: 0, sx: 0, sy: 0, cool: 0,
+    layer: Math.floor(run.rand() * Math.max(1, run.world.mode)),
   };
 }
 
@@ -454,7 +462,7 @@ function drift(run: Run, dt: number): void {
     dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
 
     if (e.faction === "beast" && run.phase !== "birth") {
-      const swim = hunt(run, e, dt);
+      const swim = together(e.layer, run.layer) ? hunt(run, e, dt) : { x: 0, y: 0 };
       dx += swim.x;
       dy += swim.y;
     }
@@ -571,6 +579,8 @@ function settle(run: Run, dt: number): void {
   const dead: Entity[] = [];
 
   for (const e of run.entities) {
+    // Your hand is a spot in three dimensions and it is centred on your plane.
+    if (!together(e.layer, run.layer)) { e.held = 0; continue; }
     if (!capturedAt(w, e.x, e.y, particleOf(e))) { e.held = 0; continue; }
     e.held += dt;
     if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
@@ -623,6 +633,7 @@ function mergePass(run: Run, dt: number): void {
     for (let j = i + 1; j < ms.length; j++) {
       const b = ms[j];
       if (gone.has(b.id)) continue;
+      if (!together(a.layer, b.layer)) continue;   // not in the same trap at all
       const r = Math.hypot(a.x - b.x, a.y - b.y);
       if (r < bestR) { bestR = r; best = b; }
     }
@@ -712,6 +723,33 @@ export function retune(run: Run): void {
   if (now !== was) run.events.push({ kind: "tuned", caught: now });
 }
 
+/**
+ * Step the channel to another harmonic.
+ *
+ * The only thing that moves a trapped body in z. There is no swimming up: a
+ * positive-contrast body sits on a node and stays there, so the way to a
+ * different height is to put the node somewhere else — which moves EVERY plane
+ * in the fluid and hands every body on one to whichever new plane is nearest.
+ * It is a real manoeuvre on a real device and it moves the whole world, which
+ * is what makes it a decision rather than a jump button.
+ */
+export function retuneChannel(run: Run, mode: number): boolean {
+  const want = Math.max(1, Math.min(MAX_MODE, Math.round(mode)));
+  if (want === run.world.mode) return false;
+
+  const zOf = (layer: number) => planes(run.world.mode)[
+    Math.max(0, Math.min(planes(run.world.mode).length - 1, layer))];
+
+  const move = (layer: number) => reseat(zOf(layer), want);
+  run.layer = move(run.layer);
+  for (const e of run.entities) e.layer = move(e.layer);
+  for (const s of run.structures) s.layer = move(s.layer);
+
+  run.world.mode = want;
+  run.events.push({ kind: "retune", mode: want, layer: run.layer });
+  return true;
+}
+
 export const THRONE_RADIUS = 30e-6;
 
 export function onThrone(run: Run, x: number, y: number): boolean {
@@ -779,7 +817,7 @@ export function placeCell(run: Run, index: number): PlaceResult {
   for (const s of run.structures) {
     if (Math.hypot(s.x - at.x, s.y - at.y) < latticePitch(run) * 0.5) return "occupied";
   }
-  const s = structureFrom(run.nextId++, c.group.hm, at.x, at.y);
+  const s = structureFrom(run.nextId++, c.group.hm, at.x, at.y, run.layer);
   run.structures.push(s);
   run.cells.splice(index, 1);
   run.score += s.strength * 2;
@@ -1086,6 +1124,7 @@ function contact(run: Run, dt: number): void {
     if (e.faction !== "beast") continue;
     if (e.held > 0) continue;   // a body you have hold of is not free to reach you
     const b = beast(e.species);
+    if (!together(e.layer, run.layer)) continue;   // tens of microns apart in z
     if (Math.hypot(e.x - run.you.x, e.y - run.you.y) < TOUCH + particleOf(e).radius) {
       e.flash = 0.3;
       // ALL DAMAGE IS TELEGRAPHED, and this is where that was still untrue. A

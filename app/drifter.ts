@@ -21,7 +21,7 @@ import {
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
   beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
-  particleOf, placeCell, readoutFor,
+  particleOf, placeCell, readoutFor, retuneChannel,
   startRun, step,
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
@@ -32,6 +32,7 @@ import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
 import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
 import { autonomous, snap, symbolOf } from "../game/body.js";
+import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
@@ -320,6 +321,16 @@ export class Game {
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    // THE THIRD DIMENSION, ON THE WHEEL. There is no swimming up: a trapped
+    // body sits on a node, so the only way to another height is to drive the
+    // channel at a different harmonic — which moves every plane in the fluid
+    // and hands every body on one to whichever new plane is nearest.
+    this.canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      if (this.screen !== "play" || this.paused) return;
+      this.retune(e.deltaY > 0 ? -1 : 1);
+    }, { passive: false });
   }
 
   /** Turn one frame of intent into everything that is not movement. */
@@ -386,6 +397,10 @@ export class Game {
     // the centre of the arena where people build: the first run to reach it fed
     // fifty-one cells by accident and woke something with three thousand eight
     // hundred hit points.
+    // The d-pad, for a pad that works. Buttons 12 and 13 in the standard
+    // mapping are up and down.
+    if (it.depth !== 0) this.retune(it.depth);
+
     if (it.crownDown) {
       this.crownHeld += dt;
       if (this.crownHeld >= Game.CROWN_HOLD && !this.crowned) {
@@ -396,6 +411,22 @@ export class Game {
       if (this.crownHeld > 0 && !this.crowned) this.doFeed();
       this.crownHeld = 0;
       this.crowned = false;
+    }
+  }
+
+  private retune(step: number): void {
+    const run = this.run;
+    const want = run.world.mode + step;
+    if (want < 1 || want > MAX_MODE) {
+      this.say(want < 1 ? "THE FUNDAMENTAL IS AS FLAT AS IT GETS"
+        : "THE PLANES WOULD BE CLOSER THAN THE BODIES ON THEM");
+      return;
+    }
+    if (retuneChannel(run, want)) {
+      this.sfx.invert(step > 0);
+      this.say(`CHANNEL AT ${run.world.mode}f  ·  `
+        + `${(modeFrequency(run.world.mode, run.world.medium) / 1e6).toFixed(2)} MHZ  ·  `
+        + `${planes(run.world.mode).length} PLANES`);
     }
   }
 
@@ -1238,11 +1269,27 @@ export class Game {
 
   private drawEntities(): void {
     const g = this.ctx;
+    const here = this.run.layer;
     for (const e of this.run.entities) {
       const p = particleOf(e);
       const x = px(e.x), y = px(e.y);
-      const r = Math.max(2.4, px(p.radius));
       const rgb = warmth(contrastFactor(p, this.run.world.medium));
+
+      // ANOTHER PLANE IS ANOTHER PLACE. Tens of microns of water in z, which is
+      // further than anything here can reach, so it is drawn as something seen
+      // through the fluid rather than something you are standing next to.
+      if (!together(e.layer, here)) {
+        const d = Math.abs(e.layer - here);
+        g.globalAlpha = Math.max(0.1, 0.3 - d * 0.07);
+        g.fillStyle = `rgb(${rgb})`;
+        g.beginPath();
+        g.arc(x, y, Math.max(1.6, px(p.radius) * 0.55), 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 1;
+        continue;
+      }
+
+      const r = Math.max(2.4, px(p.radius));
       const hot = e.held > 0 || e.flash > 0;
 
       const rad = r * (hot ? 5.5 : 3.4);
@@ -1618,6 +1665,7 @@ export class Game {
     g.textAlign = "left";
 
     this.drawRack();
+    this.drawChannel();
     this.drawObjective();
     this.drawReadout();
 
@@ -1653,6 +1701,50 @@ export class Game {
 
   /** The cell rack. Structure and freedom are shown side by side because
    *  Neumann's principle puts them in tension and the rack is where you feel it. */
+  /**
+   * The channel, side on.
+   *
+   * Which harmonic it is being driven at, where the node planes are, and which
+   * one is holding you up. The walls are drawn because they are the reason the
+   * planes are where they are: a hard wall is a pressure antinode, so the nodes
+   * fall strictly between them and nothing ever stands on one.
+   */
+  private drawChannel(): void {
+    const run = this.run;
+    const g = this.ctx;
+    const mode = run.world.mode;
+    const x = VIEW_W - 34, y = 74, h = 92;
+
+    g.fillStyle = "rgba(10,18,28,0.8)";
+    g.fillRect(x - 12, y - 8, 30, h + 20);
+    g.strokeStyle = "rgba(120,225,245,0.25)";
+    g.lineWidth = 1;
+    for (const wy of [y, y + h]) {                 // the walls
+      g.beginPath(); g.moveTo(x - 9, wy); g.lineTo(x + 15, wy); g.stroke();
+    }
+
+    planes(mode).forEach((z, i) => {
+      const py = y + h * (1 - z / CHANNEL_HEIGHT);
+      const on = i === run.layer;
+      g.strokeStyle = on ? `rgb(${JADE})` : "rgba(120,225,245,0.3)";
+      g.lineWidth = on ? 2 : 1;
+      g.beginPath(); g.moveTo(x - 7, py); g.lineTo(x + 13, py); g.stroke();
+      if (on) {
+        g.fillStyle = `rgb(${JADE})`;
+        g.beginPath(); g.arc(x + 3, py, 2.6, 0, Math.PI * 2); g.fill();
+      }
+    });
+
+    g.textAlign = "center";
+    g.font = `700 9px ${MONO}`;
+    g.fillStyle = DIM;
+    g.fillText(`${mode}f`, x + 3, y - 12);
+    g.font = `600 7px ${MONO}`;
+    g.fillStyle = FAINT;
+    g.fillText(`${(modeFrequency(mode, run.world.medium) / 1e6).toFixed(1)}`, x + 3, y + h + 10);
+    g.textAlign = "left";
+  }
+
   private drawRack(): void {
     const g = this.ctx;
     const run = this.run;
@@ -1896,7 +1988,12 @@ export class Game {
       `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
       `${pad(G.cycle)}CHOOSE WHICH CELL.`,
       `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
+      `${pad(G.depth)}RETUNE THE CHANNEL. THE ONLY WAY ANYTHING MOVES IN DEPTH.`,
       `${pad(G.mute)}SOUND.`,
+      "",
+      "HARD WALLS ARE PRESSURE ANTINODES, SO A RESONANCE NEEDS A WHOLE NUMBER",
+      "OF HALF WAVELENGTHS ACROSS THE CHANNEL: MODE N PUTS N PLANES IN THE",
+      "WATER. NOTHING SWIMS UP. YOU MOVE EVERY PLANE, OR YOU MOVE NOTHING.",
       "",
       "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
       "WHOSE BAND GAP CATCHES IT: HOW MUCH YOU BUILD DECIDES WHETHER THERE IS",

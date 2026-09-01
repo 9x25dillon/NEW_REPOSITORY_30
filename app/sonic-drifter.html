@@ -668,6 +668,100 @@
     return body.cells.length >= AUTONOMY;
   }
 
+  // src/gorkov.ts
+  function compressibility(m) {
+    return 1 / (m.rho * m.c * m.c);
+  }
+  function f1(p, med) {
+    return 1 - compressibility(p) / compressibility(med);
+  }
+  function f2(p, med) {
+    return 2 * (p.rho - med.rho) / (2 * p.rho + med.rho);
+  }
+  function contrastFactor(p, med) {
+    return f1(p, med) / 3 + f2(p, med) / 2;
+  }
+  var TAU = Math.PI * 2;
+  var CROSSOVER_RADIUS_ORDER = 15e-7;
+  var WATER = { rho: 997, c: 1497 };
+  var MAMMALIAN_CELL = { radius: 75e-7, rho: 1100, c: 1570 };
+
+  // src/fields.ts
+  function forceAt(w, u, p) {
+    const phi = contrastFactor(p, w.medium);
+    const kappa = compressibility(w.medium);
+    return Math.PI * Math.pow(p.radius, 3) * kappa * w.amplitude * w.amplitude * phi * w.k * Math.sin(2 * (w.k * u + w.phase));
+  }
+  function trapPositions(w, p, span) {
+    const phi = contrastFactor(p, w.medium);
+    if (phi === 0) return [];
+    const offset = phi > 0 ? Math.PI / 2 : 0;
+    const period = Math.PI / w.k;
+    const out = [];
+    const first = (offset - w.phase) / w.k;
+    let u = first - Math.ceil(first / period) * period;
+    while (u < -1e-15) u += period;
+    for (; u < span - 1e-15; u += period) out.push(u);
+    return out;
+  }
+  function bawResonance(ch) {
+    return ch.mode * ch.medium.c / (2 * ch.width);
+  }
+  var SAW_SUBSTRATES = [
+    { name: "Lithium niobate", cut: "128 deg Y-cut, X-propagating", velocity: 3980, hm: "3m" },
+    { name: "Lithium tantalate", cut: "36 deg Y-cut, X-propagating (leaky)", velocity: 4212, hm: "3m" },
+    { name: "Quartz", cut: "ST-cut, X-propagating", velocity: 3158, hm: "32" }
+  ];
+  function ssawWavelength(d) {
+    return 2 * d.fingerPitch;
+  }
+  function ssawFrequency(d) {
+    return d.substrate.velocity / ssawWavelength(d);
+  }
+  function ssawField(d, amplitudePa) {
+    const wavelength = ssawWavelength(d);
+    return {
+      k: 2 * Math.PI / wavelength,
+      wavelength,
+      frequency: ssawFrequency(d),
+      amplitude: amplitudePa,
+      // Two waves of phase difference p sum to an envelope cos(kx - p/2).
+      phase: envelopePhaseForIdt(d.idtPhase ?? 0),
+      medium: d.medium
+    };
+  }
+  function envelopePhaseForIdt(idtPhaseRad) {
+    return -idtPhaseRad / 2;
+  }
+
+  // game/depth.ts
+  var CHANNEL_HEIGHT = 2e-4;
+  var MAX_MODE = 4;
+  function modeFrequency(mode, medium) {
+    return bawResonance({ width: CHANNEL_HEIGHT, medium, mode });
+  }
+  function planes(mode) {
+    const n = Math.max(1, Math.min(MAX_MODE, Math.round(mode)));
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(CHANNEL_HEIGHT * (2 * i + 1) / (2 * n));
+    return out;
+  }
+  function reseat(z, mode) {
+    const p = planes(mode);
+    let best = 0;
+    for (let i = 1; i < p.length; i++) {
+      if (Math.abs(p[i] - z) < Math.abs(p[best] - z)) best = i;
+    }
+    return best;
+  }
+  function together(a, b) {
+    return a === b;
+  }
+  function modeFor(mass, aeon) {
+    if (aeon <= 1) return 1;
+    return Math.max(1, Math.min(MAX_MODE, 1 + Math.floor(mass / 14) + Math.floor(aeon / 3)));
+  }
+
   // src/linalg.ts
   function zeros(n, m = n) {
     return Array.from({ length: n }, () => new Array(m).fill(0));
@@ -957,69 +1051,6 @@
     return omega > gap.hi ? "TOO FAR APART - BUILD THEM CLOSER" : "TOO CLOSE TOGETHER - SPREAD THEM OUT";
   }
 
-  // src/gorkov.ts
-  function compressibility(m) {
-    return 1 / (m.rho * m.c * m.c);
-  }
-  function f1(p, med) {
-    return 1 - compressibility(p) / compressibility(med);
-  }
-  function f2(p, med) {
-    return 2 * (p.rho - med.rho) / (2 * p.rho + med.rho);
-  }
-  function contrastFactor(p, med) {
-    return f1(p, med) / 3 + f2(p, med) / 2;
-  }
-  var TAU = Math.PI * 2;
-  var CROSSOVER_RADIUS_ORDER = 15e-7;
-  var WATER = { rho: 997, c: 1497 };
-  var MAMMALIAN_CELL = { radius: 75e-7, rho: 1100, c: 1570 };
-
-  // src/fields.ts
-  function forceAt(w, u, p) {
-    const phi = contrastFactor(p, w.medium);
-    const kappa = compressibility(w.medium);
-    return Math.PI * Math.pow(p.radius, 3) * kappa * w.amplitude * w.amplitude * phi * w.k * Math.sin(2 * (w.k * u + w.phase));
-  }
-  function trapPositions(w, p, span) {
-    const phi = contrastFactor(p, w.medium);
-    if (phi === 0) return [];
-    const offset = phi > 0 ? Math.PI / 2 : 0;
-    const period = Math.PI / w.k;
-    const out = [];
-    const first = (offset - w.phase) / w.k;
-    let u = first - Math.ceil(first / period) * period;
-    while (u < -1e-15) u += period;
-    for (; u < span - 1e-15; u += period) out.push(u);
-    return out;
-  }
-  var SAW_SUBSTRATES = [
-    { name: "Lithium niobate", cut: "128 deg Y-cut, X-propagating", velocity: 3980, hm: "3m" },
-    { name: "Lithium tantalate", cut: "36 deg Y-cut, X-propagating (leaky)", velocity: 4212, hm: "3m" },
-    { name: "Quartz", cut: "ST-cut, X-propagating", velocity: 3158, hm: "32" }
-  ];
-  function ssawWavelength(d) {
-    return 2 * d.fingerPitch;
-  }
-  function ssawFrequency(d) {
-    return d.substrate.velocity / ssawWavelength(d);
-  }
-  function ssawField(d, amplitudePa) {
-    const wavelength = ssawWavelength(d);
-    return {
-      k: 2 * Math.PI / wavelength,
-      wavelength,
-      frequency: ssawFrequency(d),
-      amplitude: amplitudePa,
-      // Two waves of phase difference p sum to an envelope cos(kx - p/2).
-      phase: envelopePhaseForIdt(d.idtPhase ?? 0),
-      medium: d.medium
-    };
-  }
-  function envelopePhaseForIdt(idtPhaseRad) {
-    return -idtPhaseRad / 2;
-  }
-
   // src/trajectory.ts
   var WATER_VISCOSITY = 89e-5;
   function rateConstant(w, p, viscosity = WATER_VISCOSITY) {
@@ -1305,12 +1336,13 @@
   function reachOf(hm) {
     return 34e-6 + pointGroup(hm).order * 22e-7;
   }
-  function structureFrom(id, hm, x, y) {
+  function structureFrom(id, hm, x, y, layer = 0) {
     return {
       id,
       hm,
       x,
       y,
+      layer,
       lobes: lobes(hm),
       reach: reachOf(hm),
       strength: pointGroup(hm).order,
@@ -1408,6 +1440,7 @@
       wildlife: wildlifeFor(medium, 1, 0),
       density: 30,
       calm: 40,
+      mode: 1,
       current: 1e-5,
       inheritance: 0
     };
@@ -1428,6 +1461,7 @@
       // A richer body leaves more of itself suspended, and less peace.
       density: Math.min(40, 26 + Math.round(s.mass / 3)),
       calm: Math.max(4, 14 - aeon * 2),
+      mode: modeFor(s.mass, aeon),
       current: 9e-6 + aeon * 14e-7,
       // A richer king leaves more of the old world standing.
       inheritance: Math.min(0.6, 0.12 + s.mass * 0.016)
@@ -1504,6 +1538,7 @@
       aeonsSurvived: 0,
       t: 0,
       spawnIn: 3,
+      layer: 0,
       events: [],
       aim: { x: ARENA_W * 0.3, y: ARENA_H * 0.3 },
       rand: rng(seed),
@@ -1559,7 +1594,8 @@
       strike: 0,
       sx: 0,
       sy: 0,
-      cool: 0
+      cool: 0,
+      layer: Math.floor(run.rand() * Math.max(1, run.world.mode))
     };
   }
   function newMotif(run, anywhere = false) {
@@ -1651,7 +1687,7 @@
       dx += run.world.current * Math.sin(ca) * Math.cos(cb);
       dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
       if (e.faction === "beast" && run.phase !== "birth") {
-        const swim = hunt(run, e, dt);
+        const swim = together(e.layer, run.layer) ? hunt(run, e, dt) : { x: 0, y: 0 };
         dx += swim.x;
         dy += swim.y;
       }
@@ -1739,6 +1775,10 @@
     const w = run.wave;
     const dead = [];
     for (const e of run.entities) {
+      if (!together(e.layer, run.layer)) {
+        e.held = 0;
+        continue;
+      }
       if (!capturedAt(w, e.x, e.y, particleOf(e))) {
         e.held = 0;
         continue;
@@ -1784,6 +1824,7 @@
       for (let j = i + 1; j < ms.length; j++) {
         const b = ms[j];
         if (gone.has(b.id)) continue;
+        if (!together(a.layer, b.layer)) continue;
         const r = Math.hypot(a.x - b.x, a.y - b.y);
         if (r < bestR) {
           bestR = r;
@@ -1872,6 +1913,18 @@
     const now = catches(run.gap, run.bound.omega);
     if (now !== was) run.events.push({ kind: "tuned", caught: now });
   }
+  function retuneChannel(run, mode) {
+    const want = Math.max(1, Math.min(MAX_MODE, Math.round(mode)));
+    if (want === run.world.mode) return false;
+    const zOf = (layer) => planes(run.world.mode)[Math.max(0, Math.min(planes(run.world.mode).length - 1, layer))];
+    const move = (layer) => reseat(zOf(layer), want);
+    run.layer = move(run.layer);
+    for (const e of run.entities) e.layer = move(e.layer);
+    for (const s of run.structures) s.layer = move(s.layer);
+    run.world.mode = want;
+    run.events.push({ kind: "retune", mode: want, layer: run.layer });
+    return true;
+  }
   var THRONE_RADIUS = 3e-5;
   function onThrone(run, x, y) {
     return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
@@ -1905,7 +1958,7 @@
     for (const s2 of run.structures) {
       if (Math.hypot(s2.x - at.x, s2.y - at.y) < latticePitch(run) * 0.5) return "occupied";
     }
-    const s = structureFrom(run.nextId++, c.group.hm, at.x, at.y);
+    const s = structureFrom(run.nextId++, c.group.hm, at.x, at.y, run.layer);
     run.structures.push(s);
     run.cells.splice(index, 1);
     run.score += s.strength * 2;
@@ -2091,6 +2144,7 @@
       if (e.faction !== "beast") continue;
       if (e.held > 0) continue;
       const b = beast(e.species);
+      if (!together(e.layer, run.layer)) continue;
       if (Math.hypot(e.x - run.you.x, e.y - run.you.y) < TOUCH + particleOf(e).radius) {
         e.flash = 0.3;
         if (b.damage > 0) {
@@ -2211,6 +2265,7 @@
     cycle: 0,
     confirm: false,
     pause: false,
+    depth: 0,
     mute: false
   };
   var A = 0;
@@ -2232,6 +2287,8 @@
     next: [B],
     confirm: [START, A],
     pause: [START],
+    up: [12],
+    down: [13],
     mute: [BACK]
   };
   var LOOSE = {
@@ -2243,6 +2300,8 @@
     next: [5],
     confirm: [0, 1, 2, 3, 8, 9],
     pause: [9, 8],
+    up: [12],
+    down: [13],
     mute: [8]
   };
   var Pad = class {
@@ -2332,6 +2391,7 @@
         out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
         out.confirm = anyHit(m.confirm);
         out.pause = anyHit(m.pause);
+        out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
         out.mute = anyHit(m.mute);
         this.prev = [...gp.buttons].map((_, i) => down(i));
         if (!this.everMoved && (out.grip || out.dash || out.place || out.crownDown || out.confirm || Math.hypot(gp.axes[0] ?? 0, gp.axes[1] ?? 0) > DEADZONE)) {
@@ -2413,6 +2473,7 @@
       cycle: "LB / B",
       confirm: "START",
       pause: "START",
+      depth: "D-PAD",
       mute: "BACK"
     },
     // Mouse first, because the movement this game wants is a direction WITH a
@@ -2427,6 +2488,7 @@
       cycle: "Q",
       confirm: "SPACE",
       pause: "ESC / P",
+      depth: "WHEEL",
       mute: "M"
     }
   };
@@ -2806,6 +2868,11 @@
       window.addEventListener("pointerup", up);
       window.addEventListener("pointercancel", up);
       this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      this.canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        if (this.screen !== "play" || this.paused) return;
+        this.retune(e.deltaY > 0 ? -1 : 1);
+      }, { passive: false });
     }
     /** Turn one frame of intent into everything that is not movement. */
     /**
@@ -2862,6 +2929,7 @@
         this.selected = key3 - 1;
         this.spend(key3 - 1);
       } else if (it.place) this.spend(this.selected);
+      if (it.depth !== 0) this.retune(it.depth);
       if (it.crownDown) {
         this.crownHeld += dt;
         if (this.crownHeld >= _Game.CROWN_HOLD && !this.crowned) {
@@ -2872,6 +2940,18 @@
         if (this.crownHeld > 0 && !this.crowned) this.doFeed();
         this.crownHeld = 0;
         this.crowned = false;
+      }
+    }
+    retune(step2) {
+      const run = this.run;
+      const want = run.world.mode + step2;
+      if (want < 1 || want > MAX_MODE) {
+        this.say(want < 1 ? "THE FUNDAMENTAL IS AS FLAT AS IT GETS" : "THE PLANES WOULD BE CLOSER THAN THE BODIES ON THEM");
+        return;
+      }
+      if (retuneChannel(run, want)) {
+        this.sfx.invert(step2 > 0);
+        this.say(`CHANNEL AT ${run.world.mode}f  \xB7  ${(modeFrequency(run.world.mode, run.world.medium) / 1e6).toFixed(2)} MHZ  \xB7  ${planes(run.world.mode).length} PLANES`);
       }
     }
     doFeed() {
@@ -3695,11 +3775,22 @@
     }
     drawEntities() {
       const g2 = this.ctx;
+      const here = this.run.layer;
       for (const e of this.run.entities) {
         const p = particleOf(e);
         const x = px(e.x), y = px(e.y);
-        const r = Math.max(2.4, px(p.radius));
         const rgb = warmth(contrastFactor(p, this.run.world.medium));
+        if (!together(e.layer, here)) {
+          const d = Math.abs(e.layer - here);
+          g2.globalAlpha = Math.max(0.1, 0.3 - d * 0.07);
+          g2.fillStyle = `rgb(${rgb})`;
+          g2.beginPath();
+          g2.arc(x, y, Math.max(1.6, px(p.radius) * 0.55), 0, Math.PI * 2);
+          g2.fill();
+          g2.globalAlpha = 1;
+          continue;
+        }
+        const r = Math.max(2.4, px(p.radius));
         const hot = e.held > 0 || e.flash > 0;
         const rad = r * (hot ? 5.5 : 3.4);
         const glow = g2.createRadialGradient(x, y, 0, x, y, rad);
@@ -4074,6 +4165,7 @@
       g2.fillText("SCORE", VIEW_W - 18, 46);
       g2.textAlign = "left";
       this.drawRack();
+      this.drawChannel();
       this.drawObjective();
       this.drawReadout();
       if (this.toastT > 0) {
@@ -4095,6 +4187,54 @@
     }
     /** The cell rack. Structure and freedom are shown side by side because
      *  Neumann's principle puts them in tension and the rack is where you feel it. */
+    /**
+     * The channel, side on.
+     *
+     * Which harmonic it is being driven at, where the node planes are, and which
+     * one is holding you up. The walls are drawn because they are the reason the
+     * planes are where they are: a hard wall is a pressure antinode, so the nodes
+     * fall strictly between them and nothing ever stands on one.
+     */
+    drawChannel() {
+      const run = this.run;
+      const g2 = this.ctx;
+      const mode = run.world.mode;
+      const x = VIEW_W - 34, y = 74, h = 92;
+      g2.fillStyle = "rgba(10,18,28,0.8)";
+      g2.fillRect(x - 12, y - 8, 30, h + 20);
+      g2.strokeStyle = "rgba(120,225,245,0.25)";
+      g2.lineWidth = 1;
+      for (const wy of [y, y + h]) {
+        g2.beginPath();
+        g2.moveTo(x - 9, wy);
+        g2.lineTo(x + 15, wy);
+        g2.stroke();
+      }
+      planes(mode).forEach((z, i) => {
+        const py = y + h * (1 - z / CHANNEL_HEIGHT);
+        const on = i === run.layer;
+        g2.strokeStyle = on ? `rgb(${JADE})` : "rgba(120,225,245,0.3)";
+        g2.lineWidth = on ? 2 : 1;
+        g2.beginPath();
+        g2.moveTo(x - 7, py);
+        g2.lineTo(x + 13, py);
+        g2.stroke();
+        if (on) {
+          g2.fillStyle = `rgb(${JADE})`;
+          g2.beginPath();
+          g2.arc(x + 3, py, 2.6, 0, Math.PI * 2);
+          g2.fill();
+        }
+      });
+      g2.textAlign = "center";
+      g2.font = `700 9px ${MONO}`;
+      g2.fillStyle = DIM;
+      g2.fillText(`${mode}f`, x + 3, y - 12);
+      g2.font = `600 7px ${MONO}`;
+      g2.fillStyle = FAINT2;
+      g2.fillText(`${(modeFrequency(mode, run.world.medium) / 1e6).toFixed(1)}`, x + 3, y + h + 10);
+      g2.textAlign = "left";
+    }
     drawRack() {
       const g2 = this.ctx;
       const run = this.run;
@@ -4317,7 +4457,12 @@
         `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
         `${pad(G.cycle)}CHOOSE WHICH CELL.`,
         `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
+        `${pad(G.depth)}RETUNE THE CHANNEL. THE ONLY WAY ANYTHING MOVES IN DEPTH.`,
         `${pad(G.mute)}SOUND.`,
+        "",
+        "HARD WALLS ARE PRESSURE ANTINODES, SO A RESONANCE NEEDS A WHOLE NUMBER",
+        "OF HALF WAVELENGTHS ACROSS THE CHANNEL: MODE N PUTS N PLANES IN THE",
+        "WATER. NOTHING SWIMS UP. YOU MOVE EVERY PLANE, OR YOU MOVE NOTHING.",
         "",
         "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
         "WHOSE BAND GAP CATCHES IT: HOW MUCH YOU BUILD DECIDES WHETHER THERE IS",
