@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  BUILDABLE, RECIPES, SEED_MASS, assemble, cellFor, motif,
+  BUILDABLE, RECIPES, SEED_MASS, assemble, cellFor, motif, optionsFor,
 } from "../game/lattice.js";
 import { POINT_GROUPS, isEnantiomorphic, isPolar, isPiezoelectric } from "../src/pointgroups.js";
 import { allowsChiral } from "../src/sohncke.js";
@@ -140,4 +140,28 @@ test("structure and freedom pull against each other", () => {
   }
   assert.ok(discordant > concordant * 4,
     `expected a strongly negative relation, got ${concordant} vs ${discordant}`);
+});
+
+test("a cluster knows what it could still become", () => {
+  // The line the player never had. Three dimers are one girdle from a 222, one
+  // diagonal from a cubic 23, and one more dimer from a plain 2 — three
+  // different futures, and the game used to show a row of pips counting mass,
+  // which says how far along you are and nothing about what you are choosing.
+  const pool = ["a2", "a2", "a2", "g", "d"];
+  const groups = (parts: string[]) => optionsFor(parts, pool).map((o) => o.group);
+
+  assert.deepEqual(groups(["a2", "a2"]), ["2", "222", "23"]);
+  assert.deepEqual(optionsFor(["a2"], pool).map((o) => o.needs), [null, "g", "d"]);
+
+  // Committed: once a girdle is in, the cubic road is shut.
+  assert.deepEqual(groups(["a2", "g"]), ["222"]);
+  assert.deepEqual(groups(["a2", "d"]), ["23"]);
+
+  // And a cluster holding all three is going nowhere, which is the trap.
+  assert.deepEqual(groups(["a2", "g", "d"]), []);
+
+  // It never offers what this water cannot supply: a girdle alone could be a
+  // 222, but only where there are dimers to find.
+  assert.deepEqual(groups(["g"]), ["222"]);
+  assert.deepEqual(optionsFor(["g"], ["g"]).map((o) => o.group), []);
 });

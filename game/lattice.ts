@@ -280,6 +280,42 @@ const BLURB: Readonly<Record<Ability, string>> = {
 /** The eleven, in build order. */
 export const BUILDABLE: readonly string[] = RECIPES.map((r) => r.group);
 
+/** A cell a cluster could still become, and the one part it is missing. */
+export interface Option {
+  group: string;
+  /** The motif it still wants, or null if it only wants more mass. */
+  needs: string | null;
+}
+
+/**
+ * What a cluster in your hand could still turn into.
+ *
+ * THE THING THE PLAYER COULD NOT SEE. A cluster of three dimers is one girdle
+ * away from a 222, one diagonal away from a cubic 23, and one more dimer away
+ * from a plain 2 — three different futures, and the game showed a row of gold
+ * pips counting the mass. Pips tell you how far along you are and nothing about
+ * what you are going to be, so there was never a moment to decide anything, and
+ * gathering was combining dots by accident.
+ *
+ * A recipe is open to a cluster when the cluster's distinct parts are all in it
+ * and this water carries whatever is left. Ordered by group order, so the best
+ * thing available is named last.
+ */
+export function optionsFor(parts: readonly string[], pool: readonly string[]): Option[] {
+  const have = new Set(parts);
+  const water = new Set(pool);
+  const out: Option[] = [];
+
+  for (const r of RECIPES) {
+    if (![...have].every((id) => r.parts.includes(id))) continue;
+    const missing = r.parts.filter((id) => !have.has(id));
+    if (missing.length > 1) continue;
+    if (missing.length === 1 && !water.has(missing[0])) continue;
+    out.push({ group: r.group, needs: missing[0] ?? null });
+  }
+  return out.sort((a, b) => pointGroup(a.group).order - pointGroup(b.group).order);
+}
+
 /**
  * Every cell a given water can actually produce.
  *

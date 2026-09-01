@@ -178,6 +178,276 @@
     return b;
   }
 
+  // src/linalg.ts
+  function zeros(n, m = n) {
+    return Array.from({ length: n }, () => new Array(m).fill(0));
+  }
+  function identity(n) {
+    const I = zeros(n);
+    for (let i = 0; i < n; i++) I[i][i] = 1;
+    return I;
+  }
+  function symmetricEigen(input, maxSweeps = 100) {
+    const n = input.length;
+    const a = input.map((r) => [...r]);
+    const v = identity(n);
+    let scale = 0;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) scale += a[i][j] * a[i][j];
+    scale = Math.sqrt(scale);
+    const tol = (scale || 1) * 1e-14;
+    let sweeps = 0;
+    for (; sweeps < maxSweeps; sweeps++) {
+      let off = 0;
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += a[i][j] * a[i][j];
+      if (Math.sqrt(off) <= tol) break;
+      for (let p = 0; p < n - 1; p++) {
+        for (let q = p + 1; q < n; q++) {
+          if (Math.abs(a[p][q]) <= tol / n) continue;
+          const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+          const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+          const c = 1 / Math.sqrt(t * t + 1);
+          const s = t * c;
+          for (let k = 0; k < n; k++) {
+            const akp = a[k][p];
+            const akq = a[k][q];
+            a[k][p] = c * akp - s * akq;
+            a[k][q] = s * akp + c * akq;
+          }
+          for (let k = 0; k < n; k++) {
+            const apk = a[p][k];
+            const aqk = a[q][k];
+            a[p][k] = c * apk - s * aqk;
+            a[q][k] = s * apk + c * aqk;
+          }
+          for (let k = 0; k < n; k++) {
+            const vkp = v[k][p];
+            const vkq = v[k][q];
+            v[k][p] = c * vkp - s * vkq;
+            v[k][q] = s * vkp + c * vkq;
+          }
+        }
+      }
+    }
+    const pairs = Array.from({ length: n }, (_, i) => ({ value: a[i][i], col: i })).sort((x, y) => x.value - y.value);
+    const values = pairs.map((p) => p.value);
+    const vectors = zeros(n);
+    pairs.forEach((p, k) => {
+      for (let i = 0; i < n; i++) vectors[i][k] = v[i][p.col];
+    });
+    return { values, vectors, sweeps };
+  }
+  function cholesky(B2) {
+    const n = B2.length;
+    const L = zeros(n);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j <= i; j++) {
+        let sum = B2[i][j];
+        for (let k = 0; k < j; k++) sum -= L[i][k] * L[j][k];
+        if (i === j) {
+          if (sum <= 0) {
+            throw new Error(
+              `matrix is not positive definite at row ${i} (pivot ${sum}) \u2014 the plane-wave truncation may have produced a negative effective density`
+            );
+          }
+          L[i][i] = Math.sqrt(sum);
+        } else {
+          L[i][j] = sum / L[j][j];
+        }
+      }
+    }
+    return L;
+  }
+  function forwardSolve(L, b) {
+    const n = L.length;
+    const y = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      let s = b[i];
+      for (let k = 0; k < i; k++) s -= L[i][k] * y[k];
+      y[i] = s / L[i][i];
+    }
+    return y;
+  }
+  function generalizedSymmetricEigen(A2, B2) {
+    const n = A2.length;
+    const L = cholesky(B2);
+    const Y2 = zeros(n);
+    for (let c = 0; c < n; c++) {
+      const col = forwardSolve(L, A2.map((r) => r[c]));
+      for (let i = 0; i < n; i++) Y2[i][c] = col[i];
+    }
+    const C = zeros(n);
+    for (let c = 0; c < n; c++) {
+      const col = forwardSolve(L, Y2[c]);
+      for (let i = 0; i < n; i++) C[i][c] = col[i];
+    }
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const m = (C[i][j] + C[j][i]) / 2;
+        C[i][j] = m;
+        C[j][i] = m;
+      }
+    }
+    const reduced = symmetricEigen(C);
+    const vectors = zeros(n);
+    for (let k = 0; k < n; k++) {
+      const y = reduced.vectors.map((r) => r[k]);
+      const x = backSolveTranspose(L, y);
+      let norm = 0;
+      for (const v of x) norm += v * v;
+      norm = Math.sqrt(norm) || 1;
+      for (let i = 0; i < n; i++) vectors[i][k] = x[i] / norm;
+    }
+    return { values: reduced.values, vectors, sweeps: reduced.sweeps };
+  }
+  function backSolveTranspose(L, y) {
+    const n = L.length;
+    const x = new Array(n).fill(0);
+    for (let i = n - 1; i >= 0; i--) {
+      let s = y[i];
+      for (let k = i + 1; k < n; k++) s -= L[k][i] * x[k];
+      x[i] = s / L[i][i];
+    }
+    return x;
+  }
+
+  // src/bands.ts
+  function besselJ1(x) {
+    const ax = Math.abs(x);
+    let y;
+    if (ax < 3) {
+      const t2 = x / 3;
+      const t22 = t2 * t2;
+      y = x * (0.5 - 0.56249985 * t22 + 0.21093573 * t22 ** 2 - 0.03954289 * t22 ** 3 + 443319e-8 * t22 ** 4 - 31761e-8 * t22 ** 5 + 1109e-8 * t22 ** 6);
+      return y;
+    }
+    const t = 3 / ax;
+    const f12 = 0.79788456 + 156e-8 * t + 0.01659667 * t ** 2 + 17105e-8 * t ** 3 - 249511e-8 * t ** 4 + 113653e-8 * t ** 5 - 20033e-8 * t ** 6;
+    const th = ax - 2.35619449 + 0.12499612 * t + 565e-7 * t ** 2 - 637879e-8 * t ** 3 + 74348e-8 * t ** 4 + 79824e-8 * t ** 5 - 29166e-8 * t ** 6;
+    y = f12 * Math.cos(th) / Math.sqrt(ax);
+    return x < 0 ? -y : y;
+  }
+  function reciprocalVectors(a, order) {
+    const g2 = 2 * Math.PI / a;
+    const out = [];
+    for (let n = -order; n <= order; n++) {
+      for (let m = -order; m <= order; m++) out.push([n * g2, m * g2]);
+    }
+    return out;
+  }
+  function fourierCoefficient(crystal, inner, outer, gx, gy) {
+    const f = crystal.fill;
+    const delta = inner - outer;
+    const gMag = Math.hypot(gx, gy);
+    if (gMag < 1e-12) return outer + delta * f;
+    if (crystal.geometry === "circle") {
+      const R = Math.sqrt(f * crystal.a * crystal.a / Math.PI);
+      const u2 = gMag * R;
+      return delta * f * (2 * besselJ1(u2) / u2);
+    }
+    if (Math.abs(gy) > 1e-12) return 0;
+    const n = gx * crystal.a / (2 * Math.PI);
+    const u = Math.PI * n * f;
+    return delta * f * (Math.sin(u) / u);
+  }
+  function bandsAt(crystal, kx, ky, order = 3, count = 6) {
+    const Gs = reciprocalVectors(crystal.a, order);
+    const n = Gs.length;
+    const etaIn = 1 / crystal.inclusion.rho;
+    const etaOut = 1 / crystal.matrix.rho;
+    const kapIn = 1 / (crystal.inclusion.rho * crystal.inclusion.c ** 2);
+    const kapOut = 1 / (crystal.matrix.rho * crystal.matrix.c ** 2);
+    const A2 = zeros(n);
+    const B2 = zeros(n);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const dx = Gs[i][0] - Gs[j][0];
+        const dy = Gs[i][1] - Gs[j][1];
+        const dot = (kx + Gs[i][0]) * (kx + Gs[j][0]) + (ky + Gs[i][1]) * (ky + Gs[j][1]);
+        A2[i][j] = fourierCoefficient(crystal, etaIn, etaOut, dx, dy) * dot;
+        B2[i][j] = fourierCoefficient(crystal, kapIn, kapOut, dx, dy);
+      }
+    }
+    const { values } = generalizedSymmetricEigen(A2, B2);
+    return values.slice(0, count).map((v) => Math.sqrt(Math.max(v, 0)));
+  }
+  function completeGap(crystal, band, order = 3, samples = 12) {
+    const g2 = Math.PI / crystal.a;
+    let maxLower = -Infinity;
+    let minUpper = Infinity;
+    for (let i = 0; i <= samples; i++) {
+      for (let j = 0; j <= i; j++) {
+        const w = bandsAt(crystal, i / samples * g2, j / samples * g2, order, band + 2);
+        maxLower = Math.max(maxLower, w[band - 1]);
+        minUpper = Math.min(minUpper, w[band]);
+      }
+    }
+    return minUpper > maxLower ? { lo: maxLower, hi: minUpper } : null;
+  }
+
+  // game/bound.ts
+  var SKELETON = { rho: 2650, c: 5960 };
+  var SKELETON_REACH = 1.15;
+  var MAX_FILL = 0.62;
+  var GAP_ORDER = 2;
+  var GAP_SAMPLES = 4;
+  var RELEASE_TIME = 3;
+  function boundFrequency(pitch, medium) {
+    return 2 * Math.PI * medium.c / (2 * pitch);
+  }
+  function newBound(pitch, medium, x, y) {
+    return { omega: boundFrequency(pitch, medium), x, y, free: false, held: 0 };
+  }
+  function crystalOf(structures, medium) {
+    if (structures.length < 2) return null;
+    let total = 0;
+    let radius = 0;
+    for (const s of structures) {
+      let nearest2 = Infinity;
+      for (const t of structures) {
+        if (t === s) continue;
+        const d = Math.hypot(t.x - s.x, t.y - s.y);
+        if (d < nearest2) nearest2 = d;
+      }
+      total += nearest2;
+      radius += s.reach * SKELETON_REACH;
+    }
+    const a = total / structures.length;
+    const r = radius / structures.length;
+    if (!(a > 0)) return null;
+    return {
+      a,
+      geometry: "circle",
+      fill: Math.min(MAX_FILL, Math.PI * r * r / (a * a)),
+      inclusion: SKELETON,
+      matrix: medium
+    };
+  }
+  function gapOf(crystal) {
+    if (!crystal) return null;
+    try {
+      return completeGap(crystal, 1, GAP_ORDER, GAP_SAMPLES);
+    } catch {
+      return null;
+    }
+  }
+  function catches(gap, omega) {
+    return gap !== null && omega > gap.lo && omega < gap.hi;
+  }
+  function detune(gap, omega) {
+    if (!gap) return 1;
+    if (omega > gap.lo && omega < gap.hi) return 0;
+    const edge2 = omega <= gap.lo ? gap.lo : gap.hi;
+    return Math.min(1, Math.abs(omega - edge2) / omega);
+  }
+  function advice(crystal, gap, omega) {
+    if (!crystal) return "BUILD. TWO IS NOT A CRYSTAL";
+    if (!gap) {
+      return crystal.fill < 0.45 ? "NO GAP AT ALL - BUILD MORE, AND CLOSER TOGETHER" : "NO GAP AT ALL - THE SPACING IS TOO UNEVEN";
+    }
+    if (omega > gap.lo && omega < gap.hi) return "THE GAP HAS IT";
+    return omega > gap.hi ? "THE GAP IS TOO LOW - BUILD TIGHTER" : "THE GAP IS TOO HIGH - SPREAD OUT";
+  }
+
   // src/pointgroups.ts
   var POINT_GROUPS = [
     ["1", "C1", "triclinic", 1, 1, false, 0],
@@ -600,6 +870,19 @@
     anchor: "ORDER 24 AND NOT ONE DRIVABLE COMPONENT. IT CANNOT BE MOVED, WHICH IS THE POINT"
   };
   var BUILDABLE = RECIPES.map((r) => r.group);
+  function optionsFor(parts, pool) {
+    const have = new Set(parts);
+    const water = new Set(pool);
+    const out = [];
+    for (const r of RECIPES) {
+      if (![...have].every((id) => r.parts.includes(id))) continue;
+      const missing = r.parts.filter((id) => !have.has(id));
+      if (missing.length > 1) continue;
+      if (missing.length === 1 && !water.has(missing[0])) continue;
+      out.push({ group: r.group, needs: missing[0] ?? null });
+    }
+    return out.sort((a, b) => pointGroup(a.group).order - pointGroup(b.group).order);
+  }
 
   // src/gorkov.ts
   function compressibility(m) {
@@ -1125,6 +1408,9 @@
       world,
       wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
       you: newPilot(ARENA_W * 0.3, ARENA_H * 0.3),
+      bound: newBound(world.pitch, world.medium, ARENA_W * 0.72, ARENA_H * 0.28),
+      crystal: null,
+      gap: null,
       phase: "settle",
       entities: [],
       structures: [],
@@ -1243,6 +1529,7 @@
     }
     const motifs = run.entities.filter((e) => e.faction === "motif").length;
     if (motifs < 14) run.entities.push(newMotif(run));
+    release(run, dt);
     drift(run, dt);
     settle(run, dt);
     mergePass(run, dt);
@@ -1250,6 +1537,21 @@
     driveStructures(run, dt);
     if (run.phase === "reign") reign(run, dt);
     contact(run, dt);
+  }
+  function release(run, dt) {
+    const b = run.bound;
+    if (b.free) return;
+    if (catches(run.gap, b.omega)) {
+      b.held += dt;
+      if (b.held >= RELEASE_TIME) {
+        b.free = true;
+        run.score += 80;
+        run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 1);
+        run.events.push({ kind: "freed", x: b.x, y: b.y });
+      }
+    } else if (b.held > 0) {
+      b.held = Math.max(0, b.held - dt * 0.6);
+    }
   }
   function drift(run, dt) {
     const w = run.wave;
@@ -1478,6 +1780,13 @@
     }
     run.entities = keep;
   }
+  function retune(run) {
+    const was = catches(run.gap, run.bound.omega);
+    run.crystal = crystalOf(run.structures, run.world.medium);
+    run.gap = gapOf(run.crystal);
+    const now = catches(run.gap, run.bound.omega);
+    if (now !== was) run.events.push({ kind: "tuned", caught: now });
+  }
   var THRONE_RADIUS = 3e-5;
   function onThrone(run, x, y) {
     return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
@@ -1501,6 +1810,7 @@
     run.cells.splice(index, 1);
     run.score += s.strength * 2;
     run.events.push({ kind: "place", x: s.x, y: s.y, group: s.hm });
+    retune(run);
     return "placed";
   }
   function crown(run) {
@@ -1550,6 +1860,7 @@
   }
   function discharge(run, s) {
     run.structures = run.structures.filter((x) => x !== s);
+    retune(run);
     const k = run.throne;
     let damage = 0;
     if (k.awake && k.hp > 0) {
@@ -1637,6 +1948,7 @@
         run.structures = run.structures.filter((s) => s !== victim);
         k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
         run.events.push({ kind: "devour", x: victim.x, y: victim.y });
+        retune(run);
       }
     }
     if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
@@ -1737,6 +2049,13 @@
       strength: Math.max(1, Math.round(s.strength / 2))
     }));
     run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
+    run.bound = newBound(
+      w.pitch,
+      w.medium,
+      ARENA_W * (0.2 + run.rand() * 0.6),
+      ARENA_H * (0.2 + run.rand() * 0.6)
+    );
+    retune(run);
     run.bolts = [];
     run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
     for (let i = 0; i < 12; i++) run.entities.push(newMotif(run, true));
@@ -2100,6 +2419,11 @@
       id: "sign",
       title: "IT SHARES YOUR SIGN",
       body: "BOTH LATTICES ARE ONE FIELD A QUARTER WAVELENGTH APART, AND YOUR OWN CONTRAST PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS."
+    },
+    bound: {
+      id: "bound",
+      title: "IT IS HELD BY A DISPERSION RELATION",
+      body: "THE OTHER FIELD IS A MODE AT ONE FREQUENCY, IN A WORLD WHOSE LATTICE WILL NOT CARRY IT. A TRAPPED MODE LEAVES ALONG A CHANNEL, AND A CHANNEL ONLY GUIDES WHERE THE CRYSTAL AROUND IT FORBIDS - SO YOU MUST BUILD ONE WHOSE BAND GAP CATCHES ITS FREQUENCY. HOW MUCH YOU BUILD DECIDES IF THERE IS A GAP. HOW FAR APART DECIDES WHERE."
     },
     hand: {
       id: "hand",
@@ -2481,6 +2805,20 @@
             this.teach("hand");
             this.burst(ev.x, ev.y, 2, "255,255,255");
             break;
+          case "tuned":
+            this.sfx.invert(ev.caught);
+            this.say(ev.caught ? "THE GAP HAS IT - KEEP IT STANDING" : "YOU LOST IT");
+            this.teach("bound");
+            break;
+          case "freed":
+            this.flash = 1;
+            this.flashRed = false;
+            this.shake = 10;
+            this.burst(ev.x, ev.y, 40, JADE);
+            this.ring(ev.x, ev.y, 8, 300, 1.1, JADE);
+            this.sfx.capture(6);
+            this.say("IT IS OUT");
+            break;
           case "coil":
             this.sfx.coil();
             this.teach("coil");
@@ -2576,6 +2914,7 @@
       }
       this.drawField();
       this.drawStructures();
+      this.drawBound();
       this.drawThrone();
       this.drawTrails();
       this.drawEntities();
@@ -2748,6 +3087,100 @@
         }
       }
     }
+    /**
+     * The other field: a mode this world's lattice will not carry.
+     *
+     * Drawn as what it is — a standing thing that cannot go anywhere. It has no
+     * body and no position it chose; it is a frequency, so it is drawn as rings
+     * at that frequency, and they beat faster the nearer your crystal is to
+     * catching it.
+     */
+    drawBound() {
+      const run = this.run;
+      const b = run.bound;
+      if (b.free) return;
+      const g2 = this.ctx;
+      const x = px(b.x), y = px(b.y);
+      const near = 1 - detune(run.gap, b.omega);
+      const caught = catches(run.gap, b.omega);
+      const rgb = caught ? "160,255,214" : "190,170,255";
+      for (let i = 0; i < 4; i++) {
+        const phase = (this.t * (1.1 + near * 3.4) + i * 0.25) % 1;
+        g2.strokeStyle = `rgba(${rgb},${((1 - phase) * (0.16 + near * 0.4)).toFixed(3)})`;
+        g2.lineWidth = 1.4;
+        g2.beginPath();
+        g2.arc(x, y, 8 + phase * 34, 0, Math.PI * 2);
+        g2.stroke();
+      }
+      g2.fillStyle = `rgba(${rgb},0.9)`;
+      g2.beginPath();
+      g2.arc(x, y, 4.5, 0, Math.PI * 2);
+      g2.fill();
+      if (caught) {
+        const f = Math.min(1, b.held / RELEASE_TIME);
+        g2.strokeStyle = `rgb(${rgb})`;
+        g2.lineWidth = 3;
+        g2.beginPath();
+        g2.arc(x, y, 15, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+        g2.stroke();
+      }
+      g2.fillStyle = `rgba(${rgb},0.75)`;
+      g2.font = `700 8px ${MONO}`;
+      g2.textAlign = "center";
+      g2.fillText(`${(b.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz`, x, y + 26);
+      g2.textAlign = "left";
+    }
+    /**
+     * The objective, as the only thing that decides it.
+     *
+     * A band of forbidden frequencies and a marker where the trapped mode sits.
+     * Everything the player does to the world moves this bar, and it is the same
+     * number the release is computed from — so there is no version of this where
+     * the picture flatters what is happening.
+     */
+    drawObjective() {
+      const run = this.run;
+      const b = run.bound;
+      const g2 = this.ctx;
+      const x = 18, y = 62, w = 232, h = 9;
+      const SPAN = 13e7;
+      const at = (om) => x + Math.max(0, Math.min(1, om / SPAN)) * w;
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = DIM;
+      g2.fillText(b.free ? "IT IS OUT" : "THE BOUND FIELD", x, y - 12);
+      g2.fillStyle = "rgba(10,18,28,0.8)";
+      g2.fillRect(x, y, w, h);
+      if (run.gap) {
+        const lo = at(run.gap.lo), hi = at(run.gap.hi);
+        g2.fillStyle = catches(run.gap, b.omega) ? `rgba(${JADE},0.55)` : "rgba(120,225,245,0.24)";
+        g2.fillRect(lo, y, Math.max(2, hi - lo), h);
+      }
+      const m = at(b.omega);
+      g2.strokeStyle = b.free ? `rgb(${JADE})` : "#e8d9ff";
+      g2.lineWidth = 2;
+      g2.beginPath();
+      g2.moveTo(m, y - 3);
+      g2.lineTo(m, y + h + 3);
+      g2.stroke();
+      g2.strokeStyle = "rgba(120,225,245,0.3)";
+      g2.lineWidth = 1;
+      g2.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      g2.font = `600 8px ${MONO}`;
+      g2.fillStyle = b.free ? `rgb(${JADE})` : FAINT2;
+      g2.fillText(
+        b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
+        x,
+        y + h + 6
+      );
+      if (run.crystal) {
+        g2.fillStyle = FAINT2;
+        g2.fillText(
+          `SPACING ${(run.crystal.a * 1e6).toFixed(0)} UM   FILL ${run.crystal.fill.toFixed(2)}`,
+          x,
+          y + h + 17
+        );
+      }
+    }
     drawThrone() {
       const run = this.run;
       if (run.throne.awake) return;
@@ -2813,14 +3246,18 @@
         g2.beginPath();
         g2.arc(x, y, rad, 0, Math.PI * 2);
         g2.fill();
-        g2.fillStyle = `rgb(${rgb})`;
-        g2.beginPath();
-        g2.arc(x, y, r, 0, Math.PI * 2);
-        g2.fill();
-        g2.fillStyle = "rgba(255,255,255,0.45)";
-        g2.beginPath();
-        g2.arc(x - r * 0.3, y - r * 0.3, r * 0.3, 0, Math.PI * 2);
-        g2.fill();
+        if (e.faction === "motif") {
+          drawMotif(g2, x, y, r, e.parts[e.parts.length - 1], rgb, e.spin);
+        } else {
+          g2.fillStyle = `rgb(${rgb})`;
+          g2.beginPath();
+          g2.arc(x, y, r, 0, Math.PI * 2);
+          g2.fill();
+          g2.fillStyle = "rgba(255,255,255,0.45)";
+          g2.beginPath();
+          g2.arc(x - r * 0.3, y - r * 0.3, r * 0.3, 0, Math.PI * 2);
+          g2.fill();
+        }
         if (e.faction === "beast") {
           const b = beast(e.species);
           g2.strokeStyle = `rgba(${rgb},${e.flash > 0 ? 0.95 : 0.5})`;
@@ -2872,14 +3309,25 @@
             g2.stroke();
           }
         } else if (e.parts.length > 1) {
-          g2.fillStyle = GOLD;
-          const n = Math.min(6, e.parts.length);
-          for (let i = 0; i < n; i++) {
-            const th = i / n * Math.PI * 2 - Math.PI / 2;
-            g2.beginPath();
-            g2.arc(x + Math.cos(th) * (r + 5), y + Math.sin(th) * (r + 5), 1.5, 0, Math.PI * 2);
-            g2.fill();
-          }
+          const asm = assemble(e.parts);
+          const label = asm.group ? `${asm.group} ${asm.mass}/${SEED_MASS}` : asm.partial ? `? ${asm.mass}/${SEED_MASS}` : "WILL NOT BIND";
+          g2.font = `700 9px ${MONO}`;
+          g2.textAlign = "center";
+          g2.fillStyle = asm.group ? GOLD : asm.partial ? DIM : RED;
+          g2.fillText(label, x, y - r - 11);
+          g2.textAlign = "left";
+          e.parts.slice(0, 4).forEach((id, i) => {
+            const th = i / 4 * Math.PI * 2 - Math.PI / 2;
+            drawMotif(
+              g2,
+              x + Math.cos(th) * (r + 6),
+              y + Math.sin(th) * (r + 6),
+              2.6,
+              id,
+              rgb,
+              e.spin
+            );
+          });
         }
       }
     }
@@ -3163,6 +3611,7 @@
       g2.fillText("SCORE", VIEW_W - 18, 46);
       g2.textAlign = "left";
       this.drawRack();
+      this.drawObjective();
       this.drawReadout();
       if (this.toastT > 0) {
         g2.textAlign = "center";
@@ -3177,7 +3626,7 @@
       g2.fillStyle = FAINT2;
       g2.font = `600 9px ${MONO}`;
       const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
-      const hint = run.phase === "reign" ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   \xB7   ${G.dash} TO BURST CLEAR` : run.throne.fed.length > 0 ? `${G.crown} TO CROWN IT   \xB7   OR FEED IT MORE AND MAKE A RICHER WORLD` : `${G.grip} TO GATHER   \xB7   ${G.place} PLACES A CELL   \xB7   STAND ON THE THRONE TO FEED IT`;
+      const hint = run.phase === "reign" ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   \xB7   ${G.dash} TO BURST CLEAR` : !run.bound.free && run.structures.length >= 2 ? advice(run.crystal, run.gap, run.bound.omega) : run.cells.length > 0 ? `${G.place} BUILDS   \xB7   ON THE THRONE IT FEEDS INSTEAD` : run.throne.fed.length > 0 ? `${G.crown} TO CROWN IT` : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   \xB7   FOUR MAKES A CELL`;
       g2.fillText(hint, VIEW_W / 2, VIEW_H - 16);
       g2.textAlign = "left";
     }
@@ -3254,6 +3703,18 @@
       );
       g2.fillStyle = "#9fbdd0";
       g2.fillText(d.hint, x + 9, y + 58);
+      if (near.faction === "motif") {
+        const opts = optionsFor(near.parts, run.world.pool);
+        if (opts.length > 0) {
+          g2.font = `600 8px ${MONO}`;
+          g2.fillStyle = GOLD;
+          g2.fillText(
+            opts.map((o) => o.needs ? `+${motif(o.needs).label[0]}->${o.group}` : `x4->${o.group}`).join("  "),
+            x + 9,
+            y + 69
+          );
+        }
+      }
     }
     // ── screens ───────────────────────────────────────────────────────────────
     drawBirth() {
@@ -3357,10 +3818,23 @@
       g2.font = `600 12px ${MONO}`;
       g2.fillStyle = `rgb(${NODE})`;
       g2.fillText(
-        "YOU ARE A BODY IN THE WATER, AND ONLY THE FIELD MOVES YOU.",
+        "YOU ARE A FIELD. SO IS THE OTHER ONE, AND IT IS INSIDE THE MATTER.",
         VIEW_W / 2,
-        182
+        172
       );
+      g2.font = `600 10px ${MONO}`;
+      g2.fillStyle = DIM;
+      g2.fillText(
+        "A WAVE WITH NO PROPAGATING SOLUTION DOES NOT TRAVEL AND CANNOT LEAVE.",
+        VIEW_W / 2,
+        192
+      );
+      g2.fillText(
+        "NOBODY IS HOLDING IT. A DISPERSION RELATION IS. BUILD THE CRYSTAL",
+        VIEW_W / 2,
+        206
+      );
+      g2.fillText("WHOSE BAND GAP CATCHES IT, AND IT GOES WITH YOU.", VIEW_W / 2, 220);
       const on = this.pad.connected;
       const G = on ? GLYPH.pad : GLYPH.keys;
       g2.fillStyle = DIM;
@@ -3373,14 +3847,12 @@
         `${pad(G.place)}PLACE A CELL. STAND ON THE THRONE TO FEED IT INSTEAD.`,
         `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
         "",
-        "SETTLE   GATHER FOUR OF A KIND. A PLACED CELL STAYS, AND GATHERS FOR YOU.",
-        "CROWN    WHAT YOU FEED THE THRONE IS WHAT IT BECOMES.",
-        "REIGN    IT EATS WHAT YOU BUILT. GRIP YOUR OWN BUILDINGS TO FIRE THEM.",
-        "BIRTH    ITS BODY IS THE NEXT WORLD - ITS WATER, ITS LATTICE, ITS MATTER.",
-        "",
-        "WHAT SHARES YOUR CONTRAST COMES TO YOUR FEET. THE REST RINGS YOU."
+        "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
+        "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",
+        "CROWN    WHAT YOU FEED THE THRONE IS WHAT IT BECOMES, AND IT EATS YOUR CRYSTAL.",
+        "BIRTH    ITS BODY IS THE NEXT WORLD - AND STRANDS ITS OWN FIELD SOMEWHERE ELSE."
       ];
-      lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 214 + i * 17));
+      lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 246 + i * 16));
       const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
       g2.font = `700 14px ${MONO}`;
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
@@ -3428,6 +3900,54 @@
     g2.fillStyle = DIM;
     g2.font = `600 9px ${MONO}`;
     g2.fillText(label, x, y + h + 4);
+  }
+  function drawMotif(g2, x, y, r, id, rgb, spin) {
+    const m = motif(id);
+    g2.strokeStyle = `rgb(${rgb})`;
+    g2.fillStyle = `rgba(${rgb},0.30)`;
+    g2.lineWidth = 1.6;
+    if (m.role === "girdle") {
+      g2.beginPath();
+      g2.ellipse(x, y, r * 1.35, r * 0.62, spin * 0.6, 0, Math.PI * 2);
+      g2.fill();
+      g2.stroke();
+      return;
+    }
+    if (m.role === "diagonal") {
+      for (let i = 0; i < 3; i++) {
+        const a = spin + i * Math.PI * 2 / 3;
+        g2.beginPath();
+        g2.moveTo(x, y);
+        g2.lineTo(x + Math.cos(a) * r * 1.8, y + Math.sin(a) * r * 1.8);
+        g2.stroke();
+      }
+      return;
+    }
+    if (m.order <= 1) {
+      g2.beginPath();
+      g2.arc(x, y, r, 0, Math.PI * 2);
+      g2.fill();
+      g2.stroke();
+      return;
+    }
+    if (m.order === 2) {
+      g2.beginPath();
+      g2.ellipse(x, y, r * 1.5, r * 0.5, spin, 0, Math.PI * 2);
+      g2.fill();
+      g2.stroke();
+      return;
+    }
+    g2.beginPath();
+    for (let i = 0; i < m.order; i++) {
+      const a = spin + i / m.order * Math.PI * 2 - Math.PI / 2;
+      const px2 = x + Math.cos(a) * r * 1.25;
+      const py2 = y + Math.sin(a) * r * 1.25;
+      if (i === 0) g2.moveTo(px2, py2);
+      else g2.lineTo(px2, py2);
+    }
+    g2.closePath();
+    g2.fill();
+    g2.stroke();
   }
   function wrap(g2, text, x, y, maxW, lh) {
     let line = "";

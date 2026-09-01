@@ -26,6 +26,9 @@
 
 import { beast } from "./beasts.js";
 import {
+  type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound,
+} from "./bound.js";
+import {
   type Cell, assemble, cellFor, motif,
 } from "./lattice.js";
 import {
@@ -162,6 +165,8 @@ export type Ev =
   | { kind: "sovereign-hit"; x: number; y: number }
   | { kind: "wearing"; x: number; y: number }
   | { kind: "birth"; aeon: number; name: string }
+  | { kind: "tuned"; caught: boolean }
+  | { kind: "freed"; x: number; y: number }
   | { kind: "dash"; x: number; y: number }
   | { kind: "coil"; x: number; y: number; species: string }
   | { kind: "strike"; x: number; y: number; species: string }
@@ -174,6 +179,12 @@ export interface Run {
   wave: Wave;
   /** You. A particle in the water, moved by nothing but the field. */
   you: Pilot;
+  /** The other field: a mode this world's own lattice will not carry. */
+  bound: Bound;
+  /** The crystal your buildings make, and its complete gap. Recomputed when
+   *  what you have built changes, because it costs sixty milliseconds. */
+  crystal: ReturnType<typeof crystalOf>;
+  gap: ReturnType<typeof gapOf>;
   phase: Phase;
   entities: Entity[];
   structures: Structure[];
@@ -202,6 +213,9 @@ export function startRun(seed = 1): Run {
     world,
     wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
     you: newPilot(ARENA_W * 0.3, ARENA_H * 0.3),
+    bound: newBound(world.pitch, world.medium, ARENA_W * 0.72, ARENA_H * 0.28),
+    crystal: null,
+    gap: null,
     phase: "settle",
     entities: [],
     structures: [],
@@ -362,6 +376,7 @@ export function step(run: Run, input: Input, dt: number): void {
   const motifs = run.entities.filter((e) => e.faction === "motif").length;
   if (motifs < 14) run.entities.push(newMotif(run));
 
+  release(run, dt);
   drift(run, dt);
   settle(run, dt);
   mergePass(run, dt);
@@ -369,6 +384,32 @@ export function step(run: Run, input: Input, dt: number): void {
   driveStructures(run, dt);
   if (run.phase === "reign") reign(run, dt);
   contact(run, dt);
+}
+
+/**
+ * The other field, getting out.
+ *
+ * It does not leave the instant the gap catches it. A mode has to build up in
+ * the channel, and the seconds it takes are seconds you have to keep the
+ * crystal standing — which is the whole of the tension, because the thing you
+ * crowned eats buildings and every one it takes retunes the gap out from under
+ * you.
+ */
+function release(run: Run, dt: number): void {
+  const b = run.bound;
+  if (b.free) return;
+
+  if (catches(run.gap, b.omega)) {
+    b.held += dt;
+    if (b.held >= RELEASE_TIME) {
+      b.free = true;
+      run.score += 80;
+      run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 1);
+      run.events.push({ kind: "freed", x: b.x, y: b.y });
+    }
+  } else if (b.held > 0) {
+    b.held = Math.max(0, b.held - dt * 0.6);
+  }
 }
 
 // ── motion ──────────────────────────────────────────────────────────────────
@@ -626,6 +667,21 @@ function crystallise(run: Run): void {
 
 // ── building ────────────────────────────────────────────────────────────────
 
+/**
+ * Recompute the dispersion of what you have built.
+ *
+ * Called whenever the set of structures changes and never otherwise: a
+ * plane-wave expansion is sixty milliseconds, which is nothing on the frame you
+ * place a building and impossible sixty times a second.
+ */
+export function retune(run: Run): void {
+  const was = catches(run.gap, run.bound.omega);
+  run.crystal = crystalOf(run.structures, run.world.medium);
+  run.gap = gapOf(run.crystal);
+  const now = catches(run.gap, run.bound.omega);
+  if (now !== was) run.events.push({ kind: "tuned", caught: now });
+}
+
 export const THRONE_RADIUS = 30e-6;
 
 export function onThrone(run: Run, x: number, y: number): boolean {
@@ -667,6 +723,7 @@ export function placeCell(run: Run, index: number): PlaceResult {
   run.cells.splice(index, 1);
   run.score += s.strength * 2;
   run.events.push({ kind: "place", x: s.x, y: s.y, group: s.hm });
+  retune(run);
   return "placed";
 }
 
@@ -764,6 +821,7 @@ export function bearsOn(s: Structure, x: number, y: number): boolean {
  */
 export function discharge(run: Run, s: Structure): number {
   run.structures = run.structures.filter((x) => x !== s);
+  retune(run);
   const k = run.throne;
   let damage = 0;
 
@@ -916,6 +974,7 @@ function reign(run: Run, dt: number): void {
       run.structures = run.structures.filter((s) => s !== victim);
       k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
       run.events.push({ kind: "devour", x: victim.x, y: victim.y });
+      retune(run);
     }
   }
 
@@ -1031,6 +1090,9 @@ export function enterWorld(run: Run): void {
   }));
 
   run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
+  run.bound = newBound(w.pitch, w.medium,
+    ARENA_W * (0.2 + run.rand() * 0.6), ARENA_H * (0.2 + run.rand() * 0.6));
+  retune(run);
   run.bolts = [];
   run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
   for (let i = 0; i < 12; i++) run.entities.push(newMotif(run, true));

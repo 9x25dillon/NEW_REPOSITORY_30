@@ -28,6 +28,8 @@ import {
   epitaphFor, sovereignParticle, volley,
 } from "../game/world.js";
 import { lobes } from "../game/shape.js";
+import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
+import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
@@ -74,6 +76,13 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "PICKS WHICH ONE HOLDS YOU UP. ANYTHING WITH THE SAME SIGN ANSWERS TO THE SAME "
       + "LATTICE, SO YOUR OWN DRIVE REELS IT INTO YOUR LAP. THE REST IS PINNED IN THE RING "
       + "A QUARTER PITCH OUT, WHERE IT CANNOT TOUCH YOU. CHANGE THE WATER AND THAT SWAPS.",
+  },
+  bound: {
+    id: "bound", title: "IT IS HELD BY A DISPERSION RELATION",
+    body: "THE OTHER FIELD IS A MODE AT ONE FREQUENCY, IN A WORLD WHOSE LATTICE WILL NOT "
+      + "CARRY IT. A TRAPPED MODE LEAVES ALONG A CHANNEL, AND A CHANNEL ONLY GUIDES WHERE "
+      + "THE CRYSTAL AROUND IT FORBIDS - SO YOU MUST BUILD ONE WHOSE BAND GAP CATCHES ITS "
+      + "FREQUENCY. HOW MUCH YOU BUILD DECIDES IF THERE IS A GAP. HOW FAR APART DECIDES WHERE.",
   },
   hand: {
     id: "hand", title: "EVERYTHING HERE DIES BY BEING HELD",
@@ -464,6 +473,19 @@ export class Game {
           this.teach("hand");
           this.burst(ev.x, ev.y, 2, "255,255,255");
           break;
+        case "tuned":
+          this.sfx.invert(ev.caught);
+          this.say(ev.caught ? "THE GAP HAS IT - KEEP IT STANDING" : "YOU LOST IT");
+          this.teach("bound");
+          break;
+        case "freed":
+          this.flash = 1; this.flashRed = false;
+          this.shake = 10;
+          this.burst(ev.x, ev.y, 40, JADE);
+          this.ring(ev.x, ev.y, 8, 300, 1.1, JADE);
+          this.sfx.capture(6);
+          this.say("IT IS OUT");
+          break;
         case "coil":
           this.sfx.coil();
           this.teach("coil");
@@ -550,6 +572,7 @@ export class Game {
     }
     this.drawField();
     this.drawStructures();
+    this.drawBound();
     this.drawThrone();
     this.drawTrails();
     this.drawEntities();
@@ -725,6 +748,98 @@ export class Game {
     }
   }
 
+  /**
+   * The other field: a mode this world's lattice will not carry.
+   *
+   * Drawn as what it is — a standing thing that cannot go anywhere. It has no
+   * body and no position it chose; it is a frequency, so it is drawn as rings
+   * at that frequency, and they beat faster the nearer your crystal is to
+   * catching it.
+   */
+  private drawBound(): void {
+    const run = this.run;
+    const b = run.bound;
+    if (b.free) return;
+    const g = this.ctx;
+    const x = px(b.x), y = px(b.y);
+    const near = 1 - detune(run.gap, b.omega);
+    const caught = catches(run.gap, b.omega);
+    const rgb = caught ? "160,255,214" : "190,170,255";
+
+    for (let i = 0; i < 4; i++) {
+      const phase = (this.t * (1.1 + near * 3.4) + i * 0.25) % 1;
+      g.strokeStyle = `rgba(${rgb},${((1 - phase) * (0.16 + near * 0.4)).toFixed(3)})`;
+      g.lineWidth = 1.4;
+      g.beginPath(); g.arc(x, y, 8 + phase * 34, 0, Math.PI * 2); g.stroke();
+    }
+    g.fillStyle = `rgba(${rgb},0.9)`;
+    g.beginPath(); g.arc(x, y, 4.5, 0, Math.PI * 2); g.fill();
+
+    if (caught) {
+      const f = Math.min(1, b.held / RELEASE_TIME);
+      g.strokeStyle = `rgb(${rgb})`;
+      g.lineWidth = 3;
+      g.beginPath(); g.arc(x, y, 15, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); g.stroke();
+    }
+    g.fillStyle = `rgba(${rgb},0.75)`;
+    g.font = `700 8px ${MONO}`;
+    g.textAlign = "center";
+    g.fillText(`${(b.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz`, x, y + 26);
+    g.textAlign = "left";
+  }
+
+  /**
+   * The objective, as the only thing that decides it.
+   *
+   * A band of forbidden frequencies and a marker where the trapped mode sits.
+   * Everything the player does to the world moves this bar, and it is the same
+   * number the release is computed from — so there is no version of this where
+   * the picture flatters what is happening.
+   */
+  private drawObjective(): void {
+    const run = this.run;
+    const b = run.bound;
+    const g = this.ctx;
+    const x = 18, y = 62, w = 232, h = 9;
+    const SPAN = 130e6;                      // rad/s across the whole bar
+    const at = (om: number) => x + Math.max(0, Math.min(1, om / SPAN)) * w;
+
+    g.font = `600 9px ${MONO}`;
+    g.fillStyle = DIM;
+    g.fillText(b.free ? "IT IS OUT" : "THE BOUND FIELD", x, y - 12);
+
+    g.fillStyle = "rgba(10,18,28,0.8)";
+    g.fillRect(x, y, w, h);
+
+    if (run.gap) {
+      const lo = at(run.gap.lo), hi = at(run.gap.hi);
+      g.fillStyle = catches(run.gap, b.omega) ? `rgba(${JADE},0.55)` : "rgba(120,225,245,0.24)";
+      g.fillRect(lo, y, Math.max(2, hi - lo), h);
+    }
+
+    const m = at(b.omega);
+    g.strokeStyle = b.free ? `rgb(${JADE})` : "#e8d9ff";
+    g.lineWidth = 2;
+    g.beginPath(); g.moveTo(m, y - 3); g.lineTo(m, y + h + 3); g.stroke();
+
+    g.strokeStyle = "rgba(120,225,245,0.3)";
+    g.lineWidth = 1;
+    g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+    g.font = `600 8px ${MONO}`;
+    g.fillStyle = b.free ? `rgb(${JADE})` : FAINT;
+    g.fillText(
+      b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
+      x, y + h + 6);
+
+    if (run.crystal) {
+      g.fillStyle = FAINT;
+      g.fillText(
+        `SPACING ${(run.crystal.a * 1e6).toFixed(0)} UM   FILL ${run.crystal.fill.toFixed(2)}`,
+        x, y + h + 17);
+    }
+  }
+
   private drawThrone(): void {
     const run = this.run;
     if (run.throne.awake) return;
@@ -790,10 +905,14 @@ export class Game {
       g.fillStyle = glow;
       g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
 
-      g.fillStyle = `rgb(${rgb})`;
-      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
-      g.fillStyle = "rgba(255,255,255,0.45)";
-      g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.3, 0, Math.PI * 2); g.fill();
+      if (e.faction === "motif") {
+        drawMotif(g, x, y, r, e.parts[e.parts.length - 1], rgb, e.spin);
+      } else {
+        g.fillStyle = `rgb(${rgb})`;
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "rgba(255,255,255,0.45)";
+        g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.3, 0, Math.PI * 2); g.fill();
+      }
 
       if (e.faction === "beast") {
         const b = beast(e.species);
@@ -848,15 +967,26 @@ export class Game {
           g.stroke();
         }
       } else if (e.parts.length > 1) {
-        // one gold pip per motif gathered, so the count is readable at a glance
-        g.fillStyle = GOLD;
-        const n = Math.min(6, e.parts.length);
-        for (let i = 0; i < n; i++) {
-          const th = (i / n) * Math.PI * 2 - Math.PI / 2;
-          g.beginPath();
-          g.arc(x + Math.cos(th) * (r + 5), y + Math.sin(th) * (r + 5), 1.5, 0, Math.PI * 2);
-          g.fill();
-        }
+        // WHAT IT IS BECOMING, ON THE THING ITSELF. A cluster used to carry a
+        // row of gold pips counting its mass, which says how far along it is
+        // and nothing about what it is going to be — so there was no moment
+        // where you could decide to go and find the one part it still needs.
+        const asm = assemble(e.parts);
+        const label = asm.group
+          ? `${asm.group} ${asm.mass}/${SEED_MASS}`
+          : asm.partial ? `? ${asm.mass}/${SEED_MASS}` : "WILL NOT BIND";
+        g.font = `700 9px ${MONO}`;
+        g.textAlign = "center";
+        g.fillStyle = asm.group ? GOLD : asm.partial ? DIM : RED;
+        g.fillText(label, x, y - r - 11);
+        g.textAlign = "left";
+
+        // and the parts it is made of, so you can see what it still wants
+        e.parts.slice(0, 4).forEach((id, i) => {
+          const th = (i / 4) * Math.PI * 2 - Math.PI / 2;
+          drawMotif(g, x + Math.cos(th) * (r + 6), y + Math.sin(th) * (r + 6),
+            2.6, id, rgb, e.spin);
+        });
       }
     }
   }
@@ -1141,6 +1271,7 @@ export class Game {
     g.textAlign = "left";
 
     this.drawRack();
+    this.drawObjective();
     this.drawReadout();
 
     if (this.toastT > 0) {
@@ -1157,12 +1288,16 @@ export class Game {
     g.fillStyle = FAINT;
     g.font = `600 9px ${MONO}`;
     const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    // What to do next, and never more than one thing.
     const hint = run.phase === "reign"
       ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   ·   ${G.dash} TO BURST CLEAR`
-      : run.throne.fed.length > 0
-        ? `${G.crown} TO CROWN IT   ·   OR FEED IT MORE AND MAKE A RICHER WORLD`
-        : `${G.grip} TO GATHER   ·   ${G.place} PLACES A CELL   ·   `
-          + "STAND ON THE THRONE TO FEED IT";
+      : !run.bound.free && run.structures.length >= 2
+        ? advice(run.crystal, run.gap, run.bound.omega)
+        : run.cells.length > 0
+          ? `${G.place} BUILDS   ·   ON THE THRONE IT FEEDS INSTEAD`
+          : run.throne.fed.length > 0
+            ? `${G.crown} TO CROWN IT`
+            : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   ·   FOUR MAKES A CELL`;
     g.fillText(hint, VIEW_W / 2, VIEW_H - 16);
     g.textAlign = "left";
   }
@@ -1238,6 +1373,22 @@ export class Game {
       x + 138, y + 41);
     g.fillStyle = "#9fbdd0";
     g.fillText(d.hint, x + 9, y + 58);
+
+    // WHAT IT COULD STILL BECOME. Three dimers are one girdle from a 222, one
+    // diagonal from a cubic 23, and one dimer from a plain 2 — three futures,
+    // and until this line existed the game showed you a count and left you to
+    // find that out by accident.
+    if (near.faction === "motif") {
+      const opts = optionsFor(near.parts, run.world.pool);
+      if (opts.length > 0) {
+        g.font = `600 8px ${MONO}`;
+        g.fillStyle = GOLD;
+        g.fillText(
+          opts.map((o) => (o.needs ? `+${motif(o.needs).label[0]}->${o.group}` : `x4->${o.group}`))
+            .join("  "),
+          x + 9, y + 69);
+      }
+    }
   }
 
   // ── screens ───────────────────────────────────────────────────────────────
@@ -1353,8 +1504,15 @@ export class Game {
     g.fillText("SONIC DRIFTER", VIEW_W / 2, 118);
     g.font = `600 12px ${MONO}`;
     g.fillStyle = `rgb(${NODE})`;
-    g.fillText("YOU ARE A BODY IN THE WATER, AND ONLY THE FIELD MOVES YOU.",
-      VIEW_W / 2, 182);
+    g.fillText("YOU ARE A FIELD. SO IS THE OTHER ONE, AND IT IS INSIDE THE MATTER.",
+      VIEW_W / 2, 172);
+    g.font = `600 10px ${MONO}`;
+    g.fillStyle = DIM;
+    g.fillText("A WAVE WITH NO PROPAGATING SOLUTION DOES NOT TRAVEL AND CANNOT LEAVE.",
+      VIEW_W / 2, 192);
+    g.fillText("NOBODY IS HOLDING IT. A DISPERSION RELATION IS. BUILD THE CRYSTAL",
+      VIEW_W / 2, 206);
+    g.fillText("WHOSE BAND GAP CATCHES IT, AND IT GOES WITH YOU.", VIEW_W / 2, 220);
 
     const on = this.pad.connected;
     const G = on ? GLYPH.pad : GLYPH.keys;
@@ -1368,14 +1526,12 @@ export class Game {
       `${pad(G.place)}PLACE A CELL. STAND ON THE THRONE TO FEED IT INSTEAD.`,
       `${pad(G.crown)}CROWN WHAT YOU HAVE FED.`,
       "",
-      "SETTLE   GATHER FOUR OF A KIND. A PLACED CELL STAYS, AND GATHERS FOR YOU.",
-      "CROWN    WHAT YOU FEED THE THRONE IS WHAT IT BECOMES.",
-      "REIGN    IT EATS WHAT YOU BUILT. GRIP YOUR OWN BUILDINGS TO FIRE THEM.",
-      "BIRTH    ITS BODY IS THE NEXT WORLD - ITS WATER, ITS LATTICE, ITS MATTER.",
-      "",
-      "WHAT SHARES YOUR CONTRAST COMES TO YOUR FEET. THE REST RINGS YOU.",
+      "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
+      "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",
+      "CROWN    WHAT YOU FEED THE THRONE IS WHAT IT BECOMES, AND IT EATS YOUR CRYSTAL.",
+      "BIRTH    ITS BODY IS THE NEXT WORLD - AND STRANDS ITS OWN FIELD SOMEWHERE ELSE.",
     ];
-    lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 214 + i * 17));
+    lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 246 + i * 16));
 
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
     g.font = `700 14px ${MONO}`;
@@ -1433,6 +1589,68 @@ function bar(
   g.fillStyle = DIM;
   g.font = `600 9px ${MONO}`;
   g.fillText(label, x, y + h + 4);
+}
+
+/**
+ * A motif drawn as the symmetry it IS.
+ *
+ * Every body in the water used to be a small coloured circle, so a dimer and a
+ * diagonal were the same picture and the only way to tell them apart was a
+ * readout naming whichever was nearest. That is why gathering felt like
+ * combining dots by accident: you cannot choose what you cannot identify.
+ *
+ * An n-fold axial is drawn as an n-gon, turning. Nobody had to invent that —
+ * the motif is a rotation axis of order n and an n-gon is what that looks like
+ * from above, which is the same argument shape.ts makes for the cells. The
+ * girdle is a ring, because it is a two-fold ACROSS the axis rather than along
+ * it, and the diagonal is a three-armed star for the body diagonal it is.
+ */
+function drawMotif(
+  g: CanvasRenderingContext2D,
+  x: number, y: number, r: number, id: string, rgb: string, spin: number,
+): void {
+  const m = motif(id);
+  g.strokeStyle = `rgb(${rgb})`;
+  g.fillStyle = `rgba(${rgb},0.30)`;
+  g.lineWidth = 1.6;
+
+  if (m.role === "girdle") {
+    g.beginPath(); g.ellipse(x, y, r * 1.35, r * 0.62, spin * 0.6, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+    return;
+  }
+  if (m.role === "diagonal") {
+    for (let i = 0; i < 3; i++) {
+      const a = spin + (i * Math.PI * 2) / 3;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + Math.cos(a) * r * 1.8, y + Math.sin(a) * r * 1.8);
+      g.stroke();
+    }
+    return;
+  }
+  if (m.order <= 1) {
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); g.stroke();
+    return;
+  }
+  if (m.order === 2) {
+    // A two-fold is a line, and drawing it as one is the point: it is the only
+    // motif whose shape has no area to it.
+    g.beginPath();
+    g.ellipse(x, y, r * 1.5, r * 0.5, spin, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+    return;
+  }
+  g.beginPath();
+  for (let i = 0; i < m.order; i++) {
+    const a = spin + (i / m.order) * Math.PI * 2 - Math.PI / 2;
+    const px2 = x + Math.cos(a) * r * 1.25;
+    const py2 = y + Math.sin(a) * r * 1.25;
+    if (i === 0) g.moveTo(px2, py2); else g.lineTo(px2, py2);
+  }
+  g.closePath();
+  g.fill();
+  g.stroke();
 }
 
 function wrap(
