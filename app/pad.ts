@@ -44,13 +44,12 @@ export interface Intent {
   /** Stop the world. One-shot. */
   pause: boolean;
   mute: boolean;
-  restart: boolean;
 }
 
 const NOTHING: Intent = {
   move: { x: 0, y: 0 }, grip: false, dash: false, place: false,
   crown: false, crownDown: false, cycle: 0, confirm: false, pause: false,
-  mute: false, restart: false,
+  mute: false,
 };
 
 /** Buttons in the standard mapping, by the name written on an Xbox pad. */
@@ -104,10 +103,17 @@ export class Pad {
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
     window.addEventListener("blur", () => this.keys.clear());
+    // The console is the only place a controller problem can be seen from
+    // somewhere else, and a pad that does not work is otherwise completely
+    // silent: nothing throws, nothing logs, the page just ignores you.
     window.addEventListener("gamepadconnected", (e) => {
-      this.index = (e as GamepadEvent).gamepad.index;
+      const gp = (e as GamepadEvent).gamepad;
+      this.index = gp.index;
+      console.log(`[pad] connected: "${gp.id}" mapping="${gp.mapping}" `
+        + `axes=${gp.axes.length} buttons=${gp.buttons.length}`);
     });
     window.addEventListener("gamepaddisconnected", () => {
+      console.log("[pad] disconnected");
       this.index = -1;
       this.connected = false;
     });
@@ -195,7 +201,9 @@ export class Pad {
     if (tap("KeyC")) out.crown = true;
     if (k("KeyC")) out.crownDown = true;
     if (tap("KeyQ")) out.cycle = -1;
-    if (tap("KeyR")) out.restart = true;
+    // NO RESTART KEY. It threw away a good long run on a single unconfirmed
+    // keypress, in a game whose runs are ten minutes. Beginning again lives on
+    // the screen you reach by dying, where it cannot be reached by accident.
     if (tap("KeyM")) out.mute = true;
     if (tap("Space") || tap("Enter")) out.confirm = true;
     if (tap("Escape") || tap("KeyP")) out.pause = true;

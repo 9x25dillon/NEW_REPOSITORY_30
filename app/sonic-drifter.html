@@ -2211,8 +2211,7 @@
     cycle: 0,
     confirm: false,
     pause: false,
-    mute: false,
-    restart: false
+    mute: false
   };
   var A = 0;
   var B = 1;
@@ -2263,9 +2262,12 @@
       window.addEventListener("keyup", (e) => this.keys.delete(e.code));
       window.addEventListener("blur", () => this.keys.clear());
       window.addEventListener("gamepadconnected", (e) => {
-        this.index = e.gamepad.index;
+        const gp = e.gamepad;
+        this.index = gp.index;
+        console.log(`[pad] connected: "${gp.id}" mapping="${gp.mapping}" axes=${gp.axes.length} buttons=${gp.buttons.length}`);
       });
       window.addEventListener("gamepaddisconnected", () => {
+        console.log("[pad] disconnected");
         this.index = -1;
         this.connected = false;
       });
@@ -2342,7 +2344,6 @@
       if (tap("KeyC")) out.crown = true;
       if (k("KeyC")) out.crownDown = true;
       if (tap("KeyQ")) out.cycle = -1;
-      if (tap("KeyR")) out.restart = true;
       if (tap("KeyM")) out.mute = true;
       if (tap("Space") || tap("Enter")) out.confirm = true;
       if (tap("Escape") || tap("KeyP")) out.pause = true;
@@ -2740,10 +2741,6 @@
     act(it, dt) {
       const run = this.run;
       if (it.mute) this.sfx.muted = !this.sfx.muted;
-      if (it.restart) {
-        this.begin();
-        return;
-      }
       if (this.screen === "title" || this.screen === "dead") {
         if (it.confirm) {
           this.sfx.unlock();
@@ -4236,6 +4233,9 @@
         "A HUNTER STOPS AND GATHERS BEFORE IT STRIKES, AND GOES WHERE IT POINTED."
       ];
       lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 196 + i * 17));
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = this.pad.connected ? `rgb(${JADE})` : GOLD;
+      g2.fillText(this.pad.describe(), VIEW_W / 2, VIEW_H - 62);
       const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
       g2.font = `700 13px ${MONO}`;
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
@@ -4300,6 +4300,7 @@
         `bodies: ${run.bodies.length}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
         `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
+        `pad: ${this.pad.describe()}`,
         `diagnosis: ${this.diagnosis()}`
       ].join("\n");
     }
@@ -4353,9 +4354,9 @@
       g2.font = `700 14px ${MONO}`;
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
       g2.fillText(on ? "PRESS START" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
-      g2.font = `600 8px ${MONO}`;
-      g2.fillStyle = on ? `rgb(${JADE})` : FAINT2;
-      g2.fillText(this.pad.describe(), VIEW_W / 2, 440);
+      g2.font = on ? `600 9px ${MONO}` : `700 11px ${MONO}`;
+      g2.fillStyle = on ? `rgb(${JADE})` : GOLD;
+      g2.fillText(this.pad.describe(), VIEW_W / 2, 438);
       if (this.best > 0) {
         g2.fillStyle = DIM;
         g2.font = `600 10px ${MONO}`;

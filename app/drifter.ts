@@ -290,7 +290,6 @@ export class Game {
     const run = this.run;
 
     if (it.mute) this.sfx.muted = !this.sfx.muted;
-    if (it.restart) { this.begin(); return; }
 
     if (this.screen === "title" || this.screen === "dead") {
       if (it.confirm) { this.sfx.unlock(); this.begin(); }
@@ -1840,6 +1839,12 @@ export class Game {
     ];
     lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 196 + i * 17));
 
+    // The pad, here too: this is the screen somebody opens when a control is
+    // not doing what they expect.
+    g.font = `600 9px ${MONO}`;
+    g.fillStyle = this.pad.connected ? `rgb(${JADE})` : GOLD;
+    g.fillText(this.pad.describe(), VIEW_W / 2, VIEW_H - 62);
+
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
     g.font = `700 13px ${MONO}`;
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
@@ -1917,6 +1922,7 @@ export class Game {
         + `  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}`
         + `  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
       `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
+      `pad: ${this.pad.describe()}`,
       `diagnosis: ${this.diagnosis()}`,
     ].join("\n");
   }
@@ -1965,12 +1971,13 @@ export class Game {
     g.font = `700 14px ${MONO}`;
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.fillText(on ? "PRESS START" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
-    // What the browser is actually reporting. A controller that does not work
-    // is the least debuggable thing there is — nothing throws and nothing logs —
-    // so it is put on the screen instead of left to be guessed at.
-    g.font = `600 8px ${MONO}`;
-    g.fillStyle = on ? `rgb(${JADE})` : FAINT;
-    g.fillText(this.pad.describe(), VIEW_W / 2, 440);
+    // What the browser is actually reporting, said loudly. A controller that
+    // does not work is the least debuggable thing there is — nothing throws and
+    // nothing logs — and this line was previously eight-point grey where nobody
+    // would find it.
+    g.font = on ? `600 9px ${MONO}` : `700 11px ${MONO}`;
+    g.fillStyle = on ? `rgb(${JADE})` : GOLD;
+    g.fillText(this.pad.describe(), VIEW_W / 2, 438);
     if (this.best > 0) {
       g.fillStyle = DIM;
       g.font = `600 10px ${MONO}`;

@@ -408,7 +408,9 @@ under.
 | **Y** | tap to feed, **hold** to crown | the throne is at the centre of the arena, which is where you build — so an act you cannot undo does not share a button with one you make sixty times a run. |
 | **START** | stop the world | and the pause screen carries the verbs, because that is the screen you open when you cannot remember what the game lets you do. |
 
-Keyboard plays the same game: WASD, space, K, E or 1–9, C, ESC.
+Keyboard plays the same game: WASD, space, K, E or 1–9, C, ESC. There is no
+restart key — beginning again lives on the screen you reach by dying, because a
+bare keypress once threw away a ten-minute run.
 
 There is no invert button any more, and its absence is the mechanic. Both
 lattices are rigidly a quarter wavelength apart and the trap re-centres on you
