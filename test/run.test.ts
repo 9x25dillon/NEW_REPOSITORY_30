@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY,
+  ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
   latticePitch, placeCell, readoutFor, wearRate,
@@ -16,7 +16,7 @@ import { cadence, emptyThrone, feed, structureFrom, volley } from "../game/world
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
 
 const DT = 1 / 60;
-const CENTRE = { x: ARENA_W / 2, y: ARENA_H / 2 };
+const CENTRE = { x: START.x + ARENA_W / 2, y: START.y + ARENA_H / 2 };
 
 const IDLE: Input = { move: { x: 0, y: 0 }, grip: false, dash: false };
 
@@ -253,7 +253,7 @@ test("a structure gathers and merges without you touching it", () => {
   seedMotif(run, ["a2"], hx - 6e-6, hy);
   seedMotif(run, ["a2"], hx + 6e-6, hy);
 
-  stand(run, 40e-6, 40e-6);
+  stand(run, START.x + 40e-6, START.y + 40e-6);
   for (let i = 0; i < 90; i++) { step(run, IDLE, DT); run.events.length = 0; }
 
   // (the world keeps restocking loose motifs, so count parts, not bodies)
@@ -269,14 +269,14 @@ test("placing puts a cell on a lattice site and it stays", () => {
   // not what its band structure does, which the bound field depends on.
   const run = startRun(7);
   grant(run, ["222"]);
-  stand(run, 200e-6, 200e-6);
+  stand(run, START.x + 200e-6, START.y + 200e-6);
   assert.equal(placeCell(run, 0), "placed");
   assert.equal(run.cells.length, 0);
   assert.equal(run.structures.length, 1);
   assert.equal(run.structures[0].hm, "222");
 
   const pitch = latticePitch(run);
-  const site = snap(200e-6, 200e-6, pitch);
+  const site = snap(START.x + 200e-6, START.y + 200e-6, pitch);
   assert.ok(Math.abs(run.structures[0].x - site.x) < 1e-9, "on the site, not on you");
   assert.ok(Math.abs(run.structures[0].y - site.y) < 1e-9);
 
@@ -309,7 +309,7 @@ test("feeding the throne is its own verb, and cannot happen by accident", () => 
   // Feeding is a different call, and only works where the throne is.
   assert.equal(feedThrone(run, 0), "fed");
   assert.equal(run.throne.hm, "422");
-  stand(run, 200e-6, 200e-6);
+  stand(run, START.x + 200e-6, START.y + 200e-6);
   assert.equal(feedThrone(run, 0), "off-throne", "and nowhere else");
   assert.equal(placeCell(run, 0), "placed", "which is where building works");
 });
@@ -359,7 +359,7 @@ test("once it is awake the bargain is closed, but you can still build", () => {
   assert.equal(run.throne.fed.length, 1, "no second helping");
 
   // but building elsewhere works, and has to: it eats what you made
-  stand(run, 150e-6, 150e-6);
+  stand(run, START.x + 150e-6, START.y + 150e-6);
   assert.equal(placeCell(run, 0), "placed");
 });
 
@@ -470,14 +470,14 @@ test("the guns cannot turn, so the king is what you aim", () => {
   feedThrone(run, 0);
   crown(run);
 
-  const gun = structureFrom(900, "222", 300e-6, 330e-6);
+  const gun = structureFrom(900, "222", START.x + 300e-6, START.y + 330e-6);
   run.structures = [gun];
   run.entities = [];
 
   // Park it due north of the gun, which is the one place a two-lobed pattern
   // can never reach.
-  run.throne.x = 300e-6;
-  run.throne.y = 150e-6;
+  run.throne.x = START.x + 300e-6;
+  run.throne.y = START.y + 150e-6;
   assert.ok(!bearsOn(gun, run.throne.x, run.throne.y), "nothing points at it yet");
 
   // Lean on it toward the eastern arm.
@@ -600,7 +600,7 @@ test("killing it births the world it was made of", () => {
   crown(run);
 
   const before = run.world;
-  stand(run, 300e-6, 300e-6);
+  stand(run, START.x + 300e-6, START.y + 300e-6);
   placeCell(run, 0);
   run.throne.hp = 1;
   const s = structureFrom(1, "422", run.throne.x - 120e-6, run.throne.y);
@@ -627,15 +627,15 @@ test("killing it births the world it was made of", () => {
 
 test("the readout tells the truth about what is under your hand", () => {
   const run = startRun(37);
-  const husk = seedBeast(run, "husk", 100e-6, 100e-6);
+  const husk = seedBeast(run, "husk", START.x + 100e-6, START.y + 100e-6);
   const d = readoutFor(run, husk);
   assert.equal(d.goesTo, "NODE");
   assert.match(d.hint, /REELS IT IN/);
 
-  const mote = seedBeast(run, "mote", 100e-6, 100e-6);
+  const mote = seedBeast(run, "mote", START.x + 100e-6, START.y + 100e-6);
   assert.ok(readoutFor(run, mote).authority < 1);
 
-  const pair = seedMotif(run, ["a2", "g"], 200e-6, 200e-6);
+  const pair = seedMotif(run, ["a2", "g"], START.x + 200e-6, START.y + 200e-6);
   assert.match(readoutFor(run, pair).hint, /222 AT 2\/4/);
   assert.equal(labelOf(pair), "222  x2");
 });

@@ -29,6 +29,7 @@ import {
   type Body, autonomous, bodiesOf, gaitDirection, reaches, snap, walkSpeed,
 } from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
+import { mediumAt, streamAt } from "./streams.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
 } from "./bound.js";
@@ -47,7 +48,7 @@ import {
   cadence, emptyThrone, feed, firstWorld, holdPoints, reachOf, sovereignInertia,
   sovereignParticle, sovereignSpeed, structureFrom, volley, worldFrom,
 } from "./world.js";
-import { type Particle, WATER, contrastFactor } from "../src/gorkov.js";
+import { type Medium, type Particle, WATER, contrastFactor } from "../src/gorkov.js";
 import { trapPositions } from "../src/fields.js";
 
 // ── the space ───────────────────────────────────────────────────────────────
@@ -84,12 +85,23 @@ export const CHANNEL_H = 1900e-6;
  * Squared off rather than round because the lattice is, and clamped at the walls
  * of the actual channel because glass is glass.
  */
-export function boundsFor(cells: number): { w: number; h: number } {
+export interface Bounds { x: number; y: number; w: number; h: number }
+
+/** The corner of the pool everything starts in. */
+export const START = {
+  x: (CHANNEL_W - ARENA_W) / 2,
+  y: (CHANNEL_H - ARENA_H) / 2,
+};
+
+export function boundsFor(cells: number): Bounds {
   const grow = 1 + Math.max(0, cells - 2) * 0.14;
-  return {
-    w: Math.min(CHANNEL_W, ARENA_W * grow),
-    h: Math.min(CHANNEL_H, ARENA_H * grow),
-  };
+  const w = Math.min(CHANNEL_W, ARENA_W * grow);
+  const h = Math.min(CHANNEL_H, ARENA_H * grow);
+  // CENTRED IN THE CHANNEL, opening outward from where you started. Anchored at
+  // a corner instead, the pool you begin in would sit against the glass and in
+  // the wrong stream, so the water the world's whole balance was derived from
+  // would not be the water you were standing in.
+  return { x: (CHANNEL_W - w) / 2, y: (CHANNEL_H - h) / 2, w, h };
 }
 export const MAX_AMPLITUDE = 2.0e5;
 
@@ -244,7 +256,7 @@ export interface Run {
    *  because they are the same event: a body IS the crystal. */
   bodies: Body[];
   /** How much of the channel you can work in. It opens as the organism grows. */
-  bounds: { w: number; h: number };
+  bounds: Bounds;
   phase: Phase;
   entities: Entity[];
   structures: Structure[];
@@ -274,8 +286,9 @@ export function startRun(seed = 1): Run {
   const run: Run = {
     world,
     wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
-    you: newPilot(ARENA_W * 0.3, ARENA_H * 0.3),
-    bound: newBound(world.pitch, world.medium, ARENA_W * 0.72, ARENA_H * 0.28),
+    you: newPilot(START.x + ARENA_W * 0.3, START.y + ARENA_H * 0.3),
+    bound: newBound(world.pitch, world.medium,
+      START.x + ARENA_W * 0.72, START.y + ARENA_H * 0.28),
     crystal: null,
     gap: null,
     spacing: null,
@@ -285,7 +298,7 @@ export function startRun(seed = 1): Run {
     entities: [],
     structures: [],
     bolts: [],
-    throne: emptyThrone(ARENA_W / 2, ARENA_H / 2),
+    throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
     cells: [],
     integrity: MAX_INTEGRITY,
     iframe: 0,
@@ -296,7 +309,7 @@ export function startRun(seed = 1): Run {
     spawnIn: 3,
     layer: 0,
     events: [],
-    aim: { x: ARENA_W * 0.3, y: ARENA_H * 0.3 },
+    aim: { x: START.x + ARENA_W * 0.3, y: START.y + ARENA_H * 0.3 },
     rand: rng(seed),
     nextId: 0,
   };
@@ -341,9 +354,11 @@ export function labelOf(e: Entity): string {
 
 function edge(run: Run): { x: number; y: number } {
   if (run.rand() < 0.5) {
-    return { x: run.rand() < 0.5 ? 4e-6 : run.bounds.w - 4e-6, y: run.rand() * run.bounds.h };
+    return { x: run.bounds.x + (run.rand() < 0.5 ? 4e-6 : run.bounds.w - 4e-6),
+      y: run.bounds.y + run.rand() * run.bounds.h };
   }
-  return { x: run.rand() * run.bounds.w, y: run.rand() < 0.5 ? 4e-6 : run.bounds.h - 4e-6 };
+  return { x: run.bounds.x + run.rand() * run.bounds.w,
+    y: run.bounds.y + (run.rand() < 0.5 ? 4e-6 : run.bounds.h - 4e-6) };
 }
 
 function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity {
@@ -358,8 +373,8 @@ function blank(run: Run, faction: Faction, at: { x: number; y: number }): Entity
 
 export function newMotif(run: Run, anywhere = false): Entity {
   const at = anywhere
-    ? { x: 0.08 * run.bounds.w + run.rand() * 0.84 * run.bounds.w,
-        y: 0.08 * run.bounds.h + run.rand() * 0.84 * run.bounds.h }
+    ? { x: run.bounds.x + 0.08 * run.bounds.w + run.rand() * 0.84 * run.bounds.w,
+        y: run.bounds.y + 0.08 * run.bounds.h + run.rand() * 0.84 * run.bounds.h }
     : edge(run);
   const e = blank(run, "motif", at);
   e.parts = [run.world.pool[Math.floor(run.rand() * run.world.pool.length)]];
@@ -411,6 +426,10 @@ export function step(run: Run, input: Input, dt: number): void {
   // You are a body before you are a player. The drive is set, the trap is put
   // where the stick asked, and then the water moves you along with everything
   // else standing in it.
+  // The drive is computed for the water YOU are in, because that is the fluid
+  // it is coupling into.
+  w.medium = waterAt(run, you.y);
+
   const wasSpent = w.spent;
   grip(w, input.grip && alive, dt);
   if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
@@ -424,7 +443,7 @@ export function step(run: Run, input: Input, dt: number): void {
     : aimFor(you, w, 0, 0);
   run.aim.x = trap.x;
   run.aim.y = trap.y;
-  carry(you, w, dt, run.world.current, run.bounds.w, run.bounds.h);
+  carry(you, w, dt, run.world.current, run.bounds);
 
   if (run.iframe > 0) run.iframe -= dt;
   if (!alive) { drift(run, dt); return; }
@@ -490,9 +509,12 @@ function drift(run: Run, dt: number): void {
 
   for (const e of run.entities) {
     const p = particleOf(e);
+    // Every body answers to the water IT is in, not the water you are in.
+    const water = waterAt(run, e.y);
+    const lw = inWater(w, water);
     // The radiation part is stiff and is integrated as such; everything below
     // is a slow drift laid over the top of it.
-    const moved = advance(w, e.x, e.y, p, dt);
+    const moved = advance(lw, e.x, e.y, p, dt);
     let dx = 0, dy = 0;
 
     if (uStream > 0) {
@@ -514,7 +536,7 @@ function drift(run: Run, dt: number): void {
 
     // What you built pulls on what answers to it, whether or not you are here —
     // on every plane the body it belongs to can reach.
-    if (contrastFactor(p, run.world.medium) > 0) {
+    if (contrastFactor(p, water) > 0) {
       for (const s of run.structures) {
         if (!s.serves.includes(e.layer)) continue;
         for (const [hx, hy] of holdPoints(s)) {
@@ -534,10 +556,11 @@ function drift(run: Run, dt: number): void {
     e.spin += dt * 1.5;
 
     const rad = p.radius;
-    if (e.x < rad) { e.x = rad; e.ang = Math.PI - e.ang; }
-    if (e.x > run.bounds.w - rad) { e.x = run.bounds.w - rad; e.ang = Math.PI - e.ang; }
-    if (e.y < rad) { e.y = rad; e.ang = -e.ang; }
-    if (e.y > run.bounds.h - rad) { e.y = run.bounds.h - rad; e.ang = -e.ang; }
+    const b = run.bounds;
+    if (e.x < b.x + rad) { e.x = b.x + rad; e.ang = Math.PI - e.ang; }
+    if (e.x > b.x + b.w - rad) { e.x = b.x + b.w - rad; e.ang = Math.PI - e.ang; }
+    if (e.y < b.y + rad) { e.y = b.y + rad; e.ang = -e.ang; }
+    if (e.y > b.y + b.h - rad) { e.y = b.y + b.h - rad; e.ang = -e.ang; }
 
     e.trail.push(e.x, e.y);
     while (e.trail.length > 18) e.trail.shift();
@@ -628,7 +651,10 @@ function settle(run: Run, dt: number): void {
   for (const e of run.entities) {
     // Your hand is a spot in three dimensions and it is centred on your plane.
     if (!together(e.layer, run.layer)) { e.held = 0; continue; }
-    if (!capturedAt(w, e.x, e.y, particleOf(e))) { e.held = 0; continue; }
+    if (!capturedAt(inWater(w, waterAt(run, e.y)), e.x, e.y, particleOf(e))) {
+      e.held = 0;
+      continue;
+    }
     e.held += dt;
     if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
   }
@@ -820,7 +846,8 @@ function walkBodies(run: Run, dt: number): void {
     const mine = new Set(body.cells);
     const ok = body.cells.every((c) => {
       const nx = c.x + dx, ny = c.y + dy;
-      if (nx < 0 || nx > run.bounds.w || ny < 0 || ny > run.bounds.h) return false;
+      const b = run.bounds;
+      if (nx < b.x || nx > b.x + b.w || ny < b.y || ny > b.y + b.h) return false;
       if (onThrone(run, nx, ny)) return false;
       return !run.structures.some(
         (o) => !mine.has(o) && o.layer === c.layer
@@ -880,6 +907,28 @@ export function retuneChannel(run: Run, mode: number): boolean {
   run.world.mode = want;
   run.events.push({ kind: "retune", mode: want, layer: run.layer });
   return true;
+}
+
+/**
+ * The water at a point.
+ *
+ * A channel carries several fluids at once, side by side, not mixing — laminar
+ * co-flow, which is how acoustofluidic separation is actually done. So the
+ * medium is a function of WHERE YOU ARE, and since every question in this game
+ * is the sign of a contrast factor against the medium, so is every answer.
+ */
+export function waterAt(run: Run, y: number): Medium {
+  return mediumAt(run.world.medium, y, CHANNEL_H);
+}
+
+/** Which stream, for the surface and for saying where you are. */
+export function streamOf(y: number): number {
+  return streamAt(y, CHANNEL_H);
+}
+
+/** The same field, computed for a different fluid. */
+function inWater(w: Wave, medium: Medium): Wave {
+  return w.medium === medium ? w : { ...w, medium };
 }
 
 export const THRONE_RADIUS = 30e-6;
@@ -945,7 +994,8 @@ export function placeCell(run: Run, index: number): PlaceResult {
   // ON THE LATTICE, not where you were standing. A crystal is a lattice and a
   // motif; freehand placements are a heap.
   const at = snap(run.you.x, run.you.y, latticePitch(run));
-  if (at.x < 0 || at.x > run.bounds.w || at.y < 0 || at.y > run.bounds.h) return "too-close";
+  const b = run.bounds;
+  if (at.x < b.x || at.x > b.x + b.w || at.y < b.y || at.y > b.y + b.h) return "too-close";
   for (const s of run.structures) {
     if (Math.hypot(s.x - at.x, s.y - at.y) < latticePitch(run) * 0.5) return "occupied";
   }
@@ -1181,8 +1231,9 @@ function reign(run: Run, dt: number): void {
     dx += (moved.x - k.x) / dt;
     dy += (moved.y - k.y) / dt;
   }
-  k.x = Math.max(30e-6, Math.min(run.bounds.w - 30e-6, k.x + dx * dt));
-  k.y = Math.max(30e-6, Math.min(run.bounds.h - 30e-6, k.y + dy * dt));
+  const kb = run.bounds;
+  k.x = Math.max(kb.x + 30e-6, Math.min(kb.x + kb.w - 30e-6, k.x + dx * dt));
+  k.y = Math.max(kb.y + 30e-6, Math.min(kb.y + kb.h - 30e-6, k.y + dy * dt));
 
   // YOUR HAND, WHICH IS THE LAST THING YOU HAVE. Worked on by the drive like
   // anything else in the water, it comes apart — slowly, and only if you gave
@@ -1230,8 +1281,8 @@ function reign(run: Run, dt: number): void {
     b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
   }
   run.bolts = run.bolts.filter(
-    (b) => b.life > 0 && b.x > -20e-6 && b.x < run.bounds.w + 20e-6
-      && b.y > -20e-6 && b.y < run.bounds.h + 20e-6);
+    (bo) => bo.life > 0 && bo.x > run.bounds.x - 20e-6 && bo.x < run.bounds.x + run.bounds.w + 20e-6
+      && bo.y > run.bounds.y - 20e-6 && bo.y < run.bounds.y + run.bounds.h + 20e-6);
 }
 
 // ── being hit ───────────────────────────────────────────────────────────────
@@ -1344,9 +1395,10 @@ export function enterWorld(run: Run): void {
     ...s, ruin: true, charge: 0, strength: Math.max(1, Math.round(s.strength / 2)),
   }));
 
-  run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
+  run.throne = emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2);
   run.bound = newBound(w.pitch, w.medium,
-    run.bounds.w * (0.2 + run.rand() * 0.6), run.bounds.h * (0.2 + run.rand() * 0.6));
+    run.bounds.x + run.bounds.w * (0.2 + run.rand() * 0.6),
+    run.bounds.y + run.bounds.h * (0.2 + run.rand() * 0.6));
   run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
   retune(run);
   run.bolts = [];
@@ -1370,7 +1422,7 @@ export interface Readout {
 
 export function readoutFor(run: Run, e: Entity): Readout {
   const p = particleOf(e);
-  const phi = contrastFactor(p, run.world.medium);
+  const phi = contrastFactor(p, waterAt(run, e.y));
   const isBeast = e.faction === "beast";
   const asm = isBeast ? null : assemble(e.parts);
   return {

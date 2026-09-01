@@ -283,12 +283,13 @@ export function aimFor(
  * a force on a body, the conceit is gone.
  */
 export function carry(
-  p: Pilot, w: Wave, dt: number, current: number, arenaW: number, arenaH: number,
+  p: Pilot, w: Wave, dt: number, current: number,
+  bounds: { x: number; y: number; w: number; h: number },
 ): void {
   const moved = advance(w, p.x, p.y, p.particle, dt);
 
-  const ca = (Math.PI * p.x) / arenaW;
-  const cb = (Math.PI * p.y) / arenaH;
+  const ca = (Math.PI * (p.x - bounds.x)) / bounds.w;
+  const cb = (Math.PI * (p.y - bounds.y)) / bounds.h;
   const cx = current * Math.sin(ca) * Math.cos(cb);
   const cy = -current * Math.cos(ca) * Math.sin(cb);
 
@@ -296,8 +297,8 @@ export function carry(
   p.vy = moved.vy + cy;
 
   const rad = p.particle.radius;
-  p.x = Math.max(rad, Math.min(arenaW - rad, moved.x + cx * dt));
-  p.y = Math.max(rad, Math.min(arenaH - rad, moved.y + cy * dt));
+  p.x = Math.max(bounds.x + rad, Math.min(bounds.x + bounds.w - rad, moved.x + cx * dt));
+  p.y = Math.max(bounds.y + rad, Math.min(bounds.y + bounds.h - rad, moved.y + cy * dt));
 
   if (p.dash > 0) p.dash = Math.max(0, p.dash - dt);
   if (p.dashCool > 0) p.dashCool = Math.max(0, p.dashCool - dt);

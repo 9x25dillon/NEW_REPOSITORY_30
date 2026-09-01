@@ -20,8 +20,8 @@ import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
-  beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
-  particleOf, placeCell, readoutFor, retuneChannel,
+  CHANNEL_H, beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
+  particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
   startRun, step,
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
@@ -33,6 +33,8 @@ import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
 import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
 import { autonomous, limbsOf, snap, symbolOf, walkSpeed } from "../game/body.js";
 import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
+import { STREAMS, mediumAt, streamBand, streamName } from "../game/streams.js";
+import { YOU } from "../game/pilot.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
@@ -765,10 +767,10 @@ export class Game {
     // it is centred instead, which is the game as it has always looked.
     const b = this.run.bounds;
     const want = {
-      x: px(b.w) <= VIEW_W ? (px(b.w) - VIEW_W) / 2
-        : Math.max(0, Math.min(px(b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
-      y: px(b.h) <= VIEW_H ? (px(b.h) - VIEW_H) / 2
-        : Math.max(0, Math.min(px(b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2)),
+      x: px(b.w) <= VIEW_W ? px(b.x) + (px(b.w) - VIEW_W) / 2
+        : Math.max(px(b.x), Math.min(px(b.x + b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
+      y: px(b.h) <= VIEW_H ? px(b.y) + (px(b.h) - VIEW_H) / 2
+        : Math.max(px(b.y), Math.min(px(b.y + b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2)),
     };
     this.cam.x += (want.x - this.cam.x) * 0.12;
     this.cam.y += (want.y - this.cam.y) * 0.12;
@@ -819,13 +821,32 @@ export class Game {
   /** The glass. The water you can drive stops here, and it opens as you build. */
   private drawWalls(): void {
     const g = this.ctx;
-    const b = this.run.bounds;
+    const run = this.run;
+    const b = run.bounds;
+
+    // THE STREAMS. A channel carries several fluids at once, side by side, not
+    // mixing — laminar co-flow, which is how acoustofluidic separation is
+    // actually done. Each band is tinted by what a body of YOUR density does in
+    // it, because that is the only thing about it that matters: warm where you
+    // ride antinodes, cool where you ride nodes.
+    for (let i = 0; i < STREAMS; i++) {
+      const { lo, hi } = streamBand(i, CHANNEL_H);
+      const mine = contrastFactor(YOU, mediumAt(run.world.medium, (lo + hi) / 2, CHANNEL_H));
+      g.fillStyle = `rgba(${warmth(mine)},0.045)`;
+      g.fillRect(px(b.x), px(Math.max(lo, b.y)),
+        px(b.w), px(Math.min(hi, b.y + b.h) - Math.max(lo, b.y)));
+      if (lo > b.y && lo < b.y + b.h) {
+        g.strokeStyle = "rgba(200,235,255,0.09)";
+        g.lineWidth = 1;
+        g.setLineDash([9, 7]);
+        g.beginPath(); g.moveTo(px(b.x), px(lo)); g.lineTo(px(b.x + b.w), px(lo)); g.stroke();
+        g.setLineDash([]);
+      }
+    }
+
     g.strokeStyle = "rgba(120,225,245,0.16)";
     g.lineWidth = 2;
-    g.strokeRect(0, 0, px(b.w), px(b.h));
-    g.strokeStyle = "rgba(120,225,245,0.05)";
-    g.lineWidth = 1;
-    g.strokeRect(-6, -6, px(b.w) + 12, px(b.h) + 12);
+    g.strokeRect(px(b.x), px(b.y), px(b.w), px(b.h));
   }
 
   /** Both the pressure of crossed standing waves and the Gaussian focus are
@@ -1361,7 +1382,7 @@ export class Game {
     for (const e of this.run.entities) {
       const p = particleOf(e);
       const x = px(e.x), y = px(e.y);
-      const rgb = warmth(contrastFactor(p, this.run.world.medium));
+      const rgb = warmth(contrastFactor(p, waterAt(this.run, e.y)));
 
       // ANOTHER PLANE IS ANOTHER PLACE. Tens of microns of water in z, which is
       // further than anything here can reach, so it is drawn as something seen
@@ -1740,7 +1761,9 @@ export class Game {
     g.fillText(`AEON ${world.aeon}  ·  ${world.name}`, VIEW_W / 2, 16);
     g.fillStyle = DIM;
     g.font = `600 9px ${MONO}`;
-    g.fillText(run.phase === "reign" ? "IT IS AWAKE" : "SETTLING", VIEW_W / 2, 34);
+    g.fillText(
+      `${run.phase === "reign" ? "IT IS AWAKE" : "SETTLING"}  ·  ${streamName(streamOf(run.you.y))}`,
+      VIEW_W / 2, 34);
     g.textAlign = "left";
 
     g.textAlign = "right";

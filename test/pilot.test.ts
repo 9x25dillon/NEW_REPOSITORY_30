@@ -13,12 +13,11 @@ import { WATER, contrastFactor } from "../src/gorkov.js";
 const DT = 1 / 60;
 const PITCH = 88e-6;
 const MAX = 2.0e5;
-const W = 900e-6;
-const H = 660e-6;
+const BOUNDS = { x: 0, y: 0, w: 900e-6, h: 660e-6 };
 
 function rig() {
   const w = newWave(PITCH, MAX, PITCH * HAND_FOCUS, WATER);
-  const p = newPilot(W / 2, H / 2);
+  const p = newPilot(BOUNDS.w / 2, BOUNDS.h / 2);
   return { w, p };
 }
 
@@ -33,7 +32,7 @@ function run(
     grip(w, gripping, DT);
     concentrate(p, w, gripping, DT);
     aimFor(p, w, mx, my);
-    carry(p, w, DT, 0, W, H);
+    carry(p, w, DT, 0, BOUNDS);
   }
   return { travelled: Math.hypot(p.x - x0, p.y - y0), stamina: w.stamina };
 }
@@ -50,7 +49,7 @@ test("nothing moves you but the field", () => {
   for (let i = 0; i < 60; i++) {
     aimFor(p, w, 1, 0);
     w.amplitude = 0;
-    carry(p, w, DT, 0, W, H);
+    carry(p, w, DT, 0, BOUNDS);
   }
   assert.equal(p.x, x0, "no drive, no motion");
 });
@@ -83,10 +82,10 @@ test("the stick is an offset, and it is capped where sin(2ku) peaks", () => {
 test("letting go of the stick drops the node onto you and you settle", () => {
   const { w, p } = rig();
   w.amplitude = MAX;
-  for (let i = 0; i < 40; i++) { aimFor(p, w, 1, 0); carry(p, w, DT, 0, W, H); }
+  for (let i = 0; i < 40; i++) { aimFor(p, w, 1, 0); carry(p, w, DT, 0, BOUNDS); }
   assert.ok(speed(p) > 300e-6, "moving under full stick");
 
-  for (let i = 0; i < 40; i++) { aimFor(p, w, 0, 0); carry(p, w, DT, 0, W, H); }
+  for (let i = 0; i < 40; i++) { aimFor(p, w, 0, 0); carry(p, w, DT, 0, BOUNDS); }
   assert.ok(speed(p) < 5e-6, `released, you should sit in your own node (${speed(p) * 1e6} um/s)`);
 });
 
@@ -173,7 +172,7 @@ test("a dash covers ground no amount of grip does", () => {
     grip(w, false, DT);
     concentrate(p, w, false, DT);
     aimFor(p, w, 0, 0);   // a dash does not steer: it goes where it committed
-    carry(p, w, DT, 0, W, H);
+    carry(p, w, DT, 0, BOUNDS);
     frames++;
   }
   const burst = p.x - x0;

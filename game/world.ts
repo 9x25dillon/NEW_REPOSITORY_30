@@ -274,7 +274,7 @@ const SYSTEM_NAME: Readonly<Record<string, string>> = {
  */
 const CARRY_FLOOR = 0.02;
 
-function carriable(medium: Medium): Medium {
+export function carriable(medium: Medium): Medium {
   if (Math.abs(contrastFactor(YOU, medium)) >= CARRY_FLOOR) return medium;
   for (let step = 2; step <= 90; step += 2) {
     for (const s of [1, -1]) {

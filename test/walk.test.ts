@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  ARENA_H, ARENA_W, CHANNEL_H, CHANNEL_W, boundsFor, latticePitch, retune,
+  ARENA_H, ARENA_W, CHANNEL_H, CHANNEL_W, START, boundsFor, latticePitch, retune,
   startRun, step, type Input, type Run,
 } from "../game/run.js";
 import { autonomous, gaitDirection, snap, walkSpeed } from "../game/body.js";
@@ -15,7 +15,7 @@ const IDLE: Input = { move: { x: 0, y: 0 }, grip: false, dash: false };
 /** A body of `shape` cells, on the lattice, clear of the throne. */
 function organism(run: Run, shape: Array<[number, number]>, hm = "222") {
   const pitch = latticePitch(run);
-  const base = snap(140e-6, 140e-6, pitch);
+  const base = snap(START.x + 140e-6, START.y + 140e-6, pitch);
   let id = 5000;
   for (const [i, j] of shape) {
     run.structures.push(structureFrom(id++, hm, base.x + i * pitch, base.y + j * pitch, 0));
@@ -100,7 +100,10 @@ test("it will not step if any cell has nowhere to land", () => {
   // apart. So the whole step is refused rather than half taken.
   const run = startRun(15);
   const pitch = latticePitch(run);
-  const edge = snap(ARENA_W - pitch * 1.2, ARENA_H / 2 + pitch * 3, pitch);
+  // At the edge the water WILL have once this body is standing in it — putting
+  // six cells down opens the channel further, so the old edge is not one.
+  const b = boundsFor(BLOCK.length);
+  const edge = snap(b.x + b.w - pitch * 1.2, b.y + b.h / 2, pitch);
   let id = 6000;
   for (const [i, j] of BLOCK) {
     run.structures.push(structureFrom(id++, "222", edge.x + i * pitch, edge.y + j * pitch, 0));
@@ -108,7 +111,7 @@ test("it will not step if any cell has nowhere to land", () => {
   retune(run);
 
   const x0 = run.bodies[0].x;
-  watch(run, ARENA_W - 4e-6, edge.y, 6);      // beckoning it off the end of the world
+  watch(run, run.bounds.x + run.bounds.w - 4e-6, edge.y, 6);      // beckoning it off the end of the world
   assert.equal(run.bodies[0].x, x0, "the wall refuses the whole step");
 });
 
@@ -167,7 +170,7 @@ test("building opens it, and the run knows", () => {
   assert.equal(run.bounds.w, ARENA_W);
 
   const pitch = latticePitch(run);
-  const base = snap(140e-6, 140e-6, pitch);
+  const base = snap(START.x + 140e-6, START.y + 140e-6, pitch);
   let id = 900;
   for (let i = 0; i < 9; i++) {
     run.structures.push(structureFrom(id++, "222",

@@ -478,6 +478,41 @@ Which of these a water carries is not a per-level table: `world.wildlifeFor`
 sorts them by whether they share your sign in that medium and stocks the ones
 that can actually reach you.
 
+### The channel does not hold one water
+
+A microfluidic channel routinely carries several fluids at once, side by side,
+not mixing. At these scales the Reynolds number is of order 10⁻³ and flow is
+laminar: two streams introduced together run down the channel in parallel and
+exchange nothing but diffusion across a boundary that stays put. It is not an
+exotic arrangement — **it is how acoustofluidic separation is done**, sample
+stream beside buffer stream, with the field pushing cells from one into the
+other.
+
+Which means the far water is *different water*. Everything in this game is
+decided by one subtraction — the sign of a body's contrast factor against the
+medium it is in — so a channel with three streams is a channel where that sign
+is a function of where you are:
+
+| | light stream | middle | heavy stream |
+| --- | --- | --- | --- |
+| **you** | +0.065 node | −0.083 anti | −0.262 anti |
+| vesicle | +0.065 node | −0.083 anti | −0.262 anti |
+| husk | +0.200 node | +0.091 node | −0.041 **anti** |
+
+You ride nodes in the light stream and antinodes in the middle. The husk cannot
+reach you in the middle because it does not share your sign — and *shares it in
+the heavy stream*, where it arrives in your lap. Nothing about that is a reward
+placed in a corner. It is the rule the whole game already runs on, asked at a
+position instead of asked once.
+
+The three bands are not equal widths, which is the ordinary case: the width of a
+co-flowing stream is set by the flow rate of the inlet feeding it. The middle
+one is wide enough to hold the pool you start in, so the first world is one
+water and the others are somewhere to travel to. And every stream of every
+reachable world goes through the same `carriable` guarantee the world's own
+medium does — over 265 reachable waters there is no fixed pair of offsets that
+never strands the player, so it is checked rather than assumed.
+
 ### The water opens as the organism grows
 
 The arena was 900 × 660 µm and the window showed all of it. The channel is now
@@ -836,6 +871,7 @@ game/world.ts        worlds, sovereigns, and what is born out of a body
 game/bound.ts        the other field, and the band gap that will not carry it
 game/body.ts         the lattice, what is joined to what, and its space group
 game/depth.ts        the channel's harmonics, and the planes they put in the water
+game/streams.ts      laminar co-flow: the channel carries three waters, not one
 game/run.ts          the aeon: settle, crown, reign, birth
 app/drifter.ts       SONIC DRIFTER: the game surface, canvas and rendering
 app/pad.ts           the controller, and the keyboard standing in for one
@@ -846,7 +882,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                254 tests: what the modules above are actually claiming
+test/                259 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

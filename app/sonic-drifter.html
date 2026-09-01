@@ -1424,17 +1424,17 @@
     aimAt(w, tx, ty, ridesAntinodes(p, w));
     return { x: tx, y: ty };
   }
-  function carry(p, w, dt, current, arenaW, arenaH) {
+  function carry(p, w, dt, current, bounds) {
     const moved = advance(w, p.x, p.y, p.particle, dt);
-    const ca = Math.PI * p.x / arenaW;
-    const cb = Math.PI * p.y / arenaH;
+    const ca = Math.PI * (p.x - bounds.x) / bounds.w;
+    const cb = Math.PI * (p.y - bounds.y) / bounds.h;
     const cx = current * Math.sin(ca) * Math.cos(cb);
     const cy = -current * Math.cos(ca) * Math.sin(cb);
     p.vx = moved.vx + cx;
     p.vy = moved.vy + cy;
     const rad = p.particle.radius;
-    p.x = Math.max(rad, Math.min(arenaW - rad, moved.x + cx * dt));
-    p.y = Math.max(rad, Math.min(arenaH - rad, moved.y + cy * dt));
+    p.x = Math.max(bounds.x + rad, Math.min(bounds.x + bounds.w - rad, moved.x + cx * dt));
+    p.y = Math.max(bounds.y + rad, Math.min(bounds.y + bounds.h - rad, moved.y + cy * dt));
     if (p.dash > 0) p.dash = Math.max(0, p.dash - dt);
     if (p.dashCool > 0) p.dashCool = Math.max(0, p.dashCool - dt);
     if (p.iframe > 0) p.iframe = Math.max(0, p.iframe - dt);
@@ -1606,17 +1606,52 @@
     };
   }
 
+  // game/streams.ts
+  var STREAMS = 3;
+  var STREAM_RHO = 60;
+  var STREAM_C = 230;
+  var MIDDLE_SPAN = 0.56;
+  function streamAt(y, channelH) {
+    const mid = channelH * MIDDLE_SPAN;
+    const edge2 = (channelH - mid) / 2;
+    if (y < edge2) return 0;
+    if (y < edge2 + mid) return 1;
+    return 2;
+  }
+  function streamOffset(index) {
+    return index - (STREAMS - 1) / 2;
+  }
+  function mediumAt(base, y, channelH) {
+    const k = streamOffset(streamAt(y, channelH));
+    return carriable({ rho: base.rho + k * STREAM_RHO, c: base.c + k * STREAM_C });
+  }
+  function streamBand(index, channelH) {
+    const mid = channelH * MIDDLE_SPAN;
+    const edge2 = (channelH - mid) / 2;
+    if (index <= 0) return { lo: 0, hi: edge2 };
+    if (index === 1) return { lo: edge2, hi: edge2 + mid };
+    return { lo: edge2 + mid, hi: channelH };
+  }
+  function streamName(index) {
+    const k = streamOffset(index);
+    if (k === 0) return "THE MIDDLE STREAM";
+    return k < 0 ? "THE LIGHT STREAM" : "THE HEAVY STREAM";
+  }
+
   // game/run.ts
   var ARENA_W = 9e-4;
   var ARENA_H = 66e-5;
   var CHANNEL_W = 26e-4;
   var CHANNEL_H = 19e-4;
+  var START = {
+    x: (CHANNEL_W - ARENA_W) / 2,
+    y: (CHANNEL_H - ARENA_H) / 2
+  };
   function boundsFor(cells) {
     const grow = 1 + Math.max(0, cells - 2) * 0.14;
-    return {
-      w: Math.min(CHANNEL_W, ARENA_W * grow),
-      h: Math.min(CHANNEL_H, ARENA_H * grow)
-    };
+    const w = Math.min(CHANNEL_W, ARENA_W * grow);
+    const h = Math.min(CHANNEL_H, ARENA_H * grow);
+    return { x: (CHANNEL_W - w) / 2, y: (CHANNEL_H - h) / 2, w, h };
   }
   var MAX_AMPLITUDE = 2e5;
   function focusFor(pitch) {
@@ -1638,8 +1673,13 @@
     const run = {
       world,
       wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
-      you: newPilot(ARENA_W * 0.3, ARENA_H * 0.3),
-      bound: newBound(world.pitch, world.medium, ARENA_W * 0.72, ARENA_H * 0.28),
+      you: newPilot(START.x + ARENA_W * 0.3, START.y + ARENA_H * 0.3),
+      bound: newBound(
+        world.pitch,
+        world.medium,
+        START.x + ARENA_W * 0.72,
+        START.y + ARENA_H * 0.28
+      ),
       crystal: null,
       gap: null,
       spacing: null,
@@ -1649,7 +1689,7 @@
       entities: [],
       structures: [],
       bolts: [],
-      throne: emptyThrone(ARENA_W / 2, ARENA_H / 2),
+      throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
       cells: [],
       integrity: MAX_INTEGRITY,
       iframe: 0,
@@ -1660,7 +1700,7 @@
       spawnIn: 3,
       layer: 0,
       events: [],
-      aim: { x: ARENA_W * 0.3, y: ARENA_H * 0.3 },
+      aim: { x: START.x + ARENA_W * 0.3, y: START.y + ARENA_H * 0.3 },
       rand: rng(seed),
       nextId: 0
     };
@@ -1691,9 +1731,15 @@
   }
   function edge(run) {
     if (run.rand() < 0.5) {
-      return { x: run.rand() < 0.5 ? 4e-6 : run.bounds.w - 4e-6, y: run.rand() * run.bounds.h };
+      return {
+        x: run.bounds.x + (run.rand() < 0.5 ? 4e-6 : run.bounds.w - 4e-6),
+        y: run.bounds.y + run.rand() * run.bounds.h
+      };
     }
-    return { x: run.rand() * run.bounds.w, y: run.rand() < 0.5 ? 4e-6 : run.bounds.h - 4e-6 };
+    return {
+      x: run.bounds.x + run.rand() * run.bounds.w,
+      y: run.bounds.y + (run.rand() < 0.5 ? 4e-6 : run.bounds.h - 4e-6)
+    };
   }
   function blank(run, faction, at) {
     return {
@@ -1720,8 +1766,8 @@
   }
   function newMotif(run, anywhere = false) {
     const at = anywhere ? {
-      x: 0.08 * run.bounds.w + run.rand() * 0.84 * run.bounds.w,
-      y: 0.08 * run.bounds.h + run.rand() * 0.84 * run.bounds.h
+      x: run.bounds.x + 0.08 * run.bounds.w + run.rand() * 0.84 * run.bounds.w,
+      y: run.bounds.y + 0.08 * run.bounds.h + run.rand() * 0.84 * run.bounds.h
     } : edge(run);
     const e = blank(run, "motif", at);
     e.parts = [run.world.pool[Math.floor(run.rand() * run.world.pool.length)]];
@@ -1741,6 +1787,7 @@
     const w = run.wave;
     const you = run.you;
     const alive = run.phase !== "dead" && run.phase !== "birth";
+    w.medium = waterAt(run, you.y);
     const wasSpent = w.spent;
     grip(w, input.grip && alive, dt);
     if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
@@ -1751,7 +1798,7 @@
     const trap = alive ? aimFor(you, w, input.move.x, input.move.y) : aimFor(you, w, 0, 0);
     run.aim.x = trap.x;
     run.aim.y = trap.y;
-    carry(you, w, dt, run.world.current, run.bounds.w, run.bounds.h);
+    carry(you, w, dt, run.world.current, run.bounds);
     if (run.iframe > 0) run.iframe -= dt;
     if (!alive) {
       drift(run, dt);
@@ -1799,7 +1846,9 @@
     const uStream = streamingSpeed(w.amplitude);
     for (const e of run.entities) {
       const p = particleOf(e);
-      const moved = advance(w, e.x, e.y, p, dt);
+      const water = waterAt(run, e.y);
+      const lw = inWater(w, water);
+      const moved = advance(lw, e.x, e.y, p, dt);
       let dx = 0, dy = 0;
       if (uStream > 0) {
         e.ang += (run.rand() * 2 - 1) * 5 * dt;
@@ -1815,7 +1864,7 @@
         dx += swim.x;
         dy += swim.y;
       }
-      if (contrastFactor(p, run.world.medium) > 0) {
+      if (contrastFactor(p, water) > 0) {
         for (const s of run.structures) {
           if (!s.serves.includes(e.layer)) continue;
           for (const [hx, hy] of holdPoints(s)) {
@@ -1833,20 +1882,21 @@
       e.y = moved.y + dy * dt;
       e.spin += dt * 1.5;
       const rad = p.radius;
-      if (e.x < rad) {
-        e.x = rad;
+      const b = run.bounds;
+      if (e.x < b.x + rad) {
+        e.x = b.x + rad;
         e.ang = Math.PI - e.ang;
       }
-      if (e.x > run.bounds.w - rad) {
-        e.x = run.bounds.w - rad;
+      if (e.x > b.x + b.w - rad) {
+        e.x = b.x + b.w - rad;
         e.ang = Math.PI - e.ang;
       }
-      if (e.y < rad) {
-        e.y = rad;
+      if (e.y < b.y + rad) {
+        e.y = b.y + rad;
         e.ang = -e.ang;
       }
-      if (e.y > run.bounds.h - rad) {
-        e.y = run.bounds.h - rad;
+      if (e.y > b.y + b.h - rad) {
+        e.y = b.y + b.h - rad;
         e.ang = -e.ang;
       }
       e.trail.push(e.x, e.y);
@@ -1904,7 +1954,7 @@
         e.held = 0;
         continue;
       }
-      if (!capturedAt(w, e.x, e.y, particleOf(e))) {
+      if (!capturedAt(inWater(w, waterAt(run, e.y)), e.x, e.y, particleOf(e))) {
         e.held = 0;
         continue;
       }
@@ -2060,7 +2110,8 @@
       const mine = new Set(body.cells);
       const ok = body.cells.every((c) => {
         const nx = c.x + dx, ny = c.y + dy;
-        if (nx < 0 || nx > run.bounds.w || ny < 0 || ny > run.bounds.h) return false;
+        const b = run.bounds;
+        if (nx < b.x || nx > b.x + b.w || ny < b.y || ny > b.y + b.h) return false;
         if (onThrone(run, nx, ny)) return false;
         return !run.structures.some(
           (o) => !mine.has(o) && o.layer === c.layer && Math.hypot(o.x - nx, o.y - ny) < pitch * 0.5
@@ -2102,6 +2153,15 @@
     run.events.push({ kind: "retune", mode: want, layer: run.layer });
     return true;
   }
+  function waterAt(run, y) {
+    return mediumAt(run.world.medium, y, CHANNEL_H);
+  }
+  function streamOf(y) {
+    return streamAt(y, CHANNEL_H);
+  }
+  function inWater(w, medium) {
+    return w.medium === medium ? w : { ...w, medium };
+  }
   var THRONE_RADIUS = 3e-5;
   function onThrone(run, x, y) {
     return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
@@ -2131,7 +2191,8 @@
     if (!c) return "none";
     if (onThrone(run, run.you.x, run.you.y)) return "too-close";
     const at = snap(run.you.x, run.you.y, latticePitch(run));
-    if (at.x < 0 || at.x > run.bounds.w || at.y < 0 || at.y > run.bounds.h) return "too-close";
+    const b = run.bounds;
+    if (at.x < b.x || at.x > b.x + b.w || at.y < b.y || at.y > b.y + b.h) return "too-close";
     for (const s2 of run.structures) {
       if (Math.hypot(s2.x - at.x, s2.y - at.y) < latticePitch(run) * 0.5) return "occupied";
     }
@@ -2254,8 +2315,9 @@
       dx += (moved.x - k.x) / dt;
       dy += (moved.y - k.y) / dt;
     }
-    k.x = Math.max(3e-5, Math.min(run.bounds.w - 3e-5, k.x + dx * dt));
-    k.y = Math.max(3e-5, Math.min(run.bounds.h - 3e-5, k.y + dy * dt));
+    const kb = run.bounds;
+    k.x = Math.max(kb.x + 3e-5, Math.min(kb.x + kb.w - 3e-5, k.x + dx * dt));
+    k.y = Math.max(kb.y + 3e-5, Math.min(kb.y + kb.h - 3e-5, k.y + dy * dt));
     if (wearing(run)) {
       k.hp = Math.max(0, k.hp - wearRate(k) * dt);
       if (run.rand() < dt * 6) run.events.push({ kind: "wearing", x: k.x, y: k.y });
@@ -2306,7 +2368,7 @@
       b.life -= dt;
     }
     run.bolts = run.bolts.filter(
-      (b) => b.life > 0 && b.x > -2e-5 && b.x < run.bounds.w + 2e-5 && b.y > -2e-5 && b.y < run.bounds.h + 2e-5
+      (bo) => bo.life > 0 && bo.x > run.bounds.x - 2e-5 && bo.x < run.bounds.x + run.bounds.w + 2e-5 && bo.y > run.bounds.y - 2e-5 && bo.y < run.bounds.y + run.bounds.h + 2e-5
     );
   }
   var TOUCH = 17e-6;
@@ -2391,12 +2453,12 @@
       charge: 0,
       strength: Math.max(1, Math.round(s.strength / 2))
     }));
-    run.throne = emptyThrone(ARENA_W / 2, ARENA_H / 2);
+    run.throne = emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2);
     run.bound = newBound(
       w.pitch,
       w.medium,
-      run.bounds.w * (0.2 + run.rand() * 0.6),
-      run.bounds.h * (0.2 + run.rand() * 0.6)
+      run.bounds.x + run.bounds.w * (0.2 + run.rand() * 0.6),
+      run.bounds.y + run.bounds.h * (0.2 + run.rand() * 0.6)
     );
     run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
     retune(run);
@@ -2409,7 +2471,7 @@
   }
   function readoutFor(run, e) {
     const p = particleOf(e);
-    const phi = contrastFactor(p, run.world.medium);
+    const phi = contrastFactor(p, waterAt(run, e.y));
     const isBeast = e.faction === "beast";
     const asm = isBeast ? null : assemble(e.parts);
     return {
@@ -2454,7 +2516,7 @@
   var LT = 6;
   var RT = 7;
   var BACK = 8;
-  var START = 9;
+  var START2 = 9;
   var STANDARD = {
     grip: [RT, RB],
     dash: [A, LT],
@@ -2462,8 +2524,8 @@
     crown: [Y],
     prev: [LB],
     next: [B],
-    confirm: [START, A],
-    pause: [START],
+    confirm: [START2, A],
+    pause: [START2],
     up: [12],
     down: [13],
     mute: [BACK]
@@ -3454,8 +3516,8 @@
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
       const b = this.run.bounds;
       const want = {
-        x: px(b.w) <= VIEW_W ? (px(b.w) - VIEW_W) / 2 : Math.max(0, Math.min(px(b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
-        y: px(b.h) <= VIEW_H ? (px(b.h) - VIEW_H) / 2 : Math.max(0, Math.min(px(b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2))
+        x: px(b.w) <= VIEW_W ? px(b.x) + (px(b.w) - VIEW_W) / 2 : Math.max(px(b.x), Math.min(px(b.x + b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
+        y: px(b.h) <= VIEW_H ? px(b.y) + (px(b.h) - VIEW_H) / 2 : Math.max(px(b.y), Math.min(px(b.y + b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2))
       };
       this.cam.x += (want.x - this.cam.x) * 0.12;
       this.cam.y += (want.y - this.cam.y) * 0.12;
@@ -3499,13 +3561,32 @@
     /** The glass. The water you can drive stops here, and it opens as you build. */
     drawWalls() {
       const g2 = this.ctx;
-      const b = this.run.bounds;
+      const run = this.run;
+      const b = run.bounds;
+      for (let i = 0; i < STREAMS; i++) {
+        const { lo, hi } = streamBand(i, CHANNEL_H);
+        const mine = contrastFactor(YOU, mediumAt(run.world.medium, (lo + hi) / 2, CHANNEL_H));
+        g2.fillStyle = `rgba(${warmth(mine)},0.045)`;
+        g2.fillRect(
+          px(b.x),
+          px(Math.max(lo, b.y)),
+          px(b.w),
+          px(Math.min(hi, b.y + b.h) - Math.max(lo, b.y))
+        );
+        if (lo > b.y && lo < b.y + b.h) {
+          g2.strokeStyle = "rgba(200,235,255,0.09)";
+          g2.lineWidth = 1;
+          g2.setLineDash([9, 7]);
+          g2.beginPath();
+          g2.moveTo(px(b.x), px(lo));
+          g2.lineTo(px(b.x + b.w), px(lo));
+          g2.stroke();
+          g2.setLineDash([]);
+        }
+      }
       g2.strokeStyle = "rgba(120,225,245,0.16)";
       g2.lineWidth = 2;
-      g2.strokeRect(0, 0, px(b.w), px(b.h));
-      g2.strokeStyle = "rgba(120,225,245,0.05)";
-      g2.lineWidth = 1;
-      g2.strokeRect(-6, -6, px(b.w) + 12, px(b.h) + 12);
+      g2.strokeRect(px(b.x), px(b.y), px(b.w), px(b.h));
     }
     /** Both the pressure of crossed standing waves and the Gaussian focus are
      *  separable, so the wash costs two rows of trigonometry, not a grid. */
@@ -4022,7 +4103,7 @@
       for (const e of this.run.entities) {
         const p = particleOf(e);
         const x = px(e.x), y = px(e.y);
-        const rgb = warmth(contrastFactor(p, this.run.world.medium));
+        const rgb = warmth(contrastFactor(p, waterAt(this.run, e.y)));
         if (!together(e.layer, here)) {
           const d = Math.abs(e.layer - here);
           g2.globalAlpha = Math.max(0.1, 0.3 - d * 0.07);
@@ -4397,7 +4478,11 @@
       g2.fillText(`AEON ${world.aeon}  \xB7  ${world.name}`, VIEW_W / 2, 16);
       g2.fillStyle = DIM;
       g2.font = `600 9px ${MONO}`;
-      g2.fillText(run.phase === "reign" ? "IT IS AWAKE" : "SETTLING", VIEW_W / 2, 34);
+      g2.fillText(
+        `${run.phase === "reign" ? "IT IS AWAKE" : "SETTLING"}  \xB7  ${streamName(streamOf(run.you.y))}`,
+        VIEW_W / 2,
+        34
+      );
       g2.textAlign = "left";
       g2.textAlign = "right";
       g2.fillStyle = GOLD;
