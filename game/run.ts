@@ -381,6 +381,13 @@ export interface Run {
    */
   delivered: number;
   /**
+   * When this world began, in run seconds.
+   *
+   * Not `run.t`, which counts the whole run across aeons. Everything that asks
+   * "how long have you refused to leave this water" needs the age of the WORLD.
+   */
+  bornAt: number;
+  /**
    * Fractional motifs owed by the co-flow, carried between frames.
    *
    * The other half of the same correction, and the half a pure batch got wrong.
@@ -428,6 +435,7 @@ export function startRun(seed = 1): Run {
     structures: [],
     delivered: 0,
     arriving: 0,
+    bornAt: 0,
     bolts: [],
     throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
     cells: [],
@@ -528,6 +536,31 @@ export function newBeast(run: Run, species: string, at?: { x: number; y: number 
  * weather. A headless bot that tried to lay out a world under the old rate died
  * mid-construction on every seed and never crowned anything at all.
  */
+/** How long a world can be gathered in before it starts filling up, seconds. */
+export const STANDING = 150;
+
+/**
+ * How many hunters a world you will not leave is allowed to hold.
+ *
+ * Settling is deliberately quiet — see `spawnGap` — because it is the phase you
+ * are meant to BUILD in, and that is right. What was missing is that it had no
+ * END. A report came back at 909 s still in aeon 1: 3440 cells, 410 buildings,
+ * the bound field freed, ONE hit taken, and a throne that had never been fed.
+ * Nothing in the water ever asked the player to stop.
+ *
+ * So a water you refuse to leave fills up with what lives in it, one more every
+ * STANDING seconds. That is not a difficulty curve bolted on; it is the only
+ * thing standing water does. The first two minutes are exactly as calm as they
+ * have always been, so the phase this protects is untouched — and it is capped
+ * at a reign's own crowd, because settling must never be worse than the fight
+ * it is preparing you for.
+ */
+export function settleCap(run: Run): number {
+  const base = 1 + Math.floor(run.world.aeon / 3);
+  const age = Math.max(0, run.t - run.bornAt);
+  return Math.min(4 + Math.floor(run.world.aeon / 2), base + Math.floor(age / STANDING));
+}
+
 export function spawnGap(run: Run): number {
   const base = run.phase === "reign" ? 3.2 : 9.0;
   return Math.max(1.3, base - run.world.aeon * 0.3);
@@ -590,7 +623,7 @@ export function step(run: Run, input: Input, dt: number): void {
     const live = run.entities.filter((e) => e.faction === "beast").length;
     const cap = run.phase === "reign"
       ? 4 + Math.floor(run.world.aeon / 2)
-      : 1 + Math.floor(run.world.aeon / 3);
+      : settleCap(run);
     if (live < cap) {
       const table = run.world.wildlife;
       run.entities.push(newBeast(run, table[Math.floor(run.rand() * table.length)]));
@@ -1839,6 +1872,7 @@ export function enterWorld(run: Run): void {
   for (let i = run.entities.length; i < suspension(run); i++) run.entities.push(newMotif(run, true));
   run.delivered = suspension(run);
   run.arriving = 0;
+  run.bornAt = run.t;
   run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
   run.spawnIn = 4;
   run.phase = "settle";

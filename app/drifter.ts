@@ -19,6 +19,7 @@
 import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
+  arrivalRate, settleCap, suspension,
   HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
   CHANNEL_H, beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
   liftCell,
@@ -2100,8 +2101,17 @@ export class Game {
     // too it crowded out every other thing a player might do next. One report
     // came back with twenty-six buildings placed, nothing fed, and a throne that
     // had never been visited.
+    // WHEN THE WATER IS SPENT, SAY SO. Arrivals are the co-flow's rate now, so a
+    // world that has been gathered out stays gathered out — and a player with a
+    // rack full of cells and an empty throne was previously told, forever, how
+    // to build another one.
+    const spent = run.delivered >= suspension(run)
+      && run.entities.filter((e) => e.faction === "motif").length < suspension(run) * 0.4;
     const hint = run.phase === "reign"
       ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   ·   ${G.dash} TO BURST CLEAR`
+      : run.throne.fed.length === 0 && spent
+        ? `THIS WATER IS GATHERED OUT   ·   ${G.crown} ON THE THRONE FEEDS IT   ·   `
+          + "A NEW WORLD IS THE ONLY NEW WATER"
       : run.cells.length > 0
         ? `${G.place} BUILDS ON THE RING   ·   ${G.crown} ON THE THRONE FEEDS IT INSTEAD`
         : run.throne.fed.length > 0
@@ -2465,6 +2475,15 @@ export class Game {
     if (run.bodies.length > 1 && !run.bodies.some((b) => b.cells.length >= 3)) {
       return "YOUR CELLS ARE SCATTERED. PUT THEM ON ADJACENT SITES AND THEY BECOME ONE";
     }
+    // A report came back at 909 s: 3440 cells built, 410 buildings standing, the
+    // bound field freed, and a throne that had never once been visited. This
+    // function told them to close their hand on a hunter. Nothing about
+    // gathering or fighting was the answer to that run, and the one thing that
+    // was is the thing it never mentioned.
+    if (run.throne.fed.length === 0 && run.built > 20) {
+      return "YOU NEVER FED THE THRONE. GATHERING IS NOT THE GAME - "
+        + "IT IS HOW YOU PAY FOR THE ONE THING THAT ENDS THIS WATER";
+    }
     if (!run.bound.free && n("tuned") === 0) {
       return `THE GAP NEVER CAUGHT IT - ${advice(run.crystal, run.gap, run.bound.omega)}`;
     }
@@ -2526,6 +2545,10 @@ export class Game {
       `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}`
         + `  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}`
         + `  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
+      `water: ${run.entities.filter((e) => e.faction === "motif").length} standing of `
+        + `${suspension(run)}; delivered ${run.delivered}; arrivals `
+        + `${arrivalRate(run).toFixed(2)}/s; hunters allowed ${
+          run.phase === "reign" ? "reign" : settleCap(run)}`,
       `chip: ${(() => {
         const on = nearestFeature(CHIP, run.you.x, run.you.y);
         const f = chipFlow(run, run.you.x, run.you.y);

@@ -5,7 +5,8 @@ import {
   ARENA_H, ARENA_W, BEASTS, CHANNEL_H, CHANNEL_W, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
-  latticePitch, liftCell, placeCell, readoutFor, retune, suspension, wearRate,
+  STANDING, latticePitch, liftCell, placeCell, readoutFor, retune, settleCap,
+  suspension, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
@@ -1054,5 +1055,53 @@ test("an idle farm cannot outproduce a player", () => {
     run.built < 30,
     `three minutes of forty buildings and no player made ${run.built} cells; `
     + "world.ts tunes ACTIVE play at 16-35 in that time, so a farm must sit under it",
+  );
+});
+
+test("a water you will not leave fills up with what lives in it", () => {
+  // The 909 s report took ONE hit in fifteen minutes of settling. Settling is
+  // MEANT to be quiet — it is the phase you build in and spawnGap says so — but
+  // a phase with no end is not a phase, and nothing in that water ever asked
+  // the player to stop gathering and go crown something.
+  const run = startRun(8);
+  assert.equal(settleCap(run), 1, "the opening is exactly as calm as it has always been");
+  run.t = run.bornAt + STANDING - 1;
+  assert.equal(settleCap(run), 1, "and stays that way right up to the edge of it");
+  run.t = run.bornAt + STANDING + 1;
+  assert.equal(settleCap(run), 2, "then the water has something else in it");
+  run.t = run.bornAt + STANDING * 40;
+  assert.ok(
+    settleCap(run) <= 4 + Math.floor(run.world.aeon / 2),
+    "but settling never gets worse than the reign it is preparing you for",
+  );
+});
+
+test("the calm the opening depends on is untouched", () => {
+  // The guard on the change above. If this ever fails, the first two minutes
+  // have become a fight and the phase people learn the game in is gone.
+  const run = startRun(8);
+  let worst = 0;
+  for (let i = 0; i < 60 * 120; i++) {
+    step(run, IDLE, DT);
+    worst = Math.max(worst, run.entities.filter((e) => e.faction === "beast").length);
+    run.events.length = 0;
+  }
+  assert.ok(worst <= 1, `two minutes of settling held at most ${worst} hunter, as it always did`);
+});
+
+test("but fifteen minutes of it does not stay quiet", () => {
+  // "Assert that something HAPPENED": the report's whole run was spent in a
+  // water that never pushed back, so this measures the pushing.
+  const run = startRun(8);
+  let late = 0;
+  for (let i = 0; i < 60 * 900; i++) {
+    run.integrity = MAX_INTEGRITY;      // measuring the pressure, not the death
+    step(run, IDLE, DT);
+    if (i > 60 * 600) late = Math.max(late, run.entities.filter((e) => e.faction === "beast").length);
+    run.events.length = 0;
+  }
+  assert.ok(
+    late > 1,
+    `after ten minutes in one water it held ${late} hunters; the reported run met one in fifteen`,
   );
 });
