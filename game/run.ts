@@ -405,6 +405,20 @@ export interface Run {
    */
   opened: number;
   /**
+   * Whether the water you opened EBBS back when you spend the crystal.
+   *
+   * A difficulty, chosen before the run and never during it. False is the
+   * forgiving reading and the default: you drove that water open and it stays
+   * open while this world lasts. True is the strict one, and it is the older
+   * behaviour — the pool is exactly what your standing crystal reaches into, so
+   * every building you discharge closes the channel a little, the chip goes out
+   * of reach, and the water thins while the fight is still going on.
+   *
+   * It is a real difference and not a modifier: on the strict setting, killing
+   * a king costs you the world you would have inherited it in.
+   */
+  ebb: boolean;
+  /**
    * Fractional motifs owed by the co-flow, carried between frames.
    *
    * The other half of the same correction, and the half a pure batch got wrong.
@@ -434,7 +448,7 @@ export interface Run {
   nextId: number;
 }
 
-export function startRun(seed = 1): Run {
+export function startRun(seed = 1, ebb = false): Run {
   const world = firstWorld();
   const run: Run = {
     world,
@@ -454,6 +468,7 @@ export function startRun(seed = 1): Run {
     arriving: 0,
     bornAt: 0,
     opened: 0,
+    ebb: false,
     bolts: [],
     throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
     cells: [],
@@ -473,6 +488,7 @@ export function startRun(seed = 1): Run {
   for (let i = 0; i < suspension(run); i++) run.entities.push(newMotif(run, true));
   run.delivered = suspension(run);
   run.spacing = workableSpacing(run.bound.omega, world.medium, reachOf(BUILDABLE[0]));
+  run.ebb = ebb;
   return run;
 }
 
@@ -1143,7 +1159,7 @@ export function reshape(run: Run): void {
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
   run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
-  run.bounds = boundsFor(run.opened);
+  run.bounds = boundsFor(run.ebb ? (run.bodies[0]?.cells.length ?? 0) : run.opened);
   for (const b of run.bodies) {
     const zs = reaches(b, pitch);
     for (const c of b.cells) c.serves = zs;
@@ -1232,7 +1248,7 @@ export function retune(run: Run): void {
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
   run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
-  run.bounds = boundsFor(run.opened);
+  run.bounds = boundsFor(run.ebb ? (run.bodies[0]?.cells.length ?? 0) : run.opened);
 
   // WHAT A LEG IS FOR. A body that hangs a limb onto another plane can work
   // there, and every cell of it can — which is the first thing an organism does
@@ -1397,6 +1413,9 @@ export function dischargesToKill(run: Run): number {
   // killing it — was still being told THREE, which is the difference between a
   // fight you are winning and one you cannot see the end of.
   const left = run.throne.awake ? Math.max(0, run.throne.hp) : run.throne.maxHp;
+  // AT THE MUZZLE. Damage falls off across an arm, so this is the count if you
+  // land them on top of the king rather than at the far edge of a cone — which
+  // is the number worth showing, because it is the one you can achieve.
   return Math.ceil(left / (best * DISCHARGE_GAIN));
 }
 
@@ -1550,8 +1569,35 @@ export const LOBE_ARC = 0.55;
 export const LOBE_RANGE = 7;
 /** And how far the same discharge scours the wildlife. */
 export const LOBE_SCOUR = 4;
-/** Damage per group-order, per arm that finds the king. */
-export const DISCHARGE_GAIN = 8;
+/**
+ * Damage per group-order, per arm that finds the king, AT THE BUILDING ITSELF.
+ *
+ * It used to be flat across the whole arm — the same 8 at three hundred microns
+ * as at three — which made distance mean nothing and made "walk the king into
+ * your arms" a binary rather than an aim. Now the arm falls off (see
+ * `dischargeFalloff`) and this is what it is worth at the muzzle, so it is
+ * doubled from the flat 8 it replaced: point blank is twice what it was, the
+ * two are equal at 29 per cent of the arm's reach, and beyond that a shot is
+ * worse than it used to be. Getting the king ONTO a building, rather than
+ * merely somewhere in its cone, is now the difference.
+ */
+export const DISCHARGE_GAIN = 16;
+
+/**
+ * How much of a discharge survives the distance to the king, 0..1.
+ *
+ * The same shape `chip.ts` uses for a tip jet's plume — squared, so it reaches
+ * the end of its arm with zero slope and there is no line in the water where
+ * the damage switches off. Reusing that curve rather than inventing a second
+ * one is the point: this repository has one falloff and it is that one.
+ */
+export function dischargeFalloff(s: Structure, x: number, y: number): number {
+  const range = s.reach * LOBE_RANGE;
+  const r = Math.hypot(x - s.x, y - s.y);
+  if (r >= range) return 0;
+  const k = 1 - r / range;
+  return k * k;
+}
 
 /**
  * Does one of this building's arms point at (x, y) from where it stands?
@@ -1592,11 +1638,12 @@ export function discharge(run: Run, s: Structure): number {
     const toKing = Math.atan2(k.y - s.y, k.x - s.x);
     const range = s.reach * LOBE_RANGE;
     if (Math.hypot(k.x - s.x, k.y - s.y) < range) {
+      const fall = dischargeFalloff(s, k.x, k.y);
       for (const [dx, dy] of s.lobes) {
         const a = Math.atan2(dy, dx);
         let d = Math.abs(a - toKing);
         while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
-        if (d < LOBE_ARC) damage += s.strength * DISCHARGE_GAIN;
+        if (d < LOBE_ARC) damage += Math.round(s.strength * DISCHARGE_GAIN * fall);
       }
     }
   }

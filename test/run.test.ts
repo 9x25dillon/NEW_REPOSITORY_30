@@ -545,16 +545,32 @@ test("the hand is far worse than a building, which is why you build", () => {
   feedThrone(run, 0);
   crown(run);
 
-  const gun = structureFrom(901, "222", run.throne.x - 120e-6, run.throne.y);
-  run.structures = [gun];
-  const instant = discharge(run, gun);
-  assert.ok(instant > 0);
-
-  // Seconds of holding it, for what one building did in a frame.
+  // AT THE MUZZLE. Damage falls off across an arm now, so where the shot is
+  // taken from is part of the claim: a building is worth many seconds of hand
+  // when the king is standing on it, and that is what "walk the king into your
+  // arms" is asking you to do.
   const rate = wearRate(run.throne);
   assert.ok(rate > 0);
-  assert.ok(instant / rate > 4,
-    `a discharge should be worth several seconds of hand (${(instant / rate).toFixed(1)}s)`);
+
+  const shotFrom = (d: number) => {
+    const r = startRun(45);
+    grant(r, ["222"]);
+    stand(r, r.throne.x, r.throne.y);
+    feedThrone(r, 0);
+    crown(r);
+    const gun = structureFrom(901, "222", r.throne.x - d, r.throne.y);
+    r.structures = [gun];
+    return discharge(r, gun);
+  };
+
+  const point = shotFrom(20e-6);
+  assert.ok(point / rate > 8,
+    `point blank should be worth many seconds of hand (${(point / rate).toFixed(1)}s)`);
+
+  // And distance is a real cost, which is the whole reason the falloff exists.
+  const far = shotFrom(240e-6);
+  assert.ok(far > 0, "the far edge of an arm still does something");
+  assert.ok(far < point / 3, `a shot from the far edge is worth far less (${far} against ${point})`);
 });
 
 test("the cubic cell is the best gun there is and the worst thing to crown", () => {
@@ -580,9 +596,11 @@ test("the cubic cell is the best gun there is and the worst thing to crown", () 
   // four directions to align rather than two.
   const shots = (gun: string, k: typeof cubic): number =>
     Math.ceil(k.maxHp / (structureFrom(1, gun, 0, 0).strength * DISCHARGE_GAIN));
-  assert.equal(shots("23", cubic), 2);
-  assert.equal(shots("222", cubic), 5);
-  assert.ok(lobes("23").length > lobes("222").length);
+  assert.ok(shots("222", cubic) >= shots("23", cubic) * 3,
+    `a 222 needs at least three times the aligned arms a 23 does `
+    + `(${shots("222", cubic)} against ${shots("23", cubic)})`);
+  assert.ok(lobes("23").length > lobes("222").length,
+    "and it has more directions to align in the first place");
 
   // So one cell cannot do both jobs, and the diagonal that makes it is 1.6
   // microns — barely over the streaming crossover, and the hardest thing in the
@@ -1152,6 +1170,25 @@ test("spending your arsenal does not shrink the water you are fighting in", () =
   retune(run);
   assert.equal(run.bounds.w, opened.w, "the pool you drove open stays open");
   assert.equal(suspension(run), water, "and so does the water in it");
+
+  // AND THE STRICT SETTING KEEPS THE OLD BEHAVIOUR ON PURPOSE. `ebb` is chosen
+  // before a run: on it, the pool is exactly what your standing crystal reaches
+  // into, so killing a king costs you the world you were going to inherit it
+  // in. That is a difficulty, not a bug, and it has to still work.
+  const strict = startRun(3, true);
+  for (let i = 0; i < 40; i++) {
+    strict.structures.push(structureFrom(strict.nextId++, "23",
+      strict.bounds.x + strict.bounds.w / 2 + (i % 7) * pitch,
+      strict.bounds.y + strict.bounds.h / 2 + Math.floor(i / 7) * pitch, 0));
+  }
+  retune(strict);
+  const wide = strict.bounds.w;
+  while (strict.structures.length > 2) strict.structures.pop();
+  retune(strict);
+  assert.ok(strict.bounds.w < wide,
+    `with the water set to ebb, spending the crystal closes the channel back `
+    + `(${(wide * 1e6).toFixed(0)} -> ${(strict.bounds.w * 1e6).toFixed(0)}um)`);
+  assert.ok(suspension(strict) < water, "and the water in it thins with the pool");
 
   // But a NEW WORLD starts from what it inherits, not from the last one's mark.
   run.phase = "birth";

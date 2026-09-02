@@ -287,6 +287,12 @@ export class Pad {
       + `| AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
   }
 
+  /** True on the frame a key goes down, once per press. For settings, which
+   *  must not toggle sixty times a second while a finger is resting on them. */
+  tapped(code: string): boolean {
+    return this.keys.has(code) && !this.prevKeys.has(code);
+  }
+
   /** A number key held this frame, 1..9, or zero. Placing a specific cell is
    *  the one thing a keyboard does better than a pad. */
   slotKey(): number {

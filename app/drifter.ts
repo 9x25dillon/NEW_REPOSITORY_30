@@ -434,6 +434,9 @@ export class Game {
     if (it.mute) this.sfx.muted = !this.sfx.muted;
 
     if (this.screen === "title" || this.screen === "dead") {
+      // Chosen before a run and never during one, so it cannot be reached for
+      // as a way out of a fight that is going badly.
+      if (this.pad.tapped("KeyE")) { this.ebb = !this.ebb; return; }
       if (it.confirm) { this.sfx.unlock(); this.begin(); }
       return;
     }
@@ -522,11 +525,14 @@ export class Game {
     this.canvas.style.height = `${Math.floor(VIEW_H * s)}px`;
   }
 
+  /** Whether the water ebbs back as you spend your crystal. See `Run.ebb`. */
+  private ebb = false;
+
   private begin(): void {
     this.paused = false;
     this.tally = {};
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
-    this.run = startRun(this.seed);
+    this.run = startRun(this.seed, this.ebb);
     this.screen = "play";
     this.sparks = []; this.popups = []; this.rings = [];
     this.say("GATHER FOUR OF A KIND TO MAKE A CELL");
@@ -2680,6 +2686,10 @@ export class Game {
       `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
       `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
       `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
+      "",
+      `${pad("E")}${this.ebb
+        ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER."
+        : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
       "",
       "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
       "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",
