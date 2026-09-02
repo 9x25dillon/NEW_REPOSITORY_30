@@ -34,6 +34,7 @@ import { lobes } from "./shape.js";
 import { type Wave, axisX } from "./wave.js";
 import { type Particle } from "../src/gorkov.js";
 import { maxSweepSpeed } from "../src/trajectory.js";
+import { viscosity } from "./thermal.js";
 import { pointGroup } from "../src/pointgroups.js";
 import { type SpaceGroup, groupsOfPointGroup } from "../src/sohncke.js";
 
@@ -325,7 +326,12 @@ export function walkSpeed(
     const dy = c.y - wave.aimY;
     const amp = wave.amplitude * Math.exp(-(dx * dx + dy * dy) / (2 * focus * focus));
     if (amp <= 0) return 0;
-    const v = maxSweepSpeed(axisX(wave, amp), cellParticle(c));
+    // AT THE WATER'S OWN VISCOSITY. `maxSweepSpeed` has taken this as a
+    // parameter since it was written and had never once been given anything but
+    // the 25 C default. A sweep speed is a force over a drag, so an organism in
+    // hot water walks faster for nothing it did — which is the same bargain
+    // every other body in the channel is now getting.
+    const v = maxSweepSpeed(axisX(wave, amp), cellParticle(c), viscosity(wave.tC));
     if (v < slowest) slowest = v;
   }
   return Number.isFinite(slowest) ? slowest * GAIT_MARGIN : 0;

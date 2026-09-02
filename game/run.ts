@@ -31,6 +31,7 @@ import {
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
 import { type Feature, EDGE_GAIN, features, flowAt } from "./chip.js";
 import { mediumAt, streamAt } from "./streams.js";
+import { atTemperature, step as warm } from "./thermal.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
 } from "./bound.js";
@@ -42,7 +43,8 @@ import {
   streamingSpeed,
 } from "./wave.js";
 import {
-  type Pilot, aimFor, beginDash, carry, concentrate, handed, newPilot,
+  type Pilot, CRUISE_AMPLITUDE, aimFor, beginDash, carry, concentrate, handed,
+  newPilot,
 } from "./pilot.js";
 import {
   type Sovereign, type Structure, type World,
@@ -627,6 +629,11 @@ export function step(run: Run, input: Input, dt: number): void {
   // else standing in it.
   // The drive is computed for the water YOU are in, because that is the fluid
   // it is coupling into.
+  // THE WATER WARMS. From what you asked for last frame, so the medium below is
+  // already the water the temperature implies rather than a frame behind it.
+  // Everything downstream inherits it without knowing: the contrast factor of
+  // every body, what your trap can hold, the band gap the objective lives in.
+  w.tC = warm(w.tC, w.amplitude, w.maxAmplitude, CRUISE_AMPLITUDE, dt);
   w.medium = waterAt(run, you.y);
 
   const wasSpent = w.spent;
@@ -1297,7 +1304,7 @@ export function retuneChannel(run: Run, mode: number): boolean {
  * is the sign of a contrast factor against the medium, so is every answer.
  */
 export function waterAt(run: Run, y: number): Medium {
-  return mediumAt(run.world.medium, y, CHANNEL_H);
+  return atTemperature(mediumAt(run.world.medium, y, CHANNEL_H), run.wave.tC);
 }
 
 /** Which stream, for the surface and for saying where you are. */

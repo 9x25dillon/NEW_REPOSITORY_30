@@ -37,6 +37,7 @@ import {
   type SawSubstrate, type StandingWave1D,
   SAW_SUBSTRATES, forceAt, ssawField, ssawFrequency, ssawWavelength, trapPositions,
 } from "../src/fields.js";
+import { AMBIENT_C, viscosity } from "./thermal.js";
 import { rateConstant } from "../src/trajectory.js";
 
 // ── constants ───────────────────────────────────────────────────────────────
@@ -107,6 +108,16 @@ export interface Wave {
   /** True once stamina ran out; grip is refused until it recovers. */
   spent: boolean;
   medium: Medium;
+  /**
+   * The water's temperature, degrees C.
+   *
+   * It lives on the wave because the wave is the drive and the drive is what
+   * raises it, and because everything that needs the viscosity it implies —
+   * `velocityAt`, `advance`, `body.walkSpeed` — already has a wave in hand.
+   * At AMBIENT_C every number here is exactly what it was before temperature
+   * was tracked at all.
+   */
+  tC: number;
   /** Where the grid is currently pointed, m. Kept because the focus envelope
    *  needs a centre and the phases only imply one. */
   aimX: number;
@@ -131,7 +142,7 @@ export function newWave(
   return {
     pitch, phaseX: 0, phaseY: 0,
     amplitude: 0, maxAmplitude,
-    stamina: STAMINA_MAX, spent: false, medium,
+    stamina: STAMINA_MAX, spent: false, medium, tC: AMBIENT_C,
     aimX: 0, aimY: 0, focus, inverted: false,
   };
 }
@@ -245,7 +256,7 @@ export function velocityAt(
   if (w.amplitude <= 0) return { vx: 0, vy: 0 };
   const amp = localAmplitude(w, x, y);
   if (amp <= 0) return { vx: 0, vy: 0 };
-  const mu = WATER_VISCOSITY;
+  const mu = viscosity(w.tC);
   return {
     vx: driftVelocity(forceAt(axisX(w, amp), x, p), p.radius, mu),
     vy: driftVelocity(forceAt(axisY(w, amp), y, p), p.radius, mu),
@@ -287,7 +298,7 @@ export function advance(
   if (amp <= 0) return { x, y, vx: 0, vy: 0 };
 
   const rate = 2 * (Math.PI / w.pitch)
-    * Math.abs(rateConstant(axisX(w, amp), p, WATER_VISCOSITY));
+    * Math.abs(rateConstant(axisX(w, amp), p, viscosity(w.tC)));
   const n = Math.min(SUBSTEP_CAP, Math.max(1, Math.ceil((rate * dt) / SUBSTEP_RELAX)));
   const h = dt / n;
 

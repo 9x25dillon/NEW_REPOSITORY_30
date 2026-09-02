@@ -1002,18 +1002,49 @@
     return -idtPhaseRad / 2;
   }
 
+  // game/thermal.ts
+  var AMBIENT_C = 25;
+  function soundSpeed(tC) {
+    const t = tC;
+    return 1402.385 + 5.038813 * t - 0.05799136 * t * t + 3287156e-10 * t * t * t - 1398845e-12 * t * t * t * t + 278786e-14 * t * t * t * t * t;
+  }
+  function density(tC) {
+    const t = tC;
+    const num = 999.83952 + 16.945176 * t - 0.0079870401 * t * t - 46170461e-12 * t * t * t + 10556302e-14 * t * t * t * t - 28054253e-17 * t * t * t * t * t;
+    return num / (1 + 0.01687985 * t);
+  }
+  function viscosity(tC) {
+    return 2414e-8 * Math.pow(10, 247.8 / (tC + 273.15 - 140));
+  }
+  var MAX_C = 74;
+  var HEATING = 2.9;
+  var COOLING = 0.045;
+  function step(tC, amplitudePa, maxAmplitude, rated, dt) {
+    const drive = maxAmplitude > 0 ? amplitudePa / maxAmplitude : 0;
+    const over = Math.max(0, drive * drive - rated * rated);
+    const up = HEATING * over;
+    const down = COOLING * (tC - AMBIENT_C);
+    return Math.min(MAX_C, Math.max(AMBIENT_C, tC + (up - down) * dt));
+  }
+  function atTemperature(m, tC) {
+    return {
+      rho: m.rho + (density(tC) - density(AMBIENT_C)),
+      c: m.c + (soundSpeed(tC) - soundSpeed(AMBIENT_C))
+    };
+  }
+
   // src/trajectory.ts
   var WATER_VISCOSITY = 89e-5;
-  function rateConstant(w, p, viscosity = WATER_VISCOSITY) {
+  function rateConstant(w, p, viscosity2 = WATER_VISCOSITY) {
     const phi = contrastFactor(p, w.medium);
     const kappa = compressibility(w.medium);
-    return phi * w.k * p.radius * p.radius * kappa * w.amplitude * w.amplitude / (6 * viscosity);
+    return phi * w.k * p.radius * p.radius * kappa * w.amplitude * w.amplitude / (6 * viscosity2);
   }
-  function maxSweepSpeed(w, p, viscosity = WATER_VISCOSITY) {
+  function maxSweepSpeed(w, p, viscosity2 = WATER_VISCOSITY) {
     const phi = Math.abs(contrastFactor(p, w.medium));
     const kappa = compressibility(w.medium);
     const fMax = Math.PI * Math.pow(p.radius, 3) * kappa * w.amplitude * w.amplitude * phi * w.k;
-    return fMax / (6 * Math.PI * viscosity * p.radius);
+    return fMax / (6 * Math.PI * viscosity2 * p.radius);
   }
 
   // game/wave.ts
@@ -1044,6 +1075,7 @@
       stamina: STAMINA_MAX,
       spent: false,
       medium,
+      tC: AMBIENT_C,
       aimX: 0,
       aimY: 0,
       focus,
@@ -1098,7 +1130,7 @@
     if (w.amplitude <= 0) return { vx: 0, vy: 0 };
     const amp = localAmplitude(w, x, y);
     if (amp <= 0) return { vx: 0, vy: 0 };
-    const mu = WATER_VISCOSITY2;
+    const mu = viscosity(w.tC);
     return {
       vx: driftVelocity(forceAt(axisX(w, amp), x, p), p.radius, mu),
       vy: driftVelocity(forceAt(axisY(w, amp), y, p), p.radius, mu)
@@ -1109,7 +1141,7 @@
   function advance(w, x, y, p, dt) {
     const amp = localAmplitude(w, x, y);
     if (amp <= 0) return { x, y, vx: 0, vy: 0 };
-    const rate = 2 * (Math.PI / w.pitch) * Math.abs(rateConstant(axisX(w, amp), p, WATER_VISCOSITY2));
+    const rate = 2 * (Math.PI / w.pitch) * Math.abs(rateConstant(axisX(w, amp), p, viscosity(w.tC)));
     const n = Math.min(SUBSTEP_CAP, Math.max(1, Math.ceil(rate * dt / SUBSTEP_RELAX)));
     const h = dt / n;
     let v = velocityAt(w, x, y, p);
@@ -1205,11 +1237,11 @@
   function limbsOf(body, pitch) {
     const cells = body.cells;
     if (cells.length < 3) return [];
-    const step2 = pitch * 1.5;
+    const step3 = pitch * 1.5;
     const grid = /* @__PURE__ */ new Map();
     const key3 = (gx, gy) => (gx + 4096) * 8192 + (gy + 4096);
     for (const c of cells) {
-      const k = key3(Math.floor(c.x / step2), Math.floor(c.y / step2));
+      const k = key3(Math.floor(c.x / step3), Math.floor(c.y / step3));
       const at = grid.get(k);
       if (at) at.push(c);
       else grid.set(k, [c]);
@@ -1217,7 +1249,7 @@
     const degree = /* @__PURE__ */ new Map();
     for (const a of cells) {
       let n = 0;
-      const gx = Math.floor(a.x / step2), gy = Math.floor(a.y / step2);
+      const gx = Math.floor(a.x / step3), gy = Math.floor(a.y / step3);
       for (let ox = -1; ox <= 1; ox++) {
         for (let oy = -1; oy <= 1; oy++) {
           const at = grid.get(key3(gx + ox, gy + oy));
@@ -1294,7 +1326,7 @@
       const dy = c.y - wave.aimY;
       const amp = wave.amplitude * Math.exp(-(dx * dx + dy * dy) / (2 * focus * focus));
       if (amp <= 0) return 0;
-      const v = maxSweepSpeed(axisX(wave, amp), cellParticle(c));
+      const v = maxSweepSpeed(axisX(wave, amp), cellParticle(c), viscosity(wave.tC));
       if (v < slowest) slowest = v;
     }
     return Number.isFinite(slowest) ? slowest * GAIT_MARGIN : 0;
@@ -1625,9 +1657,9 @@
   var CARRY_FLOOR = 0.02;
   function carriable(medium) {
     if (Math.abs(contrastFactor(YOU, medium)) >= CARRY_FLOOR) return medium;
-    for (let step2 = 2; step2 <= 90; step2 += 2) {
+    for (let step3 = 2; step3 <= 90; step3 += 2) {
       for (const s of [1, -1]) {
-        const trial = { rho: medium.rho + s * step2, c: medium.c };
+        const trial = { rho: medium.rho + s * step3, c: medium.c };
         if (trial.rho < 905 || trial.rho > 1045) continue;
         if (Math.abs(contrastFactor(YOU, trial)) >= CARRY_FLOOR) return trial;
       }
@@ -1918,11 +1950,12 @@
     const base = run.phase === "reign" ? 3.2 : 9;
     return Math.max(1.3, base - run.world.aeon * 0.3);
   }
-  function step(run, input, dt) {
+  function step2(run, input, dt) {
     run.t += dt;
     const w = run.wave;
     const you = run.you;
     const alive = run.phase !== "dead" && run.phase !== "birth";
+    w.tC = step(w.tC, w.amplitude, w.maxAmplitude, CRUISE_AMPLITUDE, dt);
     w.medium = waterAt(run, you.y);
     const wasSpent = w.spent;
     grip(w, input.grip && alive, dt);
@@ -2365,7 +2398,7 @@
     return true;
   }
   function waterAt(run, y) {
-    return mediumAt(run.world.medium, y, CHANNEL_H);
+    return atTemperature(mediumAt(run.world.medium, y, CHANNEL_H), run.wave.tC);
   }
   function streamOf(y) {
     return streamAt(y, CHANNEL_H);
@@ -3234,6 +3267,11 @@
       title: "IT EATS WHAT YOU MADE, AND HEALS",
       body: "EVERY STRUCTURE IT TAKES IS BOTH YOUR ARSENAL AND ITS MEAL: IT HEALS THREE TIMES THAT BUILDING'S ORDER. IT CAN ONLY REACH WHAT IS WITHIN A HUNDRED AND FIFTY MICRONS OF IT, SO BUILDING AROUND THE THRONE IS FEEDING IT. STAND YOUR ARMS BACK AND WALK THE KING INTO THEM."
     },
+    heat: {
+      id: "heat",
+      title: "YOU ARE COOKING THE CHIP",
+      body: "AN AMPLIFIER DISSIPATES MOST OF WHAT IT IS FED AND A DRIVEN CHANNEL CLIMBS TENS OF DEGREES. WATER'S VISCOSITY HALVES BY SIXTY-FIVE, AND EVERY SPEED HERE IS A FORCE OVER A DRAG - SO HOT WATER IS THIN WATER AND THE WHOLE GAME RUNS FASTER, INCLUDING WHAT IS HUNTING YOU. THE GLASS TAKES IT BACK, BUT SLOWER THAN YOU CAN LET GO."
+    },
     spent: {
       id: "spent",
       title: "ENERGY DENSITY GOES AS PRESSURE SQUARED",
@@ -3512,15 +3550,15 @@
         this.crowned = false;
       }
     }
-    retune(step2) {
+    retune(step3) {
       const run = this.run;
-      const want = run.world.mode + step2;
+      const want = run.world.mode + step3;
       if (want < 1 || want > MAX_MODE) {
         this.say(want < 1 ? "THE FUNDAMENTAL IS AS FLAT AS IT GETS" : "THE PLANES WOULD BE CLOSER THAN THE BODIES ON THEM");
         return;
       }
       if (retuneChannel(run, want)) {
-        this.sfx.invert(step2 > 0);
+        this.sfx.invert(step3 > 0);
         this.say(`CHANNEL AT ${run.world.mode}f  \xB7  ${(modeFrequency(run.world.mode, run.world.medium) / 1e6).toFixed(2)} MHZ  \xB7  ${planes(run.world.mode).length} PLANES`);
       }
     }
@@ -3594,7 +3632,7 @@
       if (this.paused && this.screen === "play") return;
       this.act(it, dt);
       if (this.screen === "title") {
-        step(run, {
+        step2(run, {
           move: { x: Math.sin(this.t * 0.41), y: Math.sin(this.t * 0.63 + 1.1) },
           grip: Math.sin(this.t * 0.7) > -0.2,
           dash: false
@@ -3608,7 +3646,7 @@
       const gripping = it.grip && !run.wave.spent;
       if (gripping && !this.wasGrip) this.sfx.gripOn();
       this.wasGrip = gripping;
-      step(run, { move: it.move, grip: it.grip, dash: it.dash }, dt);
+      step2(run, { move: it.move, grip: it.grip, dash: it.dash }, dt);
       this.drain();
       this.decay(dt);
       if (run.phase === "birth" && this.screen !== "birth") {
@@ -3625,6 +3663,7 @@
       this.youTrail.push(run.you.x, run.you.y);
       while (this.youTrail.length > 26) this.youTrail.shift();
       if (run.structures.length > 0) this.teach("build");
+      if (run.wave.tC > AMBIENT_C + 12) this.teach("heat");
       if (run.phase === "reign" && run.throne.awake && run.throne.hp > 0 && run.structures.some((st) => bearsOn(st, run.throne.x, run.throne.y))) {
         this.teach("aim");
       }
@@ -5063,6 +5102,23 @@
       g2.fillText("INTEGRITY", 18, 34);
       const sf = w.stamina / STAMINA_MAX;
       bar(g2, 18, 52, 176, 7, sf, w.spent ? RED : sf < 0.3 ? "#ffa24a" : "#5ef0c0", "STAMINA");
+      const hot = (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C);
+      const rate = viscosity(AMBIENT_C) / viscosity(w.tC);
+      bar(
+        g2,
+        18,
+        66,
+        176,
+        7,
+        hot,
+        hot > 0.66 ? "#ff5a5a" : hot > 0.33 ? "#ffa24a" : "#6ea8c8",
+        `WATER ${w.tC.toFixed(0)}C`
+      );
+      if (hot > 0.08) {
+        g2.font = `700 8px ${MONO}`;
+        g2.fillStyle = hot > 0.66 ? "#ff5a5a" : "#8ce9ff";
+        g2.fillText(`THIN - EVERYTHING x${rate.toFixed(2)}`, 200, 72);
+      }
       const af = w.amplitude / w.maxAmplitude;
       bar(
         g2,
@@ -5508,6 +5564,7 @@
         })() : ""}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
         `water: ${run.entities.filter((e) => e.faction === "motif").length} standing of ${suspension(run)}; delivered ${run.delivered}; arrivals ${arrivalRate(run).toFixed(2)}/s; hunters allowed ${run.phase === "reign" ? "reign" : settleCap(run)}`,
+        `heat: ${run.wave.tC.toFixed(1)}C (ambient ${AMBIENT_C})  viscosity x${(viscosity(run.wave.tC) / viscosity(AMBIENT_C)).toFixed(2)}  everything moves x${(viscosity(AMBIENT_C) / viscosity(run.wave.tC)).toFixed(2)}  water c=${waterAt(run, run.you.y).c.toFixed(0)}`,
         `chip: ${(() => {
           const on = nearestFeature(CHIP, run.you.x, run.you.y);
           const f = chipFlow(run, run.you.x, run.you.y);

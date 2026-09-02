@@ -44,6 +44,7 @@ import { YOU } from "../game/pilot.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
+import { AMBIENT_C, MAX_C, viscosity } from "../game/thermal.js";
 import { Sfx } from "./sfx.js";
 
 // ── scale ───────────────────────────────────────────────────────────────────
@@ -190,6 +191,13 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "THAT BUILDING'S ORDER. IT CAN ONLY REACH WHAT IS WITHIN A HUNDRED AND FIFTY MICRONS "
       + "OF IT, SO BUILDING AROUND THE THRONE IS FEEDING IT. STAND YOUR ARMS BACK AND WALK "
       + "THE KING INTO THEM.",
+  },
+  heat: {
+    id: "heat", title: "YOU ARE COOKING THE CHIP",
+    body: "AN AMPLIFIER DISSIPATES MOST OF WHAT IT IS FED AND A DRIVEN CHANNEL CLIMBS TENS "
+      + "OF DEGREES. WATER'S VISCOSITY HALVES BY SIXTY-FIVE, AND EVERY SPEED HERE IS A FORCE "
+      + "OVER A DRAG - SO HOT WATER IS THIN WATER AND THE WHOLE GAME RUNS FASTER, INCLUDING "
+      + "WHAT IS HUNTING YOU. THE GLASS TAKES IT BACK, BUT SLOWER THAN YOU CAN LET GO.",
   },
   spent: {
     id: "spent", title: "ENERGY DENSITY GOES AS PRESSURE SQUARED",
@@ -631,6 +639,7 @@ export class Game {
     while (this.youTrail.length > 26) this.youTrail.shift();
 
     if (run.structures.length > 0) this.teach("build");
+    if (run.wave.tC > AMBIENT_C + 12) this.teach("heat");
 
     // HOW THE KING DIES, said the first time it is actually true.
     //
@@ -2136,6 +2145,22 @@ export class Game {
 
     const sf = w.stamina / STAMINA_MAX;
     bar(g, 18, 52, 176, 7, sf, w.spent ? RED : sf < 0.3 ? "#ffa24a" : "#5ef0c0", "STAMINA");
+
+    // THE SLOW METER, under the fast one. Stamina you feel every few seconds;
+    // this you feel across a fight. Everything in the water — you, the things
+    // hunting you, the streaming off the chip — moves at the reciprocal of the
+    // viscosity, so the number worth showing is not the temperature, it is what
+    // the temperature is doing to the speed of the world.
+    const hot = (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C);
+    const rate = viscosity(AMBIENT_C) / viscosity(w.tC);
+    bar(g, 18, 66, 176, 7, hot,
+      hot > 0.66 ? "#ff5a5a" : hot > 0.33 ? "#ffa24a" : "#6ea8c8",
+      `WATER ${w.tC.toFixed(0)}C`);
+    if (hot > 0.08) {
+      g.font = `700 8px ${MONO}`;
+      g.fillStyle = hot > 0.66 ? "#ff5a5a" : "#8ce9ff";
+      g.fillText(`THIN - EVERYTHING x${rate.toFixed(2)}`, 200, 72);
+    }
     const af = w.amplitude / w.maxAmplitude;
     bar(g, 18, 76, 176, 7, af, w.inverted ? `rgb(${ANTI})` : `rgb(${NODE})`,
       w.inverted ? "GRIP · ANTINODE · PUSH" : "GRIP · NODE · PULL");
@@ -2662,6 +2687,10 @@ export class Game {
         + `${suspension(run)}; delivered ${run.delivered}; arrivals `
         + `${arrivalRate(run).toFixed(2)}/s; hunters allowed ${
           run.phase === "reign" ? "reign" : settleCap(run)}`,
+      `heat: ${run.wave.tC.toFixed(1)}C (ambient ${AMBIENT_C})`
+        + `  viscosity x${(viscosity(run.wave.tC) / viscosity(AMBIENT_C)).toFixed(2)}`
+        + `  everything moves x${(viscosity(AMBIENT_C) / viscosity(run.wave.tC)).toFixed(2)}`
+        + `  water c=${waterAt(run, run.you.y).c.toFixed(0)}`,
       `chip: ${(() => {
         const on = nearestFeature(CHIP, run.you.x, run.you.y);
         const f = chipFlow(run, run.you.x, run.you.y);
