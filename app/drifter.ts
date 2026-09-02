@@ -861,6 +861,7 @@ export class Game {
 
     if (this.screen === "title") this.drawTitle();
     else {
+      this.drawThroneBearing();
       this.drawHud();
       if (this.screen === "birth") this.drawBirth();
       if (this.screen === "dead") this.drawDead();
@@ -1484,6 +1485,75 @@ export class Game {
     g.fillText(
       b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
       x, y + h + 20);
+  }
+
+  /**
+   * WHICH WAY THE THRONE IS, when it is not on the screen.
+   *
+   * There was never a need for one. The throne stood at the exact centre of the
+   * channel in every aeon and the pool you started in was one screen wide, so
+   * it was always either in front of you or a short walk. It stands at a
+   * landmark now, which from the far wall is two millimetres and three screens
+   * away.
+   *
+   * There is a report in this file already — see the hint line below — about a
+   * player who placed twenty-six buildings, fed nothing, and never visited a
+   * throne that was in plain sight the whole time. Moving it further away
+   * without saying which way it went would be making that exact report worse,
+   * on purpose, which is worse than not having moved it.
+   *
+   * It NAMES the landmark rather than only pointing at it. The chip is the one
+   * thing in this game that is the same in the tenth aeon as in the first, so
+   * "A BUBBLE CAVITY - 1.4 MM" is a direction a player can learn once and use
+   * for the rest of the run. An arrow is only ever good for this trip.
+   */
+  private drawThroneBearing(): void {
+    const run = this.run;
+    if (run.phase === "birth" || run.phase === "dead") return;
+    const k = run.throne;
+    const sx = px(k.x) - this.cam.x;
+    const sy = px(k.y) - this.cam.y;
+    const inset = 34;
+    if (sx > inset && sx < VIEW_W - inset && sy > inset && sy < VIEW_H - inset) return;
+
+    const g = this.ctx;
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    const a = Math.atan2(sy - cy, sx - cx);
+    // Run out from the middle along the bearing until it meets the inset frame,
+    // so the marker sits on the edge nearest the thing it is pointing at.
+    const d = Math.min(
+      Math.abs((VIEW_W / 2 - inset) / Math.cos(a)),
+      Math.abs((VIEW_H / 2 - inset) / Math.sin(a)),
+    );
+    const mx = cx + Math.cos(a) * d, my = cy + Math.sin(a) * d;
+
+    const awake = k.awake && k.hp > 0;
+    const rgb = awake ? "255,90,90" : "255,201,74";
+    const pulse = 0.55 + 0.45 * Math.sin(this.t * (awake ? 6 : 2.4));
+
+    g.save();
+    g.translate(mx, my);
+    g.rotate(a);
+    g.fillStyle = `rgba(${rgb},${pulse.toFixed(2)})`;
+    g.beginPath();
+    g.moveTo(11, 0); g.lineTo(-5, -7); g.lineTo(-5, 7);
+    g.closePath();
+    g.fill();
+    g.restore();
+
+    const r = Math.hypot(k.x - run.you.x, k.y - run.you.y);
+    const near = nearestFeature(CHIP, k.x, k.y);
+    const far = r >= 1e-3 ? `${(r * 1e3).toFixed(1)} MM` : `${(r * 1e6).toFixed(0)} UM`;
+    g.font = `700 9px ${MONO}`;
+    g.textAlign = "center";
+    g.fillStyle = `rgba(${rgb},${(0.5 + pulse * 0.35).toFixed(2)})`;
+    g.fillText(
+      `${awake ? "THE KING" : "THE THRONE"}  ·  ${far}`
+      + `${near ? `  ·  ${featureName(near.feature)}` : ""}`,
+      Math.min(Math.max(cx + Math.cos(a) * (d - 22), 96), VIEW_W - 96),
+      Math.min(Math.max(cy + Math.sin(a) * (d - 22), 16), VIEW_H - 10),
+    );
+    g.textAlign = "left";
   }
 
   private drawThrone(): void {
@@ -2433,7 +2503,16 @@ export class Game {
       `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
       `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
       `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}`
-        + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`,
+        + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`
+        // WHERE it is, not just what is in it. The throne stands at a landmark
+        // from the second aeon on, so "empty" and "never went there" look
+        // identical in a report unless the distance is in it.
+        + `${(() => {
+          const at = nearestFeature(CHIP, run.throne.x, run.throne.y);
+          const r = Math.hypot(run.throne.x - run.you.x, run.throne.y - run.you.y);
+          return `  at ${at ? `${featureName(at.feature).toLowerCase()} #${at.feature.id}` : "mid-channel"}`
+            + `, ${(r * 1e6).toFixed(0)}um from you`;
+        })()}`,
       `bodies: ${run.bodies.length}`
         + `${run.bodies[0] ? (() => {
           const l = limbsOf(run.bodies[0], latticePitch(run));

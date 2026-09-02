@@ -1101,6 +1101,53 @@ function inWater(w: Wave, medium: Medium): Wave {
 
 export const THRONE_RADIUS = 30e-6;
 
+/**
+ * Where the next throne stands.
+ *
+ * NOT THE MIDDLE OF THE CHANNEL. It was the middle in every aeon — literally
+ * `START + ARENA/2`, which is the channel's exact centre — so the one place the
+ * whole game converges on was the one place with no name. The chip is the only
+ * thing here that outlives a world, and it was somewhere you COULD go and never
+ * had to. A landmark nobody is made to visit is scenery.
+ *
+ * So the throne stands at the landmark nearest to WHERE THE LAST KING FELL.
+ * Nothing about that is seeded: you chose it two phases ago by where you
+ * finished the fight, and it is checkable afterwards, which is the difference
+ * between a decision and a surprise. The first aeon has no last king and starts
+ * in the middle — which is also the only water a player who has built nothing
+ * can reach, and the clearance in chip.ts exists to keep that opening minute
+ * free of weather.
+ *
+ * WHAT THIS COSTS THE KING, deliberately. A throne at a bubble cavity puts the
+ * sovereign in the vortex, standing in the one place the water gathers — so the
+ * farm you left there is now inside the 150 um it eats buildings from, and a
+ * cavity stops being free. A throne at a sharp edge puts the fight in 360 um/s
+ * of moving water. Neither is a rule that had to be written; both are what
+ * happens when the fight is moved somewhere that already had physics.
+ *
+ * Only features in water you have actually opened are eligible. The site is
+ * then clamped a throne's radius inside the pool, because a cavity mouth is ON
+ * the wall and a throne has to be stood on to be fed.
+ */
+export function throneSite(
+  run: Run, fellX: number, fellY: number,
+): { x: number; y: number } {
+  const b = run.bounds;
+  let best: Feature | null = null;
+  let bestR = Infinity;
+  for (const f of CHIP) {
+    if (f.x < b.x || f.x > b.x + b.w || f.y < b.y || f.y > b.y + b.h) continue;
+    const r = Math.hypot(f.x - fellX, f.y - fellY);
+    if (r < bestR) { bestR = r; best = f; }
+  }
+  if (!best) return { x: CHANNEL_W / 2, y: CHANNEL_H / 2 };
+  const m = THRONE_RADIUS;
+  return {
+    x: Math.min(Math.max(best.x, b.x + m), b.x + b.w - m),
+    y: Math.min(Math.max(best.y, b.y + m), b.y + b.h - m),
+  };
+}
+
 export function onThrone(run: Run, x: number, y: number): boolean {
   return Math.hypot(x - run.throne.x, y - run.throne.y) < THRONE_RADIUS;
 }
@@ -1599,12 +1646,20 @@ export function enterWorld(run: Run): void {
     ...s, ruin: true, charge: 0, strength: Math.max(1, Math.round(s.strength / 2)),
   }));
 
-  run.throne = emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2);
+  // WHERE THE LAST ONE FELL. The old king is still on `run.throne` here, which
+  // is the only record of it, so the position is taken before anything replaces
+  // it — and the throne itself is not placed until after `retune` below, since
+  // the pool the player actually inherits is smaller than the one they just
+  // fought in and a throne sited against the old one could land outside the
+  // water and be impossible to feed.
+  const fell = { x: run.throne.x, y: run.throne.y };
   run.bound = newBound(w.pitch, w.medium,
     run.bounds.x + run.bounds.w * (0.2 + run.rand() * 0.6),
     run.bounds.y + run.bounds.h * (0.2 + run.rand() * 0.6));
   run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
   retune(run);
+  const site = throneSite(run, fell.x, fell.y);
+  run.throne = emptyThrone(site.x, site.y);
   run.bolts = [];
   run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
   for (let i = run.entities.length; i < suspension(run); i++) run.entities.push(newMotif(run, true));

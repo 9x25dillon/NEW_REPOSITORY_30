@@ -9,7 +9,9 @@ import {
 import {
   ARENA_H, ARENA_W, BIND_RADIUS, CHANNEL_H, CHANNEL_W, CHIP, HOLD_CATCH,
   MAX_AMPLITUDE, MAX_SUSPENSION, START,
-  boundsFor, chipFlow, newMotif, retune, startRun, step, suspension,
+  THRONE_RADIUS,
+  boundsFor, chipFlow, enterWorld, latticePitch, newMotif, onThrone, retune,
+  startRun, step, suspension, throneSite,
 } from "../game/run.js";
 import { BUILDABLE } from "../game/lattice.js";
 import { reachOf, structureFrom } from "../game/world.js";
@@ -486,4 +488,88 @@ test("the merge grid finds every pair the pairwise sweep did, and no others", ()
     !planted((BIND_RADIUS * 3) / Math.SQRT2),
     "a pair outside it never does, so the grid is not introducing strangers",
   );
+});
+
+// ── the fight has somewhere to be ───────────────────────────────────────────
+
+test("the throne stands at a landmark, and the first aeon has none open", () => {
+  const run = startRun(6);
+  assert.equal(run.bounds.w, ARENA_W, "nothing built yet, so the pool is one screen");
+
+  const opening = throneSite(run, run.you.x, run.you.y);
+  assert.ok(
+    Math.hypot(opening.x - CHANNEL_W / 2, opening.y - CHANNEL_H / 2) < 1e-9,
+    "a player who has built nothing gets the middle, the only water they can reach",
+  );
+
+  // Opened out, the answer is a piece of the glass rather than a coordinate.
+  run.bounds = boundsFor(30);
+  const site = throneSite(run, run.you.x, run.you.y);
+  assert.ok(
+    CHIP.some((f) => Math.hypot(f.x - site.x, f.y - site.y) <= THRONE_RADIUS + 1e-9),
+    "it stands on something etched into the glass",
+  );
+  assert.ok(
+    Math.hypot(site.x - CHANNEL_W / 2, site.y - CHANNEL_H / 2) > 500e-6,
+    "and that is nowhere near the middle it used to always be",
+  );
+});
+
+test("where the king fell decides where the next one stands", () => {
+  const run = startRun(6);
+  run.bounds = boundsFor(30);
+  const b = run.bounds;
+  const nw = throneSite(run, b.x + 40e-6, b.y + 40e-6);
+  const se = throneSite(run, b.x + b.w - 40e-6, b.y + b.h - 40e-6);
+
+  assert.ok(
+    Math.hypot(nw.x - se.x, nw.y - se.y) > 1000e-6,
+    `two different endings put the next throne in two different places (${
+      ((nw.x - se.x) * 1e6).toFixed(0)}, ${((nw.y - se.y) * 1e6).toFixed(0)} um apart)`,
+  );
+  // Chosen by play and not by a seed, so it is answerable afterwards.
+  assert.deepEqual(throneSite(run, b.x + 40e-6, b.y + 40e-6), nw, "same ending, same throne");
+});
+
+test("a throne is always in water you can stand in", () => {
+  // THE FAILURE THIS GUARDS. The site was briefly chosen before `retune`, which
+  // means against the pool you had just fought in rather than the smaller one
+  // you inherit — and a throne outside the water cannot be fed, so the aeon
+  // cannot be crowned. Inheritance 0 is the worst case: everything you built
+  // dissolves and the pool collapses to its opening size.
+  for (const inheritance of [0, 0.3, 0.6]) {
+    for (const seed of [1, 2, 3]) {
+      const run = startRun(seed);
+      const pitch = latticePitch(run);
+      for (let i = 0; i < 36; i++) {
+        run.structures.push(structureFrom(
+          run.nextId++, BUILDABLE[0],
+          run.bounds.x + run.bounds.w / 2 + (i % 6) * pitch,
+          run.bounds.y + run.bounds.h / 2 + Math.floor(i / 6) * pitch, 0));
+      }
+      retune(run);
+      const wide = run.bounds;
+      assert.ok(wide.w > ARENA_W * 2, "the crystal opened the chip");
+
+      // It falls out at the far wall, which is the placement most likely to
+      // strand the next throne when the pool shrinks under it.
+      run.phase = "birth";
+      run.world = { ...run.world, inheritance };
+      run.throne.x = wide.x + wide.w - 20e-6;
+      run.throne.y = wide.y + 20e-6;
+      enterWorld(run);
+
+      const b = run.bounds;
+      const k = run.throne;
+      assert.ok(
+        k.x >= b.x && k.x <= b.x + b.w && k.y >= b.y && k.y <= b.y + b.h,
+        `inheritance ${inheritance} seed ${seed}: throne at (${(k.x * 1e6).toFixed(0)},${
+          (k.y * 1e6).toFixed(0)}) is outside a pool of ${(b.x * 1e6).toFixed(0)}..${
+          ((b.x + b.w) * 1e6).toFixed(0)} x ${(b.y * 1e6).toFixed(0)}..${
+          ((b.y + b.h) * 1e6).toFixed(0)} um and can never be fed`,
+      );
+      // And you can actually put your body on it.
+      assert.ok(onThrone(run, k.x, k.y), "standing on it counts as standing on it");
+    }
+  }
 });
