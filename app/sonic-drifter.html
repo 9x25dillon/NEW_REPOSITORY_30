@@ -1205,10 +1205,26 @@
   function limbsOf(body, pitch) {
     const cells = body.cells;
     if (cells.length < 3) return [];
+    const step2 = pitch * 1.5;
+    const grid = /* @__PURE__ */ new Map();
+    const key3 = (gx, gy) => (gx + 4096) * 8192 + (gy + 4096);
+    for (const c of cells) {
+      const k = key3(Math.floor(c.x / step2), Math.floor(c.y / step2));
+      const at = grid.get(k);
+      if (at) at.push(c);
+      else grid.set(k, [c]);
+    }
     const degree = /* @__PURE__ */ new Map();
     for (const a of cells) {
       let n = 0;
-      for (const b of cells) if (b !== a && joined(a, b, pitch)) n++;
+      const gx = Math.floor(a.x / step2), gy = Math.floor(a.y / step2);
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const at = grid.get(key3(gx + ox, gy + oy));
+          if (!at) continue;
+          for (const b of at) if (b !== a && joined(a, b, pitch)) n++;
+        }
+      }
       degree.set(a, n);
     }
     const dirs = lobes(body.hm);
@@ -4767,6 +4783,24 @@
       g2.fillRect(x - w / 2, y - r - 22, w, 5);
       g2.fillStyle = k.anchored ? "#d2beff" : "#8ce9ff";
       g2.fillRect(x - w / 2, y - r - 22, w * (k.hp / k.maxHp), 5);
+      const need = dischargesToKill(this.run);
+      const bearing = this.run.structures.filter((st) => bearsOn(st, k.x, k.y)).length;
+      g2.font = `700 9px ${MONO}`;
+      g2.textAlign = "center";
+      g2.fillStyle = bearing > 0 ? "#8ce9ff" : "rgba(255,255,255,0.45)";
+      g2.fillText(
+        Number.isFinite(need) ? `${need} DISCHARGE${need === 1 ? "" : "S"} TO KILL` : "NOTHING YOU OWN CAN KILL IT",
+        x,
+        y - r - 30
+      );
+      g2.fillStyle = bearing > 0 ? "#8ce9ff" : "#ff5a5a";
+      g2.font = `700 8px ${MONO}`;
+      g2.fillText(
+        bearing > 0 ? `${bearing} OF YOUR BUILDINGS BEAR ON IT  \xB7  ${GLYPH.keys.grip} ONE TO FIRE IT` : "NOTHING YOU OWN IS AIMED AT IT  \xB7  MOVE THE KING INTO AN ARM",
+        x,
+        y - r - 41
+      );
+      g2.textAlign = "left";
       if (k.anchored) {
         g2.fillStyle = "#d2beff";
         g2.font = `700 8px ${MONO}`;
@@ -5338,6 +5372,9 @@
       }
       if (run.bodies.length > 1 && !run.bodies.some((b) => b.cells.length >= 3)) {
         return "YOUR CELLS ARE SCATTERED. PUT THEM ON ADJACENT SITES AND THEY BECOME ONE";
+      }
+      if (run.throne.awake && run.structures.length > 4 && n("discharge") === 0) {
+        return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";
       }
       if (run.throne.fed.length === 0 && run.built > 20) {
         return "YOU NEVER FED THE THRONE. GATHERING IS NOT THE GAME - IT IS HOW YOU PAY FOR THE ONE THING THAT ENDS THIS WATER";

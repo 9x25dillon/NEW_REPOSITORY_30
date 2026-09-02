@@ -162,10 +162,35 @@ export function limbsOf(body: Body, pitch: number): Limb[] {
   const cells = body.cells;
   if (cells.length < 3) return [];
 
+  // HOW MANY NEIGHBOURS EACH CELL HAS, without comparing every pair.
+  //
+  // `joined` reaches at most 1.5 pitches across, so a grid of that pitch puts
+  // every possible neighbour in the nine squares around a cell. The all-pairs
+  // sweep this replaces was written when a body was a dozen cells; a play
+  // report came back with 306 in one organism, where it cost 3.9 ms and the
+  // surface calls this twice a frame — 7.8 ms of a 16.7 ms budget to compute
+  // limbs that a solid body does not have.
+  const step = pitch * 1.5;
+  const grid = new Map<number, Structure[]>();
+  const key = (gx: number, gy: number) => (gx + 4096) * 8192 + (gy + 4096);
+  for (const c of cells) {
+    const k = key(Math.floor(c.x / step), Math.floor(c.y / step));
+    const at = grid.get(k);
+    if (at) at.push(c);
+    else grid.set(k, [c]);
+  }
+
   const degree = new Map<Structure, number>();
   for (const a of cells) {
     let n = 0;
-    for (const b of cells) if (b !== a && joined(a, b, pitch)) n++;
+    const gx = Math.floor(a.x / step), gy = Math.floor(a.y / step);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const at = grid.get(key(gx + ox, gy + oy));
+        if (!at) continue;
+        for (const b of at) if (b !== a && joined(a, b, pitch)) n++;
+      }
+    }
     degree.set(a, n);
   }
 

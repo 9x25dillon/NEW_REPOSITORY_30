@@ -1854,6 +1854,32 @@ export class Game {
     g.fillRect(x - w / 2, y - r - 22, w, 5);
     g.fillStyle = k.anchored ? "#d2beff" : "#8ce9ff";
     g.fillRect(x - w / 2, y - r - 22, w * (k.hp / k.maxHp), 5);
+
+    // WHAT WOULD ACTUALLY MOVE THAT BAR. `drawThrone` prints "N DISCHARGES TO
+    // KILL" while you are feeding it and then returns early the moment it wakes
+    // — so the one actionable number in the game vanished at exactly the point
+    // it became actionable. A report came back with 306 buildings standing, a
+    // king at 150/150, and not one discharge event in the whole run: that fight
+    // needed TWO of them, and was instead fought by hand for nine minutes
+    // against a thing that heals 0.9 hp/s off the buildings it eats.
+    const need = dischargesToKill(this.run);
+    const bearing = this.run.structures.filter((st) => bearsOn(st, k.x, k.y)).length;
+    g.font = `700 9px ${MONO}`;
+    g.textAlign = "center";
+    g.fillStyle = bearing > 0 ? "#8ce9ff" : "rgba(255,255,255,0.45)";
+    g.fillText(
+      Number.isFinite(need)
+        ? `${need} DISCHARGE${need === 1 ? "" : "S"} TO KILL`
+        : "NOTHING YOU OWN CAN KILL IT",
+      x, y - r - 30);
+    g.fillStyle = bearing > 0 ? "#8ce9ff" : "#ff5a5a";
+    g.font = `700 8px ${MONO}`;
+    g.fillText(
+      bearing > 0
+        ? `${bearing} OF YOUR BUILDINGS BEAR ON IT  ·  ${GLYPH.keys.grip} ONE TO FIRE IT`
+        : "NOTHING YOU OWN IS AIMED AT IT  ·  MOVE THE KING INTO AN ARM",
+      x, y - r - 41);
+    g.textAlign = "left";
     if (k.anchored) {
       g.fillStyle = "#d2beff";
       g.font = `700 8px ${MONO}`;
@@ -2480,6 +2506,13 @@ export class Game {
     // function told them to close their hand on a hunter. Nothing about
     // gathering or fighting was the answer to that run, and the one thing that
     // was is the thing it never mentioned.
+    // The second play report: crowned, 306 buildings standing, king finished at
+    // 150/150, and not one discharge in 563 s. It needed two. This function
+    // told them to close their hand on a hunter.
+    if (run.throne.awake && run.structures.length > 4 && n("discharge") === 0) {
+      return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - "
+        + "YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";
+    }
     if (run.throne.fed.length === 0 && run.built > 20) {
       return "YOU NEVER FED THE THRONE. GATHERING IS NOT THE GAME - "
         + "IT IS HOW YOU PAY FOR THE ONE THING THAT ENDS THIS WATER";
