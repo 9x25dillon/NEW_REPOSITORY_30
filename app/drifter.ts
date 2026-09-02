@@ -185,9 +185,11 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "FIELD CANNOT TOUCH IT. YOU CANNOT PUSH IT OFF YOU. ONLY YOUR BUILDINGS CAN REACH IT NOW.",
   },
   devour: {
-    id: "devour", title: "IT EATS WHAT YOU MADE",
-    body: "EVERY STRUCTURE IT TAKES IS BOTH ITS MEAL AND YOUR ARSENAL. KEEP BUILDING WHILE "
-      + "IT FEEDS - THE FIGHT IS A RACE BETWEEN WHAT IT CAN DEVOUR AND WHAT YOU CAN PUT UP.",
+    id: "devour", title: "IT EATS WHAT YOU MADE, AND HEALS",
+    body: "EVERY STRUCTURE IT TAKES IS BOTH YOUR ARSENAL AND ITS MEAL: IT HEALS THREE TIMES "
+      + "THAT BUILDING'S ORDER. IT CAN ONLY REACH WHAT IS WITHIN A HUNDRED AND FIFTY MICRONS "
+      + "OF IT, SO BUILDING AROUND THE THRONE IS FEEDING IT. STAND YOUR ARMS BACK AND WALK "
+      + "THE KING INTO THEM.",
   },
   spent: {
     id: "spent", title: "ENERGY DENSITY GOES AS PRESSURE SQUARED",
@@ -719,6 +721,17 @@ export class Game {
         case "devour":
           this.burst(ev.x, ev.y, 14, "255,90,130");
           this.say("IT TOOK ONE OF YOURS");
+          // AND SAY WHAT THAT WAS WORTH TO IT. A discharge that lands prints
+          // -96 on the spot; eating a building printed nothing at all, so the
+          // health it bought back was invisible and the bar just refilled. A
+          // report came back having landed 96 and been healed 144, reading it
+          // as "my hit did nothing".
+          if (ev.heal > 0) {
+            this.popups.push({
+              x: this.run.throne.x, y: this.run.throne.y,
+              text: `+${ev.heal}`, life: 1.2, colour: "140,230,255", big: false,
+            });
+          }
           this.teach("devour");
           break;
         case "volley":

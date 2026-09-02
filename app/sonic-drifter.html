@@ -2586,8 +2586,9 @@
       }
       if (vr < 15e-5) {
         run.structures = run.structures.filter((s) => s !== victim);
+        const before = k.hp;
         k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
-        run.events.push({ kind: "devour", x: victim.x, y: victim.y });
+        run.events.push({ kind: "devour", x: victim.x, y: victim.y, heal: k.hp - before });
         retune(run);
       }
     }
@@ -3208,8 +3209,8 @@
     },
     devour: {
       id: "devour",
-      title: "IT EATS WHAT YOU MADE",
-      body: "EVERY STRUCTURE IT TAKES IS BOTH ITS MEAL AND YOUR ARSENAL. KEEP BUILDING WHILE IT FEEDS - THE FIGHT IS A RACE BETWEEN WHAT IT CAN DEVOUR AND WHAT YOU CAN PUT UP."
+      title: "IT EATS WHAT YOU MADE, AND HEALS",
+      body: "EVERY STRUCTURE IT TAKES IS BOTH YOUR ARSENAL AND ITS MEAL: IT HEALS THREE TIMES THAT BUILDING'S ORDER. IT CAN ONLY REACH WHAT IS WITHIN A HUNDRED AND FIFTY MICRONS OF IT, SO BUILDING AROUND THE THRONE IS FEEDING IT. STAND YOUR ARMS BACK AND WALK THE KING INTO THEM."
     },
     spent: {
       id: "spent",
@@ -3684,6 +3685,16 @@
           case "devour":
             this.burst(ev.x, ev.y, 14, "255,90,130");
             this.say("IT TOOK ONE OF YOURS");
+            if (ev.heal > 0) {
+              this.popups.push({
+                x: this.run.throne.x,
+                y: this.run.throne.y,
+                text: `+${ev.heal}`,
+                life: 1.2,
+                colour: "140,230,255",
+                big: false
+              });
+            }
             this.teach("devour");
             break;
           case "volley":

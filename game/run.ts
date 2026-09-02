@@ -320,7 +320,7 @@ export type Ev =
   | { kind: "fed"; group: string }
   | { kind: "crown"; group: string; mass: number }
   | { kind: "discharge"; x: number; y: number; group: string; damage: number }
-  | { kind: "devour"; x: number; y: number }
+  | { kind: "devour"; x: number; y: number; heal: number }
   | { kind: "volley"; x: number; y: number; arms: number }
   | { kind: "sovereign-hit"; x: number; y: number }
   | { kind: "wearing"; x: number; y: number }
@@ -1709,8 +1709,13 @@ function reign(run: Run, dt: number): void {
     }
     if (vr < 150e-6) {
       run.structures = run.structures.filter((s) => s !== victim);
+      const before = k.hp;
       k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
-      run.events.push({ kind: "devour", x: victim.x, y: victim.y });
+      // The heal goes on the event because the surface has to SAY it. A report
+      // came back with one discharge landed for 96 and four buildings eaten for
+      // 144, and the player watched their only good hit disappear off a bar
+      // that refilled without comment.
+      run.events.push({ kind: "devour", x: victim.x, y: victim.y, heal: k.hp - before });
       retune(run);
     }
   }
