@@ -43,10 +43,9 @@ it is which claim just leaked into which.**
 ## State
 
 ```
-branch   main   (3 commits AHEAD of origin/main as of the end of 2026-09-02 —
-                the chip session's work is committed but NOT PUSHED. The repo is
-                PRIVATE, which is what config/subject.ts assumes — check before
-                that ever changes)
+branch   main   (pushed to origin/main 2026-09-02, chip session included; the
+                repo is PRIVATE, which is what config/subject.ts assumes — check
+                before that ever changes)
 tests    282, all passing
 build    npm test | npm run typecheck | npm run drifter
 play     app/sonic-drifter.html — one file, no build step, no network
