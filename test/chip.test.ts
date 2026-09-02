@@ -7,9 +7,13 @@ import {
   features, flowAt, nearestFeature,
 } from "../game/chip.js";
 import {
-  ARENA_H, ARENA_W, CHANNEL_H, CHANNEL_W, CHIP, MAX_AMPLITUDE, START,
-  boundsFor, chipFlow, newMotif, startRun, step,
+  ARENA_H, ARENA_W, BIND_RADIUS, CHANNEL_H, CHANNEL_W, CHIP, HOLD_CATCH,
+  MAX_AMPLITUDE, MAX_SUSPENSION, START,
+  boundsFor, chipFlow, newMotif, retune, startRun, step, suspension,
 } from "../game/run.js";
+import { BUILDABLE } from "../game/lattice.js";
+import { reachOf, structureFrom } from "../game/world.js";
+import { lobes } from "../game/shape.js";
 import { CRUISE_AMPLITUDE, YOU, speed } from "../game/pilot.js";
 import { advance, aimAt, newWave, streamingSpeed } from "../game/wave.js";
 import { MAMMALIAN_CELL } from "../src/gorkov.js";
@@ -329,4 +333,157 @@ test("the chip can tell you what you are standing in, and only when you are", ()
   assert.ok(near, "and standing in a cavity, you are told");
   assert.equal(near.feature.id, c.id);
   assert.ok(near.r < CAVITY_REACH);
+});
+
+// ── the water the chip stands in ────────────────────────────────────────────
+//
+// A collector is worth nothing in distilled water, and until the suspension
+// became a concentration that is exactly what the outer channel was. Every
+// motif in the game was seeded into the starting pool and held there by a count
+// — the channel is 21.2 times that pool's area — so `chip.ts`'s central claim,
+// that a cavity "has been gathering while you were elsewhere", was false. Not
+// because the cavity was wrong: a mote at its rim is at the core in fifteen
+// seconds. Because nothing was ever out there.
+
+test("the water you open is carrying something: density is a concentration", () => {
+  const run = startRun(4);
+  const pool = suspension(run);
+  assert.equal(pool, run.world.density, "in the starting pool it is the tuned figure exactly");
+
+  // The same water, opened out. A suspension does not thin because you can
+  // reach more of it.
+  run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  const opened = suspension(run);
+  const ratio = (CHANNEL_W * CHANNEL_H) / (ARENA_W * ARENA_H);
+  assert.ok(opened > pool * 10, `the whole channel holds far more than the pool: ${opened} vs ${pool}`);
+  assert.ok(
+    Math.abs(opened - run.world.density * ratio) < 2,
+    `and it holds exactly the concentration, not a capped guess: ${opened}`,
+  );
+  assert.ok(opened <= MAX_SUSPENSION, "the backstop is above what any real world asks for");
+});
+
+test("a bubble cavity gathers while you are somewhere else", () => {
+  // THE REWARD FOR GOING. The player never moves and never grips; the drive is
+  // floored at cruise, which is what makes the chip alive at all.
+  const run = startRun(11);
+  run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  run.you.x = CHANNEL_W / 2;
+  run.you.y = CHANNEL_H / 2;
+  const dt = 1 / 60;
+  for (let i = 0; i < 90 / dt; i++) {
+    step(run, { move: { x: 0, y: 0 }, grip: false, dash: false }, dt);
+    run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  }
+  const motifs = run.entities.filter((e) => e.faction === "motif");
+  const inCore = (f: Feature) =>
+    motifs.filter((e) => Math.hypot(e.x - f.x, e.y - f.y) < 80e-6).length;
+
+  // A core is a 160 um circle in a 4200 x 3000 um channel: a thousandth of the
+  // area. Anything above a couple of motifs is concentration, not chance.
+  const piles = cavities.map(inCore);
+  const byChance = motifs.length * (Math.PI * 80e-6 ** 2) / (CHANNEL_W * CHANNEL_H);
+  for (const [i, n] of piles.entries()) {
+    assert.ok(
+      n > byChance * 8,
+      `cavity ${i} holds ${n} motifs where an even scatter of ${motifs.length} would leave ` +
+      `${byChance.toFixed(1)} there. That is concentration, which is what a cavity is for.`,
+    );
+  }
+
+  // And a sharp edge does the opposite, which is the point of cutting it tilted:
+  // it pumps rather than collects, so it strings its catch out along the jet.
+  for (const f of edges) {
+    assert.ok(inCore(f) <= 4, "a tip throws water away from itself, it does not hoard it");
+  }
+});
+
+test("building at a cavity is a decision: the arm tip has to land on the core", () => {
+  // The measurement this exists to protect. A cavity concentrates into a POINT
+  // and a building holds on a RING of arm tips, so the same building at the
+  // same cavity either farms or does nothing depending on one placement. If
+  // this ever stops being true, HOLD_CATCH and the catchment the surface draws
+  // have drifted apart from each other.
+  const hm = BUILDABLE[0];
+  const cav = cavities.find((f) => f.y === 0)!;
+  const r = reachOf(hm);
+  const [lx, ly] = lobes(hm)[0];
+
+  const farmed = (sx: number, sy: number) => {
+    const run = startRun(11);
+    run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+    run.you.x = CHANNEL_W / 2;
+    run.you.y = CHANNEL_H / 2;
+    run.structures.push(structureFrom(run.nextId++, hm, sx, sy, 0));
+    retune(run);
+    run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+    const dt = 1 / 60;
+    let merges = 0;
+    for (let i = 0; i < 60 / dt; i++) {
+      run.events.length = 0;
+      step(run, { move: { x: 0, y: 0 }, grip: false, dash: false }, dt);
+      merges += run.events.filter((e) => e.kind === "merge").length;
+      run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+    }
+    return merges;
+  };
+
+  // One reach back along a lobe, so that arm's tip sits exactly on the core.
+  const onCore = farmed(cav.x - lx * r, cav.y - ly * r);
+  // The same building, its tip a clear catchment-and-a-half off the core.
+  const offBy = r * HOLD_CATCH * 2.5;
+  const missed = farmed(cav.x - lx * r + offBy, cav.y - ly * r + offBy);
+
+  assert.ok(onCore > 0, `a tip on the core binds what the cavity brings (${onCore} merges)`);
+  assert.ok(
+    onCore > missed * 2,
+    `and placement is the whole of it: ${onCore} merges on the core against ${missed} off it`,
+  );
+});
+
+test("the merge grid finds every pair the pairwise sweep did, and no others", () => {
+  // mergePass went from comparing every pair to a grid of exactly BIND_RADIUS,
+  // which is only correct if nothing can bind further away than one square.
+  //
+  // The evidence is that the two motifs NOTICED each other at all, not that
+  // they joined: a pair that finds each other and is refused by the assembly
+  // rules is still a pair the sweep found. Both outcomes are events, and a
+  // neighbourhood that dropped the pair emits neither.
+  const dt = 1 / 60;
+  const planted = (gap: number) => {
+    const run = startRun(2);
+    // Nobody else in the water: the suspension tops itself up every frame, and
+    // arrivals colliding elsewhere would answer this question for us.
+    run.world = { ...run.world, density: 0 };
+    run.entities = [];
+    // Straddling a grid line on purpose: the pair's midpoint sits on a corner
+    // of the hash, which is the placement a naive single-cell lookup loses.
+    const gx = Math.ceil(run.you.x / BIND_RADIUS) * BIND_RADIUS;
+    const gy = Math.ceil(run.you.y / BIND_RADIUS) * BIND_RADIUS;
+    run.you.x = gx;
+    run.you.y = gy;
+    for (const sgn of [-1, 1]) {
+      const e = newMotif(run, true);
+      e.x = gx + (sgn * gap) / 2;
+      e.y = gy + (sgn * gap) / 2;
+      run.entities.push(e);
+    }
+    let noticed = false;
+    for (let i = 0; i < 90; i++) {
+      run.events.length = 0;
+      step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, dt);
+      if (run.events.some((e) => e.kind === "merge" || e.kind === "refuse")) noticed = true;
+      if (run.entities.filter((e) => e.faction === "motif").length < 2) noticed = true;
+    }
+    return noticed;
+  };
+
+  assert.ok(
+    planted((BIND_RADIUS * 0.5) / Math.SQRT2),
+    "a pair inside BIND_RADIUS finds each other even across a grid line",
+  );
+  assert.ok(
+    !planted((BIND_RADIUS * 3) / Math.SQRT2),
+    "a pair outside it never does, so the grid is not introducing strangers",
+  );
 });

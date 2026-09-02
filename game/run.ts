@@ -124,6 +124,52 @@ export function boundsFor(cells: number): Bounds {
   // would not be the water you were standing in.
   return { x: (CHANNEL_W - w) / 2, y: (CHANNEL_H - h) / 2, w, h };
 }
+/**
+ * How many motifs the water you have opened is carrying.
+ *
+ * `world.density` is a CONCENTRATION — its own doc says so, "it is a
+ * suspension, how much is in it is a property of the water" — but it was being
+ * spent as an absolute count, seeded once into the starting pool and then held
+ * there by `motifs < density`. The channel is twenty-one times that pool's
+ * area, so every motif in the game lived in the middle five per cent of it and
+ * the rest was distilled water.
+ *
+ * That made `chip.ts`'s central claim false. It says a cavity "has been
+ * gathering while you were elsewhere, and going to look is the reward for
+ * going". Going was worth nothing — and NOT because the cavity was wrong: a
+ * mote dropped at its rim is at the core in fifteen seconds at cruise and four
+ * and a half at grip. There was simply never anything out there to gather.
+ *
+ * So: the same concentration, over the water you have actually opened. The
+ * density figures tuned in world.ts stay exactly as valid, because the count
+ * NEAR YOU does not change — what changes is that the outer channel now has
+ * something in it, and a landmark can pay for the walk.
+ *
+ * THE CAP IS A BACKSTOP AND NOT A TUNING KNOB, and in the worlds this game
+ * actually makes it never binds: the richest water is density 40, the whole
+ * channel is 21.2 pools, and 848 is under it.
+ *
+ * It was briefly a real frame budget of 400. That was when `mergePass` compared
+ * every pair — 636 motifs cost 8.5 ms a frame against a budget of 16.7, and the
+ * outer water had to run at two thirds concentration to pay for it. The merge
+ * pass is O(n) now (see `neighbourhood`), which measures at 1.4 ms for the same
+ * 636 and 2.0 ms for a thousand, so the physical answer and the affordable one
+ * stopped disagreeing and the cap stopped having anything to decide.
+ *
+ * The renderer needed the other half of that: it draws a trail as eight
+ * separate strokes per motif, so `drifter.onCamera` culls to the view.
+ */
+export const MAX_SUSPENSION = 900;
+
+/** The motif population the current pool should hold. */
+export function suspension(run: Run): number {
+  const area = run.bounds.w * run.bounds.h;
+  return Math.min(
+    MAX_SUSPENSION,
+    Math.round(run.world.density * (area / (ARENA_W * ARENA_H))),
+  );
+}
+
 export const MAX_AMPLITUDE = 2.0e5;
 
 /** Focus must stay well under the trap pitch or your hand is not one trap. */
@@ -335,7 +381,7 @@ export function startRun(seed = 1): Run {
     rand: rng(seed),
     nextId: 0,
   };
-  for (let i = 0; i < world.density; i++) run.entities.push(newMotif(run, true));
+  for (let i = 0; i < suspension(run); i++) run.entities.push(newMotif(run, true));
   run.spacing = workableSpacing(run.bound.omega, world.medium, reachOf(BUILDABLE[0]));
   return run;
 }
@@ -487,7 +533,7 @@ export function step(run: Run, input: Input, dt: number): void {
     }
   }
   const motifs = run.entities.filter((e) => e.faction === "motif").length;
-  if (motifs < run.world.density) run.entities.push(newMotif(run));
+  if (motifs < suspension(run)) run.entities.push(newMotif(run));
 
   release(run, dt);
   walkBodies(run, dt);
@@ -717,33 +763,104 @@ export function kill(run: Run, e: Entity): void {
 
 // ── merging, and what your buildings do while you are away ──────────────────
 
+/**
+ * How wide a catch each of a building's arm tips has, as a fraction of its
+ * holding radius.
+ *
+ * Exported for the reason LOBE_ARC and LOBE_RANGE were: the surface has to draw
+ * the same region the rule is computed in. That comment says the player "was
+ * shown a forty-micron stub and handed a three-hundred-micron gun"; this is the
+ * same fault the other way round — an arm tip is drawn as a dot two pixels
+ * across and binds anything inside twenty microns of it.
+ *
+ * It matters now in a way it did not before. A bubble cavity concentrates what
+ * the water is carrying into a POINT, and a building holds along a RING of arm
+ * tips, so whether a structure at a cavity farms or does nothing comes down to
+ * whether one tip lands on the core. Measured, both at the same cavity with the
+ * player idle on the far side of the channel for two minutes: a tip on the core
+ * makes six cells, a tip fifty microns off makes none. That is a real decision
+ * and it was invisible.
+ */
+export const HOLD_CATCH = 0.55;
+
 /** True if this point is inside some structure's holding field. */
 function underStructure(run: Run, x: number, y: number, layer: number): boolean {
   for (const s of run.structures) {
     if (!s.serves.includes(layer)) continue;
     for (const [hx, hy] of holdPoints(s)) {
-      if (Math.hypot(hx - x, hy - y) < s.reach * 0.55) return true;
+      if (Math.hypot(hx - x, hy - y) < s.reach * HOLD_CATCH) return true;
     }
   }
   return false;
+}
+
+/**
+ * Everything within binding distance, without asking every pair.
+ *
+ * Two motifs can only bind inside BIND_RADIUS, so a grid of exactly that pitch
+ * puts every possible partner in the nine cells around a mote and nowhere else.
+ * The pairwise sweep this replaces was the whole reason the suspension had to
+ * be capped: it was O(n^2), and at the 636 motifs a full channel asks for it
+ * cost 8.5 ms a frame against a 16.7 ms budget. It is O(n) now and the cap is
+ * gone, so the water carries the concentration it should.
+ *
+ * Order is preserved exactly — a mote still partners with the nearest candidate
+ * of HIGHER index — because a merge consumes one of the pair and which one it
+ * consumes decides where the survivor ends up. Same answer, less asking.
+ */
+function neighbourhood(ms: readonly Entity[]): Map<number, number[]> {
+  const grid = new Map<number, number[]>();
+  for (let i = 0; i < ms.length; i++) {
+    const key = cellKey(ms[i].x, ms[i].y);
+    const at = grid.get(key);
+    if (at) at.push(i);
+    else grid.set(key, [i]);
+  }
+  return grid;
+}
+
+/**
+ * Which grid square a point is in, as one number.
+ *
+ * Multiplied rather than bit-shifted on purpose: a shift in JS is 32-bit
+ * signed, and the offset that keeps negative coordinates in range would push
+ * this past 2^31 and wrap. The channel is a couple of hundred squares across,
+ * so the product stays small enough to be an exact integer in a double.
+ */
+const KEY_ORIGIN = 32768;
+const KEY_STRIDE = 65536;
+function cellKey(x: number, y: number): number {
+  const cx = Math.floor(x / BIND_RADIUS) + KEY_ORIGIN;
+  const cy = Math.floor(y / BIND_RADIUS) + KEY_ORIGIN;
+  return cx * KEY_STRIDE + cy;
 }
 
 function mergePass(run: Run, dt: number): void {
   const ms = run.entities.filter((e) => e.faction === "motif");
   const gripping = handed(run.you);
   const gone = new Set<number>();
+  const grid = neighbourhood(ms);
 
   for (let i = 0; i < ms.length; i++) {
     const a = ms[i];
     if (gone.has(a.id)) continue;
     let best: Entity | null = null;
     let bestR = BIND_RADIUS;
-    for (let j = i + 1; j < ms.length; j++) {
-      const b = ms[j];
-      if (gone.has(b.id)) continue;
-      if (!together(a.layer, b.layer)) continue;   // not in the same trap at all
-      const r = Math.hypot(a.x - b.x, a.y - b.y);
-      if (r < bestR) { bestR = r; best = b; }
+    const cx = Math.floor(a.x / BIND_RADIUS);
+    const cy = Math.floor(a.y / BIND_RADIUS);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const at = grid.get((cx + ox + KEY_ORIGIN) * KEY_STRIDE + (cy + oy + KEY_ORIGIN));
+        if (!at) continue;
+        for (const j of at) {
+          if (j <= i) continue;                      // the same pair, once
+          const b = ms[j];
+          if (gone.has(b.id)) continue;
+          if (!together(a.layer, b.layer)) continue; // not in the same trap at all
+          const r = Math.hypot(a.x - b.x, a.y - b.y);
+          if (r < bestR) { bestR = r; best = b; }
+        }
+      }
     }
     if (!best) { a.dwell = 0; a.partner = -1; continue; }
 
@@ -1490,7 +1607,7 @@ export function enterWorld(run: Run): void {
   retune(run);
   run.bolts = [];
   run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
-  for (let i = run.entities.length; i < w.density; i++) run.entities.push(newMotif(run, true));
+  for (let i = run.entities.length; i < suspension(run); i++) run.entities.push(newMotif(run, true));
   run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
   run.spawnIn = 4;
   run.phase = "settle";

@@ -1751,6 +1751,14 @@
     const h = Math.min(CHANNEL_H, ARENA_H * grow);
     return { x: (CHANNEL_W - w) / 2, y: (CHANNEL_H - h) / 2, w, h };
   }
+  var MAX_SUSPENSION = 900;
+  function suspension(run) {
+    const area = run.bounds.w * run.bounds.h;
+    return Math.min(
+      MAX_SUSPENSION,
+      Math.round(run.world.density * (area / (ARENA_W * ARENA_H)))
+    );
+  }
   var MAX_AMPLITUDE = 2e5;
   function focusFor(pitch) {
     return pitch * 0.62;
@@ -1802,7 +1810,7 @@
       rand: rng(seed),
       nextId: 0
     };
-    for (let i = 0; i < world.density; i++) run.entities.push(newMotif(run, true));
+    for (let i = 0; i < suspension(run); i++) run.entities.push(newMotif(run, true));
     run.spacing = workableSpacing(run.bound.omega, world.medium, reachOf(BUILDABLE[0]));
     return run;
   }
@@ -1913,7 +1921,7 @@
       }
     }
     const motifs = run.entities.filter((e) => e.faction === "motif").length;
-    if (motifs < run.world.density) run.entities.push(newMotif(run));
+    if (motifs < suspension(run)) run.entities.push(newMotif(run));
     release(run, dt);
     walkBodies(run, dt);
     drift(run, dt);
@@ -2080,32 +2088,60 @@
       }
     }
   }
+  var HOLD_CATCH = 0.55;
   function underStructure(run, x, y, layer) {
     for (const s of run.structures) {
       if (!s.serves.includes(layer)) continue;
       for (const [hx, hy] of holdPoints(s)) {
-        if (Math.hypot(hx - x, hy - y) < s.reach * 0.55) return true;
+        if (Math.hypot(hx - x, hy - y) < s.reach * HOLD_CATCH) return true;
       }
     }
     return false;
+  }
+  function neighbourhood(ms) {
+    const grid = /* @__PURE__ */ new Map();
+    for (let i = 0; i < ms.length; i++) {
+      const key3 = cellKey(ms[i].x, ms[i].y);
+      const at = grid.get(key3);
+      if (at) at.push(i);
+      else grid.set(key3, [i]);
+    }
+    return grid;
+  }
+  var KEY_ORIGIN = 32768;
+  var KEY_STRIDE = 65536;
+  function cellKey(x, y) {
+    const cx = Math.floor(x / BIND_RADIUS) + KEY_ORIGIN;
+    const cy = Math.floor(y / BIND_RADIUS) + KEY_ORIGIN;
+    return cx * KEY_STRIDE + cy;
   }
   function mergePass(run, dt) {
     const ms = run.entities.filter((e) => e.faction === "motif");
     const gripping = handed(run.you);
     const gone = /* @__PURE__ */ new Set();
+    const grid = neighbourhood(ms);
     for (let i = 0; i < ms.length; i++) {
       const a = ms[i];
       if (gone.has(a.id)) continue;
       let best = null;
       let bestR = BIND_RADIUS;
-      for (let j = i + 1; j < ms.length; j++) {
-        const b = ms[j];
-        if (gone.has(b.id)) continue;
-        if (!together(a.layer, b.layer)) continue;
-        const r = Math.hypot(a.x - b.x, a.y - b.y);
-        if (r < bestR) {
-          bestR = r;
-          best = b;
+      const cx = Math.floor(a.x / BIND_RADIUS);
+      const cy = Math.floor(a.y / BIND_RADIUS);
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          const at = grid.get((cx + ox + KEY_ORIGIN) * KEY_STRIDE + (cy + oy + KEY_ORIGIN));
+          if (!at) continue;
+          for (const j of at) {
+            if (j <= i) continue;
+            const b = ms[j];
+            if (gone.has(b.id)) continue;
+            if (!together(a.layer, b.layer)) continue;
+            const r = Math.hypot(a.x - b.x, a.y - b.y);
+            if (r < bestR) {
+              bestR = r;
+              best = b;
+            }
+          }
         }
       }
       if (!best) {
@@ -2585,7 +2621,7 @@
     retune(run);
     run.bolts = [];
     run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
-    for (let i = run.entities.length; i < w.density; i++) run.entities.push(newMotif(run, true));
+    for (let i = run.entities.length; i < suspension(run); i++) run.entities.push(newMotif(run, true));
     run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
     run.spawnIn = 4;
     run.phase = "settle";
@@ -4171,6 +4207,21 @@
           g2.moveTo(x + dx * 6, y + dy * 6);
           g2.lineTo(x + dx * R, y + dy * R);
           g2.stroke();
+          const cr = R * HOLD_CATCH;
+          const catchment = g2.createRadialGradient(
+            x + dx * R,
+            y + dy * R,
+            0,
+            x + dx * R,
+            y + dy * R,
+            cr
+          );
+          catchment.addColorStop(0, `rgba(${rgb},${(a * 0.16).toFixed(3)})`);
+          catchment.addColorStop(1, "rgba(0,0,0,0)");
+          g2.fillStyle = catchment;
+          g2.beginPath();
+          g2.arc(x + dx * R, y + dy * R, cr, 0, Math.PI * 2);
+          g2.fill();
           g2.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
           g2.beginPath();
           g2.arc(x + dx * R, y + dy * R, 2.6, 0, Math.PI * 2);
@@ -4351,10 +4402,29 @@
       }
       g2.textAlign = "left";
     }
+    /**
+     * Is this near enough to the view to be worth drawing?
+     *
+     * This was not needed while the whole population lived in the starting pool,
+     * which was one screen. The water now carries its real concentration over the
+     * whole channel — six hundred-odd motifs instead of thirty — and only about a
+     * fourteenth of them are ever on screen. Trails are the reason it matters:
+     * each one is eight separate strokes, so an unculled frame asked the canvas
+     * for five thousand paths to show a few dozen.
+     *
+     * The margin covers a trail's own length. A trail is nine points of motion
+     * and nothing here moves faster than a jet, so tens of pixels is generous.
+     */
+    onCamera(x, y, margin = 48) {
+      const sx = px(x) - this.cam.x;
+      const sy = px(y) - this.cam.y;
+      return sx > -margin && sx < VIEW_W + margin && sy > -margin && sy < VIEW_H + margin;
+    }
     drawTrails() {
       const g2 = this.ctx;
       g2.lineCap = "round";
       for (const e of this.run.entities) {
+        if (!this.onCamera(e.x, e.y)) continue;
         const n = e.trail.length / 2;
         if (n < 3) continue;
         const rgb = warmth(contrastFactor(particleOf(e), this.run.world.medium));
@@ -4374,6 +4444,7 @@
       const g2 = this.ctx;
       const here = this.run.layer;
       for (const e of this.run.entities) {
+        if (!this.onCamera(e.x, e.y)) continue;
         const p = particleOf(e);
         const x = px(e.x), y = px(e.y);
         const rgb = warmth(contrastFactor(p, waterAt(this.run, e.y)));

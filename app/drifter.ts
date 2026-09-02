@@ -19,7 +19,7 @@
 import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
-  LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
+  HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
   CHANNEL_H, beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
   liftCell,
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
@@ -1339,11 +1339,27 @@ export class Game {
 
       g.strokeStyle = `rgba(${rgb},${(a * 0.6).toFixed(3)})`;
       g.lineWidth = 1.4;
+      // WHAT EACH ARM ACTUALLY CATCHES. The tip is where the building holds,
+      // and it holds everything inside HOLD_CATCH of it — which is twenty
+      // microns, not the two-pixel dot this used to be. It is the same fault
+      // the cones above were drawn to fix, in the other direction.
+      //
+      // It became worth drawing when the chip did. A cavity gathers the water
+      // into a point; a building holds on a ring; so building AT a cavity is
+      // the act of landing one of these on that point, and a player cannot aim
+      // at something they cannot see.
       for (const [dx, dy] of s.lobes) {
         g.beginPath();
         g.moveTo(x + dx * 6, y + dy * 6);
         g.lineTo(x + dx * R, y + dy * R);
         g.stroke();
+        const cr = R * HOLD_CATCH;
+        const catchment = g.createRadialGradient(
+          x + dx * R, y + dy * R, 0, x + dx * R, y + dy * R, cr);
+        catchment.addColorStop(0, `rgba(${rgb},${(a * 0.16).toFixed(3)})`);
+        catchment.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = catchment;
+        g.beginPath(); g.arc(x + dx * R, y + dy * R, cr, 0, Math.PI * 2); g.fill();
         g.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
         g.beginPath(); g.arc(x + dx * R, y + dy * R, 2.6, 0, Math.PI * 2); g.fill();
       }
@@ -1533,10 +1549,31 @@ export class Game {
     g.textAlign = "left";
   }
 
+  /**
+   * Is this near enough to the view to be worth drawing?
+   *
+   * This was not needed while the whole population lived in the starting pool,
+   * which was one screen. The water now carries its real concentration over the
+   * whole channel — six hundred-odd motifs instead of thirty — and only about a
+   * fourteenth of them are ever on screen. Trails are the reason it matters:
+   * each one is eight separate strokes, so an unculled frame asked the canvas
+   * for five thousand paths to show a few dozen.
+   *
+   * The margin covers a trail's own length. A trail is nine points of motion
+   * and nothing here moves faster than a jet, so tens of pixels is generous.
+   */
+  private onCamera(x: number, y: number, margin = 48): boolean {
+    const sx = px(x) - this.cam.x;
+    const sy = px(y) - this.cam.y;
+    return sx > -margin && sx < VIEW_W + margin
+      && sy > -margin && sy < VIEW_H + margin;
+  }
+
   private drawTrails(): void {
     const g = this.ctx;
     g.lineCap = "round";
     for (const e of this.run.entities) {
+      if (!this.onCamera(e.x, e.y)) continue;
       const n = e.trail.length / 2;
       if (n < 3) continue;
       const rgb = warmth(contrastFactor(particleOf(e), this.run.world.medium));
@@ -1557,6 +1594,7 @@ export class Game {
     const g = this.ctx;
     const here = this.run.layer;
     for (const e of this.run.entities) {
+      if (!this.onCamera(e.x, e.y)) continue;
       const p = particleOf(e);
       const x = px(e.x), y = px(e.y);
       const rgb = warmth(contrastFactor(p, waterAt(this.run, e.y)));
