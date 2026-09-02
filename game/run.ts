@@ -1523,11 +1523,29 @@ function driveStructures(run: Run, dt: number): void {
   const driving = handed(run.you);
   const spent: Structure[] = [];
 
+  const k = run.throne;
+  const hunting = k.awake && k.hp > 0;
+
   for (const s of run.structures) {
     const near = Math.hypot(s.x - run.you.x, s.y - run.you.y) < DRIVE_RADIUS;
     if (driving && near) {
-      s.charge += dt / chargeTime(s);
-      if (s.charge >= 1) spent.push(s);
+      s.charge = Math.min(1, s.charge + dt / chargeTime(s));
+      // IT WAITS FOR A TARGET. This used to fire the instant the charge filled,
+      // bearing or nothing — so a building you had held for a second and a half
+      // was spent into empty water if the king stepped out of the arm while it
+      // charged. A report came back with six discharges and two hits, 81
+      // buildings standing, and a king at 549 of 830.
+      //
+      // Measured on that layout: only four of 81 buildings bear on the king at
+      // any moment, and at 44 per cent of the positions it can stand in NOTHING
+      // does. Against those odds, firing on a timer is not a skill test, it is
+      // a coin toss that costs a building either way.
+      //
+      // This module already says what the rule was meant to be — "a building
+      // cannot be aimed, so the only thing that can be aimed is the KING". A
+      // loaded building holding until the king is in front of it IS that rule.
+      // Letting go still drops the charge, so it cannot be banked.
+      if (s.charge >= 1 && (!hunting || bearsOn(s, k.x, k.y))) spent.push(s);
     } else {
       // WHAT THE GLASS DOES TO IT. A building standing in a tip jet is being
       // worked on by water that YOU drove — chip.ts: "it is powered by your

@@ -1200,3 +1200,52 @@ test("spending your arsenal does not shrink the water you are fighting in", () =
     + "not with the high-water mark of the world you left",
   );
 });
+
+test("a loaded building waits for the king instead of firing into water", () => {
+  // A report came back with six discharges and two hits, 81 buildings standing,
+  // and a king at 549 of 830. Measured on that layout: four of 81 buildings
+  // bear on the king at any moment and at 44% of the positions it can stand in
+  // none of them do — so firing the instant the charge filled was a coin toss
+  // that cost a building either way. This module's own comment says the rule:
+  // a building cannot be aimed, so the only thing that can be aimed is the king.
+  const build = (angleFromKing: number) => {
+    const run = startRun(21);
+    grant(run, ["222"]);
+    stand(run, run.throne.x, run.throne.y);
+    feedThrone(run, 0);
+    crown(run);
+    // A 222 fires along +/-x and its arm carries 300 um. Put the gun beyond the
+    // 150 um the king eats within — otherwise it is devoured mid-test and the
+    // building goes missing for a reason that has nothing to do with firing.
+    const d = 200e-6;
+    const gun = structureFrom(901, "222",
+      run.throne.x - Math.cos(angleFromKing) * d,
+      run.throne.y - Math.sin(angleFromKing) * d);
+    run.structures = [gun];
+    stand(run, gun.x, gun.y);
+    // Three seconds. Continuous grip empties the stamina in about six, and a
+    // spent hand stops driving — so a longer window measures the charge
+    // decaying after the drive died, not whether it waited.
+    let fired = 0;
+    for (let i = 0; i < 60 * 3; i++) {
+      // Pinned BEFORE the step, not after: `carry` runs early in a frame and
+      // `driveStructures` late, so a hand set afterwards has already drifted
+      // off the building by the time the charge is counted.
+      run.you.x = gun.x; run.you.y = gun.y;
+      run.throne.x = gun.x + Math.cos(angleFromKing) * d;
+      run.throne.y = gun.y + Math.sin(angleFromKing) * d;
+      run.events.length = 0;
+      step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+      fired += run.events.filter((e) => e.kind === "discharge").length;
+    }
+    return { fired, left: run.structures.length, charge: gun.charge };
+  };
+
+  const aligned = build(0);
+  assert.ok(aligned.fired > 0, "a gun with the king in its arm fires");
+
+  const off = build(Math.PI / 2);
+  assert.equal(off.fired, 0, "a gun with the king square off its arm does not");
+  assert.equal(off.left, 1, "and is still standing, not spent on nothing");
+  assert.ok(off.charge >= 1, "it is loaded and waiting, which is what the surface says");
+});

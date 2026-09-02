@@ -2475,11 +2475,13 @@
     }
     const driving = handed(run.you);
     const spent = [];
+    const k = run.throne;
+    const hunting = k.awake && k.hp > 0;
     for (const s of run.structures) {
       const near = Math.hypot(s.x - run.you.x, s.y - run.you.y) < DRIVE_RADIUS;
       if (driving && near) {
-        s.charge += dt / chargeTime(s);
-        if (s.charge >= 1) spent.push(s);
+        s.charge = Math.min(1, s.charge + dt / chargeTime(s));
+        if (s.charge >= 1 && (!hunting || bearsOn(s, k.x, k.y))) spent.push(s);
       } else {
         const f = chipFlow(run, s.x, s.y);
         const held = Math.min(1, Math.hypot(f.x, f.y) / CHIP_FASTEST);
@@ -4356,6 +4358,14 @@
             g2.beginPath();
             g2.arc(x, y, R + 5, 0, Math.PI * 2);
             g2.stroke();
+            g2.strokeStyle = `rgba(${rgb},${(0.18 + 0.22 * Math.sin(this.t * 5)).toFixed(2)})`;
+            g2.lineWidth = 1;
+            g2.setLineDash([2, 4]);
+            g2.beginPath();
+            g2.moveTo(x, y);
+            g2.lineTo(px(k.x), px(k.y));
+            g2.stroke();
+            g2.setLineDash([]);
           }
         }
         g2.strokeStyle = `rgba(${rgb},${(a * 0.28).toFixed(3)})`;
@@ -4400,11 +4410,19 @@
         g2.fillText(s.hm, x, y + 12);
         g2.textAlign = "left";
         if (s.charge > 0) {
-          g2.strokeStyle = `rgba(255,201,74,${(0.4 + s.charge * 0.6).toFixed(2)})`;
-          g2.lineWidth = 3;
+          const loaded = s.charge >= 1;
+          g2.strokeStyle = loaded ? `rgba(140,233,255,${(0.55 + 0.45 * Math.sin(this.t * 9)).toFixed(2)})` : `rgba(255,201,74,${(0.4 + s.charge * 0.6).toFixed(2)})`;
+          g2.lineWidth = loaded ? 4 : 3;
           g2.beginPath();
           g2.arc(x, y, 10, -Math.PI / 2, -Math.PI / 2 + s.charge * Math.PI * 2);
           g2.stroke();
+          if (loaded && fighting && !bearsOn(s, k.x, k.y)) {
+            g2.fillStyle = "rgba(140,233,255,0.8)";
+            g2.font = `700 8px ${MONO}`;
+            g2.textAlign = "center";
+            g2.fillText("LOADED - WALK IT IN", x, y - R - 8);
+            g2.textAlign = "left";
+          }
         }
       }
     }

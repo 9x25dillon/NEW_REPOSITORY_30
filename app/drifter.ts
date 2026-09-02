@@ -1390,6 +1390,15 @@ export class Game {
           g.strokeStyle = `rgba(${rgb},0.75)`;
           g.lineWidth = 1.4;
           g.beginPath(); g.arc(x, y, R + 5, 0, Math.PI * 2); g.stroke();
+          // ONLY FOUR OF EIGHTY-ONE BUILDINGS BEAR ON THE KING AT ONCE, measured,
+          // and at 44% of the places it can stand none of them do. A ring around
+          // one building in a crystal of eighty is not findable, so the ones that
+          // can actually hit it are joined to it by a line.
+          g.strokeStyle = `rgba(${rgb},${(0.18 + 0.22 * Math.sin(this.t * 5)).toFixed(2)})`;
+          g.lineWidth = 1;
+          g.setLineDash([2, 4]);
+          g.beginPath(); g.moveTo(x, y); g.lineTo(px(k.x), px(k.y)); g.stroke();
+          g.setLineDash([]);
         }
       }
 
@@ -1433,11 +1442,24 @@ export class Game {
       g.textAlign = "left";
 
       if (s.charge > 0) {
-        g.strokeStyle = `rgba(255,201,74,${(0.4 + s.charge * 0.6).toFixed(2)})`;
-        g.lineWidth = 3;
+        const loaded = s.charge >= 1;
+        // LOADED AND WAITING. A full charge no longer fires into empty water —
+        // it holds until the king is in the arm — so the surface has to say
+        // that, or a player stands there gripping a building that looks broken.
+        g.strokeStyle = loaded
+          ? `rgba(140,233,255,${(0.55 + 0.45 * Math.sin(this.t * 9)).toFixed(2)})`
+          : `rgba(255,201,74,${(0.4 + s.charge * 0.6).toFixed(2)})`;
+        g.lineWidth = loaded ? 4 : 3;
         g.beginPath();
         g.arc(x, y, 10, -Math.PI / 2, -Math.PI / 2 + s.charge * Math.PI * 2);
         g.stroke();
+        if (loaded && fighting && !bearsOn(s, k.x, k.y)) {
+          g.fillStyle = "rgba(140,233,255,0.8)";
+          g.font = `700 8px ${MONO}`;
+          g.textAlign = "center";
+          g.fillText("LOADED - WALK IT IN", x, y - R - 8);
+          g.textAlign = "left";
+        }
       }
     }
   }
