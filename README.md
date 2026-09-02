@@ -545,6 +545,90 @@ permanent.
 Wildlife arrives at the new edges rather than the old ones, the sovereign walks
 in the larger water, and a body can walk further before it runs out of room.
 
+### There is something out there, and it is older than the world
+
+The channel opened, and for a while there was nothing in the far corners but a
+different water. Now there is a **chip**.
+
+Everything else in this game is a consequence of the last sovereign — the
+medium, the pitch, the wildlife, what your cells are made of — so nothing in a
+world can be relied on twice. The channel is not. It is etched silicon and
+glass, it was etched once, and it is the same channel in the tenth aeon as in
+the first, which makes it **the only thing here a player can learn**. A landmark
+has to be older than the level it is in.
+
+Two things are cut into it, both of them ordinary microfluidics:
+
+**A sharp edge.** A tip standing off the sidewall. The velocity gradient around
+a sharp tip in an oscillating field rectifies into a steady jet leaving along
+the tip's bisector — sharp-edge acoustofluidics, used to mix, to pump and to
+sort. They are cut *over* rather than straight, which is how the array is
+oriented when it is meant to pump: the bottom wall drives one way and the top
+wall the other, so **the two long walls are a way around the channel** rather
+than two hazards.
+
+**A bubble cavity.** A dead-end side channel holding an air bubble at its mouth.
+Driven, the bubble oscillates and throws off a streaming vortex strong enough to
+pull particles out of the passing flow. That is what a lateral cavity acoustic
+transducer is *for* — it concentrates cells — so a cavity is a place that has
+been gathering while you were on the other side of the channel, and going to
+look is the reward for going.
+
+None of it is a number anybody chose. The speed is `wave.streamingSpeed`, which
+is already pinned against `gorkov.streamingRatioScaling`, times **one declared
+ratio**: bulk streaming in a MHz channel runs at microns per second and measured
+sharp-edge jets run at hundreds to thousands, so the ratio is one to two orders
+and `EDGE_GAIN` sits at the geometric middle of it. What that lands at was not
+arranged:
+
+```
+bulk streaming, full grip      14 um/s
+a tip jet, full grip          459 um/s
+a tip jet, released           139 um/s
+you, gripping                 565 um/s
+you, at cruise                225 um/s
+```
+
+So a jet is something you can ride and cannot simply walk out of. And because
+streaming goes as pressure *squared* and the whole chip is powered by your own
+drive, **gripping is what makes a whirlpool strong**. The way out of one is to
+let go — the exact inverse of every other habit the game teaches, and nobody
+wrote that rule either.
+
+The size law arrives free. `flowAt` is never told how big anything is; radiation
+force goes as radius cubed and drag from a flow goes as radius, so the trap
+fighting the drag sorts them by itself. Ninety microns downstream of a tip, with
+a trap on the body:
+
+```
+0.5 um mote     swept 515 um, clean out of the plume
+3   um          swept 408 um
+9   um  (you)   19 um: it keeps its node
+19  um          7 um: it barely notices
+```
+
+Finding that out required aiming the trap, and the failure was the useful part:
+the drive is apodised around your hand, so four hundred microns away the local
+amplitude is 0.1 kPa out of 200. **A body in the far channel with nobody near it
+has no trap at all** and the water simply takes it — which is not a flaw in the
+measurement, it is the rule the far water runs on, and it is exactly why a
+cavity out there collects instead of merely stirring.
+
+The middle column is left clear, and as a hard clearance rather than a quiet
+one. The opening minute of this game is about learning that a node holds things,
+and a current running through it would teach something else. An earlier version
+of the test asked only that the flow in the starting pool be *small*, and it
+passed with an edge planted in the dead centre of the channel throwing 17 µm/s
+straight into it — any threshold loose enough to pass the real layout was loose
+enough to pass that. It now asks that no plume **reach** the pool at all, in
+microns, and that is what fixed the tips at 0.26 of the channel rather than the
+third they started at.
+
+On screen it is drawn with tracer beads advected by the same `flowAt` the game
+moves everything else with, brightness by speed — which is both the cheapest
+honest thing available and simply what a microfluidics video looks like. You
+cannot see a streaming field; you seed it with beads and watch.
+
 ### And it walks
 
 `src/trajectory.ts` has said this since it was written and nothing had ever
@@ -881,6 +965,7 @@ game/bound.ts        the other field, and the band gap that will not carry it
 game/body.ts         the lattice, what is joined to what, and its space group
 game/depth.ts        the channel's harmonics, and the planes they put in the water
 game/streams.ts      laminar co-flow: the channel carries three waters, not one
+game/chip.ts         what is etched into the glass, and the streaming off it
 game/run.ts          the aeon: settle, crown, reign, birth
 app/drifter.ts       SONIC DRIFTER: the game surface, canvas and rendering
 app/pad.ts           the controller, and the keyboard standing in for one
@@ -891,7 +976,7 @@ personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                262 tests: what the modules above are actually claiming
+test/                274 tests: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.

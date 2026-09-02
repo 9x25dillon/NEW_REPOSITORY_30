@@ -29,6 +29,7 @@ import {
   type Body, autonomous, bodiesOf, gaitDirection, reaches, snap, walkSpeed,
 } from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
+import { type Feature, features, flowAt } from "./chip.js";
 import { mediumAt, streamAt } from "./streams.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
@@ -71,6 +72,26 @@ export const ARENA_H = 660e-6;
  */
 export const CHANNEL_W = 4200e-6;
 export const CHANNEL_H = 3000e-6;
+
+/**
+ * What is etched into it, and the flow that comes off it.
+ *
+ * A MODULE CONSTANT, NOT RUN STATE, and that is the claim. Everything on `Run`
+ * is born with a world and dies with it; the channel is the piece of glass all
+ * of them happen inside. Putting the chip on the run would say the next aeon
+ * gets a different one, and it does not — which is the entire reason there can
+ * be a landmark here at all.
+ */
+export const CHIP: readonly Feature[] = features(CHANNEL_W, CHANNEL_H);
+
+export {
+  type Feature, EDGE_STANDOFF_FRAC, featureName, flowAt, nearestFeature,
+} from "./chip.js";
+
+/** What the glass is doing to the water at a point, m/s. */
+export function chipFlow(run: Run, x: number, y: number): { x: number; y: number } {
+  return flowAt(CHIP, x, y, run.wave.amplitude);
+}
 
 /**
  * How much of the channel you can work in, given what you have built.
@@ -444,7 +465,10 @@ export function step(run: Run, input: Input, dt: number): void {
     : aimFor(you, w, 0, 0);
   run.aim.x = trap.x;
   run.aim.y = trap.y;
-  carry(you, w, dt, run.world.current, run.bounds);
+  // The glass moves the water, and you are standing in the water. It is
+  // powered by the drive, so gripping makes every jet on the chip fiercer —
+  // including the one you are trying to get out of.
+  carry(you, w, dt, run.world.current, run.bounds, chipFlow(run, you.x, you.y));
 
   if (run.iframe > 0) run.iframe -= dt;
   if (!alive) { drift(run, dt); return; }
@@ -528,6 +552,15 @@ function drift(run: Run, dt: number): void {
     const cb = (Math.PI * e.y) / run.bounds.h;
     dx += run.world.current * Math.sin(ca) * Math.cos(cb);
     dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
+
+    // And the glass. Nothing here asks how big the thing is: a flow carries
+    // whatever is in it. The size dependence is already in the room — `advance`
+    // above put the radiation force on the same body this frame, and that force
+    // goes as radius cubed while this drag goes as radius. A cell holds its node
+    // against a jet and a mote does not, and neither of them was told to.
+    const flow = flowAt(CHIP, e.x, e.y, w.amplitude);
+    dx += flow.x;
+    dy += flow.y;
 
     if (e.faction === "beast" && run.phase !== "birth") {
       const swim = together(e.layer, run.layer) ? hunt(run, e, dt) : { x: 0, y: 0 };

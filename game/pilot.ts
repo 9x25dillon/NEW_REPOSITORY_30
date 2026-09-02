@@ -278,20 +278,31 @@ export function aimFor(
  * Let the water move you.
  *
  * One call to wave.velocityAt on your own particle, plus the world's own
- * circulation, which is in the water whether you are gripping or not. There is
+ * circulation, which is in the water whether you are gripping or not, plus
+ * whatever the glass is doing to the water where you are standing. There is
  * nothing else here on purpose: if this function ever grows a term that is not
  * a force on a body, the conceit is gone.
+ *
+ * AND `flow` IS ONE, which is worth saying because it does not look like one.
+ * A body in moving water feels Stokes drag — the one place viscosity enters,
+ * see wave.WATER_VISCOSITY — and at a Reynolds number of 10^-3 the drag settles
+ * against nothing, so the body simply goes at the water's speed. Handing this
+ * function a velocity is handing it a force; it is only spelt in the units the
+ * overdamped limit leaves behind. Where the velocity comes FROM is chip.flowAt,
+ * and it is second-order acoustic streaming off the same drive — not a term
+ * anyone chose.
  */
 export function carry(
   p: Pilot, w: Wave, dt: number, current: number,
   bounds: { x: number; y: number; w: number; h: number },
+  flow: { x: number; y: number } = { x: 0, y: 0 },
 ): void {
   const moved = advance(w, p.x, p.y, p.particle, dt);
 
   const ca = (Math.PI * (p.x - bounds.x)) / bounds.w;
   const cb = (Math.PI * (p.y - bounds.y)) / bounds.h;
-  const cx = current * Math.sin(ca) * Math.cos(cb);
-  const cy = -current * Math.cos(ca) * Math.sin(cb);
+  const cx = current * Math.sin(ca) * Math.cos(cb) + flow.x;
+  const cy = -current * Math.cos(ca) * Math.sin(cb) + flow.y;
 
   p.vx = moved.vx + cx;
   p.vy = moved.vy + cy;

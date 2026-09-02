@@ -35,6 +35,10 @@ import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
 import { autonomous, limbsOf, snap, symbolOf, walkSpeed } from "../game/body.js";
 import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
 import { STREAMS, mediumAt, streamBand, streamName } from "../game/streams.js";
+import {
+  type Feature, CHIP, CHANNEL_W, EDGE_STANDOFF_FRAC, chipFlow, featureName,
+  flowAt, nearestFeature,
+} from "../game/run.js";
 import { YOU } from "../game/pilot.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
@@ -66,6 +70,7 @@ const MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
 interface Spark { x: number; y: number; vx: number; vy: number; life: number; max: number; rgb: string }
 interface Popup { x: number; y: number; text: string; life: number; colour: string; big: boolean }
 interface Ring { x: number; y: number; r: number; max: number; life: number; born: number; rgb: string }
+interface Tracer { x: number; y: number; px: number; py: number; life: number; f: Feature }
 
 interface Lesson { id: string; title: string; body: string }
 
@@ -89,6 +94,22 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "THE DRAG - PAST THAT A CELL FALLS OUT OF ITS NODE AND IS LEFT BEHIND. SO THE BODY "
       + "WALKS AT THE PACE OF ITS FURTHEST CELL, ALONG THE DIRECTIONS ITS OWN GROUP HAS, AND "
       + "ONLY WHILE YOU ARE NEAR ENOUGH FOR THE DRIVE TO REACH ALL OF IT.",
+  },
+  chip: {
+    id: "chip", title: "THE GLASS IS OLDER THAN THE WORLD",
+    body: "A SHARP TIP IN AN OSCILLATING FIELD RECTIFIES THE FLOW AROUND IT INTO A STEADY "
+      + "JET - SHARP-EDGE ACOUSTOFLUIDICS, USED TO MIX AND TO PUMP. THESE ARE CUT OVER SO "
+      + "THEY ADD ALONG THE WALL INSTEAD OF FIGHTING ACROSS IT, WHICH MAKES THE TWO LONG "
+      + "WALLS A WAY AROUND THE CHANNEL. EVERY WORLD IS BORN FROM THE LAST KING. THE CHANNEL "
+      + "IS NOT: IT WAS ETCHED ONCE AND IT IS THE SAME CHIP IN EVERY AEON, SO IT IS THE ONLY "
+      + "THING HERE WORTH LEARNING THE SHAPE OF.",
+  },
+  whirl: {
+    id: "whirl", title: "LET GO",
+    body: "A BUBBLE TRAPPED IN A SIDE CAVITY OSCILLATES AND THROWS A STREAMING VORTEX. IT IS "
+      + "DRIVEN BY YOUR FIELD AND STREAMING GOES AS PRESSURE SQUARED, SO GRIPPING IS WHAT "
+      + "MAKES IT STRONG - RELEASE AND IT DROPS TO A THIRD AND YOU CAN WALK OUT. EVERYTHING "
+      + "ELSE HERE IS ESCAPED BY GRIPPING. THIS IS NOT.",
   },
   bound: {
     id: "bound", title: "IT IS HELD BY A DISPERSION RELATION",
@@ -235,6 +256,16 @@ export class Game {
   private sparks: Spark[] = [];
   private popups: Popup[] = [];
   private rings: Ring[] = [];
+  /**
+   * Tracer beads in the water around the etched features.
+   *
+   * NOT a decoration laid over the flow — they are advected by chip.flowAt,
+   * the same call the game moves everything else with, so what they draw is
+   * what will happen to you. This is also just what a microfluidics video looks
+   * like: you cannot see a streaming field, you seed it with beads and watch.
+   * They are the cheapest honest thing on the screen.
+   */
+  private tracers: Tracer[] = [];
   private flash = 0;
   private flashRed = false;
   private shake = 0;
@@ -587,6 +618,18 @@ export class Game {
     if (run.structures.length > 0) this.teach("build");
     if (run.entities.some((e) => e.species === "mote"
       && Math.hypot(e.x - run.you.x, e.y - run.you.y) < 120e-6)) this.teach("mote");
+
+    // The chip explains itself the first time it is doing something to you, and
+    // the whirlpool waits until the water is actually beating you — told before
+    // that, "let go" is a fact; told while you are losing ground, it is the
+    // answer to the question you already have.
+    const on = nearestFeature(CHIP, run.you.x, run.you.y);
+    if (on) {
+      const f = chipFlow(run, run.you.x, run.you.y);
+      const u = Math.hypot(f.x, f.y);
+      if (u > 6e-5) this.teach("chip");
+      if (on.feature.kind === "cavity" && u > 2.6e-4) this.teach("whirl");
+    }
   }
 
   private drain(): void {
@@ -795,6 +838,7 @@ export class Game {
     }
     g.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
     this.drawWalls();
+    this.drawChip();
     this.drawField();
     this.drawLattice();
     this.drawSites();
@@ -861,6 +905,125 @@ export class Game {
     g.strokeStyle = "rgba(120,225,245,0.16)";
     g.lineWidth = 2;
     g.strokeRect(px(b.x), px(b.y), px(b.w), px(b.h));
+  }
+
+  /**
+   * What is etched into the glass, and what the water is doing about it.
+   *
+   * THE ONLY THING ON SCREEN OLDER THAN THIS WORLD. Everything else is a
+   * consequence of the last sovereign and will be gone after the next one; the
+   * channel was etched once and is the same in the tenth aeon as the first. It
+   * is drawn like that on purpose — cut out of the wall in the wall's own
+   * colour, structural rather than lit, with no warm/cool contrast tint,
+   * because a contrast factor is a thing a BODY has in a medium and glass is
+   * not in the medium. Nothing here answers to your lattice.
+   */
+  private drawChip(): void {
+    const g = this.ctx;
+    const run = this.run;
+    const b = run.bounds;
+    const amp = run.wave.amplitude;
+    const lit = Math.min(1, amp / run.wave.maxAmplitude);
+    const standoff = CHANNEL_H * EDGE_STANDOFF_FRAC;
+
+    // Only what is on screen, in world metres, with a plume's worth of margin.
+    const near = (f: Feature): boolean =>
+      px(f.x) > this.cam.x - px(f.reach) && px(f.x) < this.cam.x + VIEW_W + px(f.reach)
+      && px(f.y) > this.cam.y - px(f.reach) && px(f.y) < this.cam.y + VIEW_H + px(f.reach);
+    const shown = CHIP.filter(near);
+    if (shown.length === 0) { this.tracers.length = 0; return; }
+
+    // ── the geometry ────────────────────────────────────────────────────────
+    for (const f of shown) {
+      if (f.kind === "edge") {
+        // A tip standing off the wall, leaning the way it is cut. The two base
+        // corners sit on the wall it grew out of, so it reads as glass rather
+        // than as something floating in the water.
+        const wall = f.y < CHANNEL_H / 2 ? 0 : CHANNEL_H;
+        const lean = f.jx * standoff * 0.45;
+        g.beginPath();
+        g.moveTo(px(f.x - standoff * 0.34 - lean), px(wall));
+        g.lineTo(px(f.x), px(f.y));
+        g.lineTo(px(f.x + standoff * 0.34 - lean), px(wall));
+        g.closePath();
+        g.fillStyle = "rgba(18,30,44,0.92)";
+        g.fill();
+        g.strokeStyle = `rgba(150,205,235,${(0.16 + lit * 0.24).toFixed(3)})`;
+        g.lineWidth = 1.5;
+        g.stroke();
+      } else {
+        // A dead-end side cavity with a bubble held at its mouth. The bubble is
+        // what oscillates and it is the only part that brightens with the
+        // drive, because it is the only part that is doing anything.
+        const r = f.reach * 0.24;
+        const inx = f.x === 0 ? 1 : f.x >= CHANNEL_W ? -1 : 0;
+        const iny = f.y === 0 ? 1 : f.y >= CHANNEL_H ? -1 : 0;
+        g.beginPath();
+        g.arc(px(f.x), px(f.y), px(r * 1.35), 0, Math.PI * 2);
+        g.fillStyle = "rgba(18,30,44,0.92)";
+        g.fill();
+        g.strokeStyle = `rgba(150,205,235,${(0.14 + lit * 0.2).toFixed(3)})`;
+        g.lineWidth = 1.5;
+        g.stroke();
+
+        const bob = Math.sin(this.t * 7 + f.id) * lit * px(r) * 0.12;
+        g.beginPath();
+        g.arc(px(f.x) + inx * bob, px(f.y) + iny * bob,
+          px(r) * (1 + lit * 0.1), 0, Math.PI * 2);
+        g.fillStyle = `rgba(200,240,255,${(0.05 + lit * 0.16).toFixed(3)})`;
+        g.fill();
+        g.strokeStyle = `rgba(200,240,255,${(0.2 + lit * 0.45).toFixed(3)})`;
+        g.lineWidth = 1;
+        g.stroke();
+      }
+    }
+
+    // ── and the water ───────────────────────────────────────────────────────
+    //
+    // Seeded in the plumes and carried by the same flowAt the game uses. A bead
+    // that leaves the water you can work in is retired, because a streak drawn
+    // outside the glass is a promise the game will not keep.
+    const want = Math.min(220, shown.length * 26);
+    let guard = 0;
+    while (this.tracers.length < want && guard++ < 40) {
+      const f = shown[(Math.random() * shown.length) | 0];
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * f.reach;
+      this.tracers.push({
+        x: f.x + Math.cos(a) * r, y: f.y + Math.sin(a) * r,
+        px: 0, py: 0, life: 0.6 + Math.random() * 2.2, f,
+      });
+    }
+
+    const dt = 1 / 60;
+    g.lineCap = "round";
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const t = this.tracers[i];
+      const v = flowAt(CHIP, t.x, t.y, amp);
+      t.px = t.x; t.py = t.y;
+      t.x += v.x * dt;
+      t.y += v.y * dt;
+      t.life -= dt;
+
+      const speed = Math.hypot(v.x, v.y);
+      const gone = t.life <= 0 || speed < 2e-6
+        || t.x < b.x || t.x > b.x + b.w || t.y < b.y || t.y > b.y + b.h;
+      if (gone) { this.tracers.splice(i, 1); continue; }
+
+      // Brightness is speed, so the picture IS the flow field: the fast water
+      // off a tip and the fast ring inside a cavity light up and the still core
+      // of the vortex stays dark. Nothing had to be authored to make the shape
+      // of it legible.
+      const k = Math.min(1, speed / 4.2e-4);
+      const fade = Math.min(1, t.life * 1.6);
+      g.strokeStyle = `rgba(150,225,255,${(0.06 + k * 0.4 * fade).toFixed(3)})`;
+      g.lineWidth = 0.6 + k * 1.1;
+      g.beginPath();
+      g.moveTo(px(t.px), px(t.py));
+      g.lineTo(px(t.x), px(t.y));
+      g.stroke();
+    }
+    g.lineCap = "butt";
   }
 
   /** Both the pressure of crossed standing waves and the Gaussian focus are
@@ -1778,6 +1941,22 @@ export class Game {
     g.fillText(
       `${run.phase === "reign" ? "IT IS AWAKE" : "SETTLING"}  ·  ${streamName(streamOf(run.you.y))}`,
       VIEW_W / 2, 34);
+
+    // WHERE ON THE CHIP YOU ARE, when you are anywhere on it. The channel is
+    // the one thing that is the same in every aeon, so it is the only thing
+    // here that can be a landmark — and a landmark you are not told the name of
+    // is scenery. It says how fast the water is going too, because that is the
+    // number the decision turns on: released it is walkable and gripping it is
+    // not, and the player has to be able to see which one they are in.
+    const here = nearestFeature(CHIP, run.you.x, run.you.y);
+    if (here) {
+      const f = chipFlow(run, run.you.x, run.you.y);
+      const u = Math.hypot(f.x, f.y);
+      g.fillStyle = u > 2.4e-4 ? GOLD : DIM;
+      g.font = `700 9px ${MONO}`;
+      g.fillText(`${featureName(here.feature)}  ·  ${(u * 1e6).toFixed(0)} UM/S`,
+        VIEW_W / 2, 48);
+    }
     g.textAlign = "left";
 
     g.textAlign = "right";
@@ -2230,6 +2409,14 @@ export class Game {
       `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}`
         + `  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}`
         + `  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
+      `chip: ${(() => {
+        const on = nearestFeature(CHIP, run.you.x, run.you.y);
+        const f = chipFlow(run, run.you.x, run.you.y);
+        const reach = CHIP.filter((c) => c.x >= run.bounds.x && c.x <= run.bounds.x + run.bounds.w
+          && c.y >= run.bounds.y && c.y <= run.bounds.y + run.bounds.h).length;
+        return `${reach}/${CHIP.length} in reach; flow on you ${(Math.hypot(f.x, f.y) * 1e6).toFixed(0)}um/s`
+          + `${on ? ` (in ${featureName(on.feature).toLowerCase()} #${on.feature.id})` : ""}`;
+      })()}`,
       `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
       `pad: ${this.pad.describe()}`,
       `diagnosis: ${this.diagnosis()}`,

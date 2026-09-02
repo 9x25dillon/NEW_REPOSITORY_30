@@ -1,6 +1,7 @@
 # Handoff
 
-Written at the end of the session of 2026-08-31, for whoever picks this up next.
+Written at the end of the session of 2026-08-31 and extended 2026-09-02, for
+whoever picks this up next.
 Everything here is checkable — if a claim in this file disagrees with the code,
 the code is right and this file is stale.
 
@@ -41,8 +42,8 @@ it is which claim just leaked into which.**
 ## State
 
 ```
-branch   main   (27 commits ahead of origin/main — NOT pushed; that is the user's call)
-tests    262, all passing
+branch   main   (29 commits ahead of origin/main — NOT pushed; that is the user's call)
+tests    274, all passing
 build    npm test | npm run typecheck | npm run drifter
 play     app/sonic-drifter.html — one file, no build step, no network
 ```
@@ -67,6 +68,7 @@ DOM so `src/` cannot reach for a browser; `tsconfig.build.json` covers `app/`.
 | `game/body.ts` | the lattice, what is joined to what, its space group, limbs, legs, gait |
 | `game/depth.ts` | the channel's harmonics. Mode *n* puts *n* node planes in the fluid |
 | `game/streams.ts` | laminar co-flow: the channel carries three waters, not one |
+| `game/chip.ts` | what is etched into the glass — sharp edges, bubble cavities — and the streaming that comes off it. The only thing in the game older than the current world |
 | `game/run.ts` | the aeon: settle, crown, reign, birth |
 | `app/pad.ts` | controller and keyboard, one intent shape |
 | `app/drifter.ts` | the surface. Renders only what is true |
@@ -87,7 +89,15 @@ These are not preferences. Breaking one breaks something else two modules away.
    on rather than trapped because it is 38 µm across against a 44 µm lattice.
 5. **A body can only grow, fire, or walk along the directions its own point
    group has.** `shape.lobes()` decides all three.
-6. **The instrument may refuse.** `bands.completeGap` throws when its plane-wave
+6. **The chip is not run state.** `CHIP` is a module constant in `run.ts`, not a
+   field on `Run`. Everything on `Run` is born with a world and dies with it;
+   the channel is the glass all of them happen inside. Put the chip on the run
+   and you have said the next aeon gets a different one — and there is then no
+   landmark in this game, because a landmark has to outlive the level.
+7. **Streaming is powered by your own drive**, so gripping makes every jet on
+   the chip fiercer. The way out of a whirlpool is to let go. This inverts the
+   game's central habit on purpose; do not "fix" it.
+8. **The instrument may refuse.** `bands.completeGap` throws when its plane-wave
    expansion stops being trustworthy; `game/bound.ts` catches that and reads it
    as "no gap". Do not "fix" the library to stop it refusing.
 
@@ -136,13 +146,24 @@ movement that gives way to the creation of things like the water bear"*, then
 appendages, tools, armour, and an open world. Most of that now exists. What does
 not:
 
-- **Somewhere to walk to.** The channel is 4200 × 3000 µm and opens as the
-  organism grows, and the far water is genuinely different (laminar streams flip
-  contrast signs). But there is still nothing *in* the far corners — no
-  structures, no reason beyond the physics change.
+- ~~**Somewhere to walk to.**~~ Done 2026-09-02: `game/chip.ts`. Eight sharp
+  edges and four bubble cavities are etched into the channel, they are the same
+  in every aeon, and they come into reach as the organism grows — you feel the
+  first current at about eight joined cells, touch a tip at about thirteen, and
+  have the whole chip at twenty-five. **What is still thin is what you DO with
+  them.** Right now they are terrain: you can ride the wall lanes and a cavity
+  gathers motifs for you. Nothing yet is built there, nothing is won there, and
+  the throne is still always in the middle.
 - **Tools and armour.** `Cell.ability` (thrust / weave / anchor) exists and is
   barely used. The 432 is literally armour: order 24, zero piezoelectric
-  components, "the field cannot touch it".
+  components, "the field cannot touch it". The chip gives `anchor` an obvious
+  job it did not have before — something that holds station in a jet — and
+  `thrust` an obvious place to matter.
+- **Something to build on the chip.** The strongest unclaimed idea: a structure
+  placed inside a cavity's vortex is standing in water that gathers, and one
+  placed behind a sharp edge is in its lee. Both are already true of the flow
+  field and neither is used. This is the cheapest route to the next real
+  decision, because the geometry already argues for it.
 - **Levels and rewards.** Every world sets the same kind of objective at a
   different frequency. Freeing a bound field grants +1 integrity and 80 score,
   which is thin.

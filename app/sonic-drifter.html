@@ -1338,6 +1338,100 @@
     return Math.max(1, Math.min(MAX_MODE, 1 + Math.floor(mass / 14) + Math.floor(aeon / 3)));
   }
 
+  // game/chip.ts
+  var EDGE_GAIN = 32;
+  var CAVITY_GAIN = EDGE_GAIN;
+  var CAVITY_DRAW = 0.35;
+  var EDGE_STANDOFF_FRAC = 0.2;
+  var EDGE_REACH = 72e-5;
+  var CAVITY_REACH = 46e-5;
+  var EDGE_TILT = Math.PI / 6;
+  var EDGE_STATIONS = [0.14, 0.26, 0.74, 0.86];
+  function features(channelW, channelH) {
+    const out = [];
+    const standoff = channelH * EDGE_STANDOFF_FRAC;
+    let id = 0;
+    for (const wall of [-1, 1]) {
+      const y = wall < 0 ? standoff : channelH - standoff;
+      const inward = wall < 0 ? 1 : -1;
+      const along = wall < 0 ? 1 : -1;
+      for (const f of EDGE_STATIONS) {
+        out.push({
+          id: id++,
+          kind: "edge",
+          x: channelW * f,
+          y,
+          reach: EDGE_REACH,
+          jx: along * Math.sin(EDGE_TILT),
+          jy: inward * Math.cos(EDGE_TILT),
+          spin: 0
+        });
+      }
+    }
+    const cav = [
+      [channelW * 0.5, 0, 1],
+      [channelW * 0.5, channelH, -1],
+      [0, channelH * 0.5, -1],
+      [channelW, channelH * 0.5, 1]
+    ];
+    for (const [x, y, spin] of cav) {
+      out.push({ id: id++, kind: "cavity", x, y, reach: CAVITY_REACH, jx: 0, jy: 0, spin });
+    }
+    return out;
+  }
+  function fade(r, reach) {
+    if (r >= reach) return 0;
+    const k = 1 - r / reach;
+    return k * k;
+  }
+  function lobe(cos) {
+    return cos <= 0 ? 0 : cos * cos * cos;
+  }
+  function ring(r, reach) {
+    if (r >= reach) return 0;
+    const u = r / reach;
+    return 4 * u * (1 - u);
+  }
+  function flowAt(fs, x, y, amplitudePa) {
+    const u = streamingSpeed(amplitudePa);
+    let vx = 0, vy = 0;
+    if (u <= 0) return { x: 0, y: 0 };
+    for (const f of fs) {
+      const dx = x - f.x, dy = y - f.y;
+      const r = Math.hypot(dx, dy);
+      if (r >= f.reach) continue;
+      if (f.kind === "edge") {
+        const cos = r < 1e-9 ? 1 : (dx * f.jx + dy * f.jy) / r;
+        const s = u * EDGE_GAIN * fade(r, f.reach) * lobe(cos);
+        vx += f.jx * s;
+        vy += f.jy * s;
+      } else {
+        if (r < 1e-9) continue;
+        const s = u * CAVITY_GAIN * ring(r, f.reach);
+        vx += -dy / r * s * f.spin;
+        vy += dx / r * s * f.spin;
+        vx += -dx / r * s * CAVITY_DRAW;
+        vy += -dy / r * s * CAVITY_DRAW;
+      }
+    }
+    return { x: vx, y: vy };
+  }
+  function nearestFeature(fs, x, y) {
+    let best = null;
+    let bestR = Infinity;
+    for (const f of fs) {
+      const r = Math.hypot(x - f.x, y - f.y);
+      if (r < f.reach && r < bestR) {
+        best = f;
+        bestR = r;
+      }
+    }
+    return best ? { feature: best, r: bestR } : null;
+  }
+  function featureName(f) {
+    return f.kind === "edge" ? "A SHARP EDGE" : "A BUBBLE CAVITY";
+  }
+
   // game/pilot.ts
   var YOU = { radius: 9e-6, rho: 915, c: 1450 };
   var LEAD = 0.25;
@@ -1424,12 +1518,12 @@
     aimAt(w, tx, ty, ridesAntinodes(p, w));
     return { x: tx, y: ty };
   }
-  function carry(p, w, dt, current, bounds) {
+  function carry(p, w, dt, current, bounds, flow = { x: 0, y: 0 }) {
     const moved = advance(w, p.x, p.y, p.particle, dt);
     const ca = Math.PI * (p.x - bounds.x) / bounds.w;
     const cb = Math.PI * (p.y - bounds.y) / bounds.h;
-    const cx = current * Math.sin(ca) * Math.cos(cb);
-    const cy = -current * Math.cos(ca) * Math.sin(cb);
+    const cx = current * Math.sin(ca) * Math.cos(cb) + flow.x;
+    const cy = -current * Math.cos(ca) * Math.sin(cb) + flow.y;
     p.vx = moved.vx + cx;
     p.vy = moved.vy + cy;
     const rad = p.particle.radius;
@@ -1643,6 +1737,10 @@
   var ARENA_H = 66e-5;
   var CHANNEL_W = 42e-4;
   var CHANNEL_H = 3e-3;
+  var CHIP = features(CHANNEL_W, CHANNEL_H);
+  function chipFlow(run, x, y) {
+    return flowAt(CHIP, x, y, run.wave.amplitude);
+  }
   var START = {
     x: (CHANNEL_W - ARENA_W) / 2,
     y: (CHANNEL_H - ARENA_H) / 2
@@ -1798,7 +1896,7 @@
     const trap = alive ? aimFor(you, w, input.move.x, input.move.y) : aimFor(you, w, 0, 0);
     run.aim.x = trap.x;
     run.aim.y = trap.y;
-    carry(you, w, dt, run.world.current, run.bounds);
+    carry(you, w, dt, run.world.current, run.bounds, chipFlow(run, you.x, you.y));
     if (run.iframe > 0) run.iframe -= dt;
     if (!alive) {
       drift(run, dt);
@@ -1859,6 +1957,9 @@
       const cb = Math.PI * e.y / run.bounds.h;
       dx += run.world.current * Math.sin(ca) * Math.cos(cb);
       dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
+      const flow = flowAt(CHIP, e.x, e.y, w.amplitude);
+      dx += flow.x;
+      dy += flow.y;
       if (e.faction === "beast" && run.phase !== "birth") {
         const swim = together(e.layer, run.layer) ? hunt(run, e, dt) : { x: 0, y: 0 };
         dx += swim.x;
@@ -2907,6 +3008,16 @@
       title: "IT IS FOLLOWING YOU",
       body: "A SWEPT LATTICE CARRIES WHAT IS SITTING IN IT, BUT ONLY WHILE THE TRAP CAN OUT-PULL THE DRAG - PAST THAT A CELL FALLS OUT OF ITS NODE AND IS LEFT BEHIND. SO THE BODY WALKS AT THE PACE OF ITS FURTHEST CELL, ALONG THE DIRECTIONS ITS OWN GROUP HAS, AND ONLY WHILE YOU ARE NEAR ENOUGH FOR THE DRIVE TO REACH ALL OF IT."
     },
+    chip: {
+      id: "chip",
+      title: "THE GLASS IS OLDER THAN THE WORLD",
+      body: "A SHARP TIP IN AN OSCILLATING FIELD RECTIFIES THE FLOW AROUND IT INTO A STEADY JET - SHARP-EDGE ACOUSTOFLUIDICS, USED TO MIX AND TO PUMP. THESE ARE CUT OVER SO THEY ADD ALONG THE WALL INSTEAD OF FIGHTING ACROSS IT, WHICH MAKES THE TWO LONG WALLS A WAY AROUND THE CHANNEL. EVERY WORLD IS BORN FROM THE LAST KING. THE CHANNEL IS NOT: IT WAS ETCHED ONCE AND IT IS THE SAME CHIP IN EVERY AEON, SO IT IS THE ONLY THING HERE WORTH LEARNING THE SHAPE OF."
+    },
+    whirl: {
+      id: "whirl",
+      title: "LET GO",
+      body: "A BUBBLE TRAPPED IN A SIDE CAVITY OSCILLATES AND THROWS A STREAMING VORTEX. IT IS DRIVEN BY YOUR FIELD AND STREAMING GOES AS PRESSURE SQUARED, SO GRIPPING IS WHAT MAKES IT STRONG - RELEASE AND IT DROPS TO A THIRD AND YOU CAN WALK OUT. EVERYTHING ELSE HERE IS ESCAPED BY GRIPPING. THIS IS NOT."
+    },
     bound: {
       id: "bound",
       title: "IT IS HELD BY A DISPERSION RELATION",
@@ -3035,6 +3146,16 @@
       __publicField(this, "sparks", []);
       __publicField(this, "popups", []);
       __publicField(this, "rings", []);
+      /**
+       * Tracer beads in the water around the etched features.
+       *
+       * NOT a decoration laid over the flow — they are advected by chip.flowAt,
+       * the same call the game moves everything else with, so what they draw is
+       * what will happen to you. This is also just what a microfluidics video looks
+       * like: you cannot see a streaming field, you seed it with beads and watch.
+       * They are the cheapest honest thing on the screen.
+       */
+      __publicField(this, "tracers", []);
       __publicField(this, "flash", 0);
       __publicField(this, "flashRed", false);
       __publicField(this, "shake", 0);
@@ -3341,6 +3462,13 @@
       while (this.youTrail.length > 26) this.youTrail.shift();
       if (run.structures.length > 0) this.teach("build");
       if (run.entities.some((e) => e.species === "mote" && Math.hypot(e.x - run.you.x, e.y - run.you.y) < 12e-5)) this.teach("mote");
+      const on = nearestFeature(CHIP, run.you.x, run.you.y);
+      if (on) {
+        const f = chipFlow(run, run.you.x, run.you.y);
+        const u = Math.hypot(f.x, f.y);
+        if (u > 6e-5) this.teach("chip");
+        if (on.feature.kind === "cavity" && u > 26e-5) this.teach("whirl");
+      }
     }
     drain() {
       const run = this.run;
@@ -3564,6 +3692,7 @@
       }
       g2.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
       this.drawWalls();
+      this.drawChip();
       this.drawField();
       this.drawLattice();
       this.drawSites();
@@ -3624,6 +3753,113 @@
       g2.strokeStyle = "rgba(120,225,245,0.16)";
       g2.lineWidth = 2;
       g2.strokeRect(px(b.x), px(b.y), px(b.w), px(b.h));
+    }
+    /**
+     * What is etched into the glass, and what the water is doing about it.
+     *
+     * THE ONLY THING ON SCREEN OLDER THAN THIS WORLD. Everything else is a
+     * consequence of the last sovereign and will be gone after the next one; the
+     * channel was etched once and is the same in the tenth aeon as the first. It
+     * is drawn like that on purpose — cut out of the wall in the wall's own
+     * colour, structural rather than lit, with no warm/cool contrast tint,
+     * because a contrast factor is a thing a BODY has in a medium and glass is
+     * not in the medium. Nothing here answers to your lattice.
+     */
+    drawChip() {
+      const g2 = this.ctx;
+      const run = this.run;
+      const b = run.bounds;
+      const amp = run.wave.amplitude;
+      const lit = Math.min(1, amp / run.wave.maxAmplitude);
+      const standoff = CHANNEL_H * EDGE_STANDOFF_FRAC;
+      const near = (f) => px(f.x) > this.cam.x - px(f.reach) && px(f.x) < this.cam.x + VIEW_W + px(f.reach) && px(f.y) > this.cam.y - px(f.reach) && px(f.y) < this.cam.y + VIEW_H + px(f.reach);
+      const shown = CHIP.filter(near);
+      if (shown.length === 0) {
+        this.tracers.length = 0;
+        return;
+      }
+      for (const f of shown) {
+        if (f.kind === "edge") {
+          const wall = f.y < CHANNEL_H / 2 ? 0 : CHANNEL_H;
+          const lean = f.jx * standoff * 0.45;
+          g2.beginPath();
+          g2.moveTo(px(f.x - standoff * 0.34 - lean), px(wall));
+          g2.lineTo(px(f.x), px(f.y));
+          g2.lineTo(px(f.x + standoff * 0.34 - lean), px(wall));
+          g2.closePath();
+          g2.fillStyle = "rgba(18,30,44,0.92)";
+          g2.fill();
+          g2.strokeStyle = `rgba(150,205,235,${(0.16 + lit * 0.24).toFixed(3)})`;
+          g2.lineWidth = 1.5;
+          g2.stroke();
+        } else {
+          const r = f.reach * 0.24;
+          const inx = f.x === 0 ? 1 : f.x >= CHANNEL_W ? -1 : 0;
+          const iny = f.y === 0 ? 1 : f.y >= CHANNEL_H ? -1 : 0;
+          g2.beginPath();
+          g2.arc(px(f.x), px(f.y), px(r * 1.35), 0, Math.PI * 2);
+          g2.fillStyle = "rgba(18,30,44,0.92)";
+          g2.fill();
+          g2.strokeStyle = `rgba(150,205,235,${(0.14 + lit * 0.2).toFixed(3)})`;
+          g2.lineWidth = 1.5;
+          g2.stroke();
+          const bob = Math.sin(this.t * 7 + f.id) * lit * px(r) * 0.12;
+          g2.beginPath();
+          g2.arc(
+            px(f.x) + inx * bob,
+            px(f.y) + iny * bob,
+            px(r) * (1 + lit * 0.1),
+            0,
+            Math.PI * 2
+          );
+          g2.fillStyle = `rgba(200,240,255,${(0.05 + lit * 0.16).toFixed(3)})`;
+          g2.fill();
+          g2.strokeStyle = `rgba(200,240,255,${(0.2 + lit * 0.45).toFixed(3)})`;
+          g2.lineWidth = 1;
+          g2.stroke();
+        }
+      }
+      const want = Math.min(220, shown.length * 26);
+      let guard = 0;
+      while (this.tracers.length < want && guard++ < 40) {
+        const f = shown[Math.random() * shown.length | 0];
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * f.reach;
+        this.tracers.push({
+          x: f.x + Math.cos(a) * r,
+          y: f.y + Math.sin(a) * r,
+          px: 0,
+          py: 0,
+          life: 0.6 + Math.random() * 2.2,
+          f
+        });
+      }
+      const dt = 1 / 60;
+      g2.lineCap = "round";
+      for (let i = this.tracers.length - 1; i >= 0; i--) {
+        const t = this.tracers[i];
+        const v = flowAt(CHIP, t.x, t.y, amp);
+        t.px = t.x;
+        t.py = t.y;
+        t.x += v.x * dt;
+        t.y += v.y * dt;
+        t.life -= dt;
+        const speed = Math.hypot(v.x, v.y);
+        const gone = t.life <= 0 || speed < 2e-6 || t.x < b.x || t.x > b.x + b.w || t.y < b.y || t.y > b.y + b.h;
+        if (gone) {
+          this.tracers.splice(i, 1);
+          continue;
+        }
+        const k = Math.min(1, speed / 42e-5);
+        const fade2 = Math.min(1, t.life * 1.6);
+        g2.strokeStyle = `rgba(150,225,255,${(0.06 + k * 0.4 * fade2).toFixed(3)})`;
+        g2.lineWidth = 0.6 + k * 1.1;
+        g2.beginPath();
+        g2.moveTo(px(t.px), px(t.py));
+        g2.lineTo(px(t.x), px(t.y));
+        g2.stroke();
+      }
+      g2.lineCap = "butt";
     }
     /** Both the pressure of crossed standing waves and the Gaussian focus are
      *  separable, so the wash costs two rows of trigonometry, not a grid. */
@@ -4351,13 +4587,13 @@
     }
     drawRings() {
       const g2 = this.ctx;
-      for (const ring of this.rings) {
-        const f = 1 - ring.life / ring.born;
-        const r = ring.r + (ring.max - ring.r) * Math.min(1, f * 1.4);
-        g2.strokeStyle = `rgba(${ring.rgb},${Math.max(0, ring.life / ring.born * 0.9).toFixed(3)})`;
+      for (const ring2 of this.rings) {
+        const f = 1 - ring2.life / ring2.born;
+        const r = ring2.r + (ring2.max - ring2.r) * Math.min(1, f * 1.4);
+        g2.strokeStyle = `rgba(${ring2.rgb},${Math.max(0, ring2.life / ring2.born * 0.9).toFixed(3)})`;
         g2.lineWidth = 2;
         g2.beginPath();
-        g2.arc(px(ring.x), px(ring.y), r, 0, Math.PI * 2);
+        g2.arc(px(ring2.x), px(ring2.y), r, 0, Math.PI * 2);
         g2.stroke();
       }
     }
@@ -4520,6 +4756,18 @@
         VIEW_W / 2,
         34
       );
+      const here = nearestFeature(CHIP, run.you.x, run.you.y);
+      if (here) {
+        const f = chipFlow(run, run.you.x, run.you.y);
+        const u = Math.hypot(f.x, f.y);
+        g2.fillStyle = u > 24e-5 ? GOLD : DIM;
+        g2.font = `700 9px ${MONO}`;
+        g2.fillText(
+          `${featureName(here.feature)}  \xB7  ${(u * 1e6).toFixed(0)} UM/S`,
+          VIEW_W / 2,
+          48
+        );
+      }
       g2.textAlign = "left";
       g2.textAlign = "right";
       g2.fillStyle = GOLD;
@@ -4915,6 +5163,12 @@
           return ` limbs ${l.length - legs} legs ${legs}`;
         })() : ""}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
+        `chip: ${(() => {
+          const on = nearestFeature(CHIP, run.you.x, run.you.y);
+          const f = chipFlow(run, run.you.x, run.you.y);
+          const reach = CHIP.filter((c) => c.x >= run.bounds.x && c.x <= run.bounds.x + run.bounds.w && c.y >= run.bounds.y && c.y <= run.bounds.y + run.bounds.h).length;
+          return `${reach}/${CHIP.length} in reach; flow on you ${(Math.hypot(f.x, f.y) * 1e6).toFixed(0)}um/s${on ? ` (in ${featureName(on.feature).toLowerCase()} #${on.feature.id})` : ""}`;
+        })()}`,
         `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
         `pad: ${this.pad.describe()}`,
         `diagnosis: ${this.diagnosis()}`
