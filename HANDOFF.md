@@ -163,13 +163,40 @@ anything.**
 
 1. **The controller does not deliver input on the user's machine.** The browser
    sees it (`mapping="standard"`, 4 axes, 17 buttons) and `getGamepads()` returns
-   nothing but zeroes. The page now says `CLICK THE GAME - A PAGE WITHOUT FOCUS
-   GETS NO PAD INPUT` when unfocused, and logs `[pad] first input received` when
-   anything arrives. Neither has been confirmed on their machine. **Leading
-   hypothesis: a Flatpak/Snap browser sandbox**, which needs explicit `/dev/input`
-   permission — and which would *also* explain a `file://` link to
-   `/home/kill/...` appearing broken. One cause, both symptoms. Worth testing
-   before writing any more controller code.
+   nothing but zeroes. The page says `CLICK THE GAME - A PAGE WITHOUT FOCUS GETS
+   NO PAD INPUT` when unfocused, and logs `[pad] first input received` when
+   anything arrives. Neither has been confirmed on their machine.
+
+   **Three hypotheses have been killed, all on 2026-09-02, none of them by
+   writing code.** Do not spend a fourth commit on any of these:
+
+   - *Flatpak/Snap browser sandbox with no `/dev/input`.* Dead: `flatpak list
+     --app` and `snap list` both return nothing. The browser is not sandboxed.
+     This also removes the one theory that covered the broken `file://` link as
+     the same cause, so that is now unexplained and separate.
+   - *Our own polling caching a stale `Gamepad` object* — the classic version of
+     this bug, since `getGamepads()` returns a snapshot. Dead: `pad.gamepad()`
+     re-calls `navigator.getGamepads()` every poll and holds no reference.
+     `app/pad.ts` is not at fault.
+   - *A device-permission problem at `/dev/input`.* Dead in a more interesting
+     way: **there was no gamepad attached to the machine at all.** `joydev` is
+     loaded with usage count 0, no `/dev/input/js*` node exists, and nothing in
+     `/proc/bus/input/devices` is a pad — the only HID there is a Compx (vendor
+     3554) 2.4G keyboard/mouse dongle and an FDUCE audio interface.
+
+   **So the next step is not a code change, it is one measurement with the pad
+   actually connected.** Plug it in or pair it, then:
+
+   ```
+   ls /dev/input/js* ; grep -E "^N: " /proc/bus/input/devices
+   ```
+
+   If a joystick node and a pad name appear, the OS is fine and the fault is
+   browser-side — which at this point means page focus, and `everMoved` /
+   `[pad] first input received` are already there to prove it. If nothing
+   appears, it is the controller's own mode (many 2.4G pads ship in a
+   keyboard-emulation mode and need a button combo to switch to X-input) and no
+   amount of browser code will ever reach it.
 2. **Mouse and keyboard are the supported path.** Point to steer (the offset
    grows over ~130 µm), left button grips, right bursts, WASD overrides.
 3. `personal/` and the bench app have not been touched this session.
