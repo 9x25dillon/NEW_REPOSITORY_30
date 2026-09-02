@@ -5,7 +5,7 @@ import {
   ARENA_H, ARENA_W, BEASTS, CHANNEL_H, CHANNEL_W, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
-  latticePitch, liftCell, placeCell, readoutFor, wearRate,
+  latticePitch, liftCell, placeCell, readoutFor, retune, suspension, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
 } from "../game/run.js";
@@ -978,4 +978,81 @@ test("standing still is still fatal", () => {
     run.events.length = 0;
   }
   assert.equal(run.phase, "dead");
+});
+
+// ── the water is not a spring ───────────────────────────────────────────────
+
+test("what you gather out is not handed straight back", () => {
+  // THE REPORT THIS EXISTS FOR. 909 s of play came back with 3440 cells built,
+  // 410 buildings standing, and a throne that had never been fed — because
+  // `motifs < suspension` pushed a replacement every frame a motif went
+  // missing. That is sixty a second, so the water could never run dry and an
+  // aeon's economy was bounded by nothing but how many catchments you owned.
+  const run = startRun(4);
+  const full = suspension(run);
+  assert.ok(run.entities.filter((e) => e.faction === "motif").length >= full - 1,
+    "the world starts with what its water holds");
+
+  // Take most of it out of the water by hand and give it a full second back.
+  const motifs = run.entities.filter((e) => e.faction === "motif");
+  for (const e of motifs.slice(0, full - 4)) {
+    run.entities = run.entities.filter((x) => x !== e);
+  }
+  const emptied = run.entities.filter((e) => e.faction === "motif").length;
+  // Five seconds. At the opening the co-flow and streaming together carry about
+  // half a motif a second past you, so a one-second window is shorter than the
+  // gap between arrivals and would prove nothing either way.
+  for (let i = 0; i < 60 * 5; i++) step(run, IDLE, DT);
+  const after = run.entities.filter((e) => e.faction === "motif").length;
+
+  assert.ok(after < emptied + 8,
+    `five seconds of water brings a few motifs, not a poolful (${emptied} -> ${after} of ${full})`);
+  assert.ok(after > emptied,
+    "but it does bring some: the pool is a window on a channel, not a sealed jar");
+});
+
+test("opening new water hands you what was already suspended in it", () => {
+  // The other half, and they are different things. Reaching further does not
+  // conjure cells — it reaches water that already had them.
+  const run = startRun(4);
+  for (let i = 0; i < 60; i++) step(run, IDLE, DT);
+  const small = run.entities.filter((e) => e.faction === "motif").length;
+
+  run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  const wide = suspension(run);
+  assert.ok(wide > small * 10, "the whole channel holds far more than the pool");
+  for (let i = 0; i < 60 * 20; i++) {
+    step(run, IDLE, DT);
+    run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  }
+  const opened = run.entities.filter((e) => e.faction === "motif").length;
+  assert.ok(
+    opened > small * 5,
+    `the water you opened arrives because it was already there (${small} -> ${opened} of ${wide}), `
+    + "rather than trickling in at the co-flow rate for seven minutes",
+  );
+});
+
+test("an idle farm cannot outproduce a player", () => {
+  // The relationship the report had upside down: 410 buildings were making
+  // cells faster than anyone could spend them, so playing was the slow way to
+  // get anything. Buildings should work while you are away, not instead of you.
+  const run = startRun(4);
+  const pitch = latticePitch(run);
+  for (let i = 0; i < 40; i++) {
+    run.structures.push(structureFrom(
+      run.nextId++, "222",
+      run.bounds.x + run.bounds.w / 2 + ((i % 7) - 3) * pitch,
+      run.bounds.y + run.bounds.h / 2 + (Math.floor(i / 7) - 3) * pitch, 0));
+  }
+  retune(run);
+  run.you.x = run.bounds.x + 12e-6;      // parked in a corner, hands open
+  run.you.y = run.bounds.y + 12e-6;
+  for (let i = 0; i < 60 * 180; i++) step(run, IDLE, DT);
+
+  assert.ok(
+    run.built < 30,
+    `three minutes of forty buildings and no player made ${run.built} cells; `
+    + "world.ts tunes ACTIVE play at 16-35 in that time, so a farm must sit under it",
+  );
 });

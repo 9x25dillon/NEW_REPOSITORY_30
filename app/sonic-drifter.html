@@ -1554,9 +1554,6 @@
       ruin: false
     };
   }
-  function holdPoints(s) {
-    return s.lobes.map(([dx, dy]) => [s.x + dx * s.reach, s.y + dy * s.reach]);
-  }
   function emptyThrone(x, y) {
     return {
       hm: "",
@@ -1752,6 +1749,10 @@
     return { x: (CHANNEL_W - w) / 2, y: (CHANNEL_H - h) / 2, w, h };
   }
   var MAX_SUSPENSION = 900;
+  function arrivalRate(run) {
+    const past = run.world.current + streamingSpeed(run.wave.amplitude);
+    return suspension(run) * past / run.bounds.w;
+  }
   function suspension(run) {
     const area = run.bounds.w * run.bounds.h;
     return Math.min(
@@ -1794,6 +1795,8 @@
       phase: "settle",
       entities: [],
       structures: [],
+      delivered: 0,
+      arriving: 0,
       bolts: [],
       throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
       cells: [],
@@ -1811,6 +1814,7 @@
       nextId: 0
     };
     for (let i = 0; i < suspension(run); i++) run.entities.push(newMotif(run, true));
+    run.delivered = suspension(run);
     run.spacing = workableSpacing(run.bound.omega, world.medium, reachOf(BUILDABLE[0]));
     return run;
   }
@@ -1920,8 +1924,17 @@
         run.entities.push(newBeast(run, table[Math.floor(run.rand() * table.length)]));
       }
     }
-    const motifs = run.entities.filter((e) => e.faction === "motif").length;
-    if (motifs < suspension(run)) run.entities.push(newMotif(run));
+    if (run.delivered < suspension(run)) {
+      run.entities.push(newMotif(run));
+      run.delivered++;
+    } else {
+      run.arriving += arrivalRate(run) * dt;
+      if (run.arriving >= 1) {
+        const standing = run.entities.filter((e) => e.faction === "motif").length;
+        if (standing < suspension(run)) run.entities.push(newMotif(run));
+        run.arriving -= 1;
+      }
+    }
     release(run, dt);
     walkBodies(run, dt);
     drift(run, dt);
@@ -1950,6 +1963,8 @@
   function drift(run, dt) {
     const w = run.wave;
     const uStream = streamingSpeed(w.amplitude);
+    const ix = indexStructures(run.structures);
+    const scratch = [];
     for (const e of run.entities) {
       const p = particleOf(e);
       const water = waterAt(run, e.y);
@@ -1974,13 +1989,15 @@
         dy += swim.y;
       }
       if (contrastFactor(p, water) > 0) {
-        for (const s of run.structures) {
+        for (const s of nearStructures(ix, e.x, e.y, scratch)) {
           if (!s.serves.includes(e.layer)) continue;
-          for (const [hx, hy] of holdPoints(s)) {
-            const qx = hx - e.x, qy = hy - e.y;
+          const grab = s.reach * 1.1;
+          for (const [lx, ly] of s.lobes) {
+            const qx = s.x + lx * s.reach - e.x;
+            const qy = s.y + ly * s.reach - e.y;
             const r = Math.hypot(qx, qy);
-            if (r > 1e-9 && r < s.reach * 1.1) {
-              const pull = (s.ruin ? 22e-6 : 44e-6) * (1 - r / (s.reach * 1.1));
+            if (r > 1e-9 && r < grab) {
+              const pull = (s.ruin ? 22e-6 : 44e-6) * (1 - r / grab);
               dx += qx / r * pull;
               dy += qy / r * pull;
             }
@@ -2088,12 +2105,39 @@
       }
     }
   }
+  function indexStructures(ss) {
+    let cell = 4e-5;
+    for (const s of ss) cell = Math.max(cell, s.reach * 2.1);
+    const grid = /* @__PURE__ */ new Map();
+    for (const s of ss) {
+      const key3 = (Math.floor(s.x / cell) + KEY_ORIGIN) * KEY_STRIDE + (Math.floor(s.y / cell) + KEY_ORIGIN);
+      const at = grid.get(key3);
+      if (at) at.push(s);
+      else grid.set(key3, [s]);
+    }
+    return { cell, grid };
+  }
+  function nearStructures(ix, x, y, out) {
+    out.length = 0;
+    const cx = Math.floor(x / ix.cell);
+    const cy = Math.floor(y / ix.cell);
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const at = ix.grid.get((cx + ox + KEY_ORIGIN) * KEY_STRIDE + (cy + oy + KEY_ORIGIN));
+        if (at) for (const s of at) out.push(s);
+      }
+    }
+    return out;
+  }
   var HOLD_CATCH = 0.55;
-  function underStructure(run, x, y, layer) {
-    for (const s of run.structures) {
+  function underStructure(ix, scratch, x, y, layer) {
+    for (const s of nearStructures(ix, x, y, scratch)) {
       if (!s.serves.includes(layer)) continue;
-      for (const [hx, hy] of holdPoints(s)) {
-        if (Math.hypot(hx - x, hy - y) < s.reach * HOLD_CATCH) return true;
+      const catchR = s.reach * HOLD_CATCH;
+      for (const [lx, ly] of s.lobes) {
+        const hx = s.x + lx * s.reach - x;
+        const hy = s.y + ly * s.reach - y;
+        if (Math.hypot(hx, hy) < catchR) return true;
       }
     }
     return false;
@@ -2120,6 +2164,8 @@
     const gripping = handed(run.you);
     const gone = /* @__PURE__ */ new Set();
     const grid = neighbourhood(ms);
+    const ix = indexStructures(run.structures);
+    const scratch = [];
     for (let i = 0; i < ms.length; i++) {
       const a = ms[i];
       if (gone.has(a.id)) continue;
@@ -2149,7 +2195,7 @@
         a.partner = -1;
         continue;
       }
-      const bound = gripping || underStructure(run, a.x, a.y, a.layer);
+      const bound = gripping || underStructure(ix, scratch, a.x, a.y, a.layer);
       if (!bound) {
         a.dwell = 0;
         a.partner = -1;
@@ -2646,6 +2692,8 @@
     run.bolts = [];
     run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
     for (let i = run.entities.length; i < suspension(run); i++) run.entities.push(newMotif(run, true));
+    run.delivered = suspension(run);
+    run.arriving = 0;
     run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
     run.spawnIn = 4;
     run.phase = "settle";

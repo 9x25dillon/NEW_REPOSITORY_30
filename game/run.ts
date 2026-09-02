@@ -46,7 +46,7 @@ import {
 } from "./pilot.js";
 import {
   type Sovereign, type Structure, type World,
-  cadence, emptyThrone, feed, firstWorld, holdPoints, reachOf, sovereignInertia,
+  cadence, emptyThrone, feed, firstWorld, reachOf, sovereignInertia,
   sovereignParticle, sovereignSpeed, structureFrom, volley, worldFrom,
 } from "./world.js";
 import { type Medium, type Particle, WATER, contrastFactor } from "../src/gorkov.js";
@@ -160,6 +160,42 @@ export function boundsFor(cells: number): Bounds {
  * separate strokes per motif, so `drifter.onCamera` culls to the view.
  */
 export const MAX_SUSPENSION = 900;
+
+/**
+ * How fast the water carries more in, motifs per second.
+ *
+ * Derived, not chosen. The pool is `bounds.w` across and the water crosses it at
+ * `world.current`, so its entire content is replaced every `bounds.w / current`
+ * seconds — 90 s for the opening pool, 420 s for the whole channel. Carrying
+ * `suspension` motifs, that is the rate they arrive at.
+ *
+ * WHAT IT REPLACED, and why. This used to be `motifs < suspension`, one motif
+ * pushed per frame, which is sixty a second and never runs dry. It meant an
+ * aeon's economy had no ceiling at all: the only limit was how many catchments
+ * you owned. A 909 s report came back with 3440 cells built, 410 buildings
+ * standing, and a throne that had never once been fed, because there was no
+ * point at which gathering stopped paying better than the objective.
+ *
+ * TWO THINGS MOVE THE WATER PAST YOU and the first draft only counted one.
+ * `world.current` is the co-flow; bulk acoustic streaming is the same order
+ * (4.3 um/s at cruise, 14.4 gripping) and is driven by your own field. Both are
+ * large-scale circulations rather than a pipe, but that does not matter here:
+ * a circulation of scale L still exchanges the contents of a window smaller
+ * than L, and your pool is that window.
+ *
+ * Leaving streaming out cost the opening its tail. Measured over ten seeds,
+ * time to the first cell: with the old unbounded spring, worst 32 s and median
+ * 25. Co-flow alone, worst 77 s and median 26 — the typical run was untouched
+ * and the unlucky one doubled, which is the shape of fault that gets reported
+ * as "I suck at this game" and never as a bug. With both terms, below.
+ *
+ * It also means gripping brings you more water, which is the same bargain the
+ * chip already makes: drive harder and the glass does more.
+ */
+export function arrivalRate(run: Run): number {
+  const past = run.world.current + streamingSpeed(run.wave.amplitude);
+  return (suspension(run) * past) / run.bounds.w;
+}
 
 /** The motif population the current pool should hold. */
 export function suspension(run: Run): number {
@@ -328,6 +364,31 @@ export interface Run {
   phase: Phase;
   entities: Entity[];
   structures: Structure[];
+  /**
+   * How much of this world's water has been handed over.
+   *
+   * A suspension is a BATCH. It was being spent as a spring: the population was
+   * topped back up to `suspension(run)` every frame a motif went missing, at up
+   * to sixty a second, so gathering could never run the water dry and the only
+   * limit on an aeon's economy was how fast you could pick things up. A report
+   * came back at 909 s with 3440 cells built, 410 buildings standing, and a
+   * throne that had never been fed — because there was no reason to ever stop.
+   *
+   * So this counts what the water has already given you, and it only rises when
+   * the POOL DOES. Opening more water hands you the cells that were already
+   * suspended in it; it does not conjure new ones into water you have already
+   * been through.
+   */
+  delivered: number;
+  /**
+   * Fractional motifs owed by the co-flow, carried between frames.
+   *
+   * The other half of the same correction, and the half a pure batch got wrong.
+   * The pool is not a sealed jar — it is a region of a channel with three waters
+   * flowing through it, so what you gather out IS replaced. Just not instantly.
+   * See `arrivalRate`.
+   */
+  arriving: number;
   bolts: Bolt[];
   throne: Sovereign;
   /** Cells in hand, not yet placed or fed. */
@@ -365,6 +426,8 @@ export function startRun(seed = 1): Run {
     phase: "settle",
     entities: [],
     structures: [],
+    delivered: 0,
+    arriving: 0,
     bolts: [],
     throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
     cells: [],
@@ -382,6 +445,7 @@ export function startRun(seed = 1): Run {
     nextId: 0,
   };
   for (let i = 0; i < suspension(run); i++) run.entities.push(newMotif(run, true));
+  run.delivered = suspension(run);
   run.spacing = workableSpacing(run.bound.omega, world.medium, reachOf(BUILDABLE[0]));
   return run;
 }
@@ -532,8 +596,21 @@ export function step(run: Run, input: Input, dt: number): void {
       run.entities.push(newBeast(run, table[Math.floor(run.rand() * table.length)]));
     }
   }
-  const motifs = run.entities.filter((e) => e.faction === "motif").length;
-  if (motifs < suspension(run)) run.entities.push(newMotif(run));
+  // TWO DIFFERENT THINGS, and conflating them is what made the water a spring.
+  // Opening the pool reaches water that ALREADY HAS CELLS IN IT, so that share
+  // arrives at once. Replacing what you gathered out is the co-flow's job, and
+  // the co-flow is slow.
+  if (run.delivered < suspension(run)) {
+    run.entities.push(newMotif(run));
+    run.delivered++;
+  } else {
+    run.arriving += arrivalRate(run) * dt;
+    if (run.arriving >= 1) {
+      const standing = run.entities.filter((e) => e.faction === "motif").length;
+      if (standing < suspension(run)) run.entities.push(newMotif(run));
+      run.arriving -= 1;
+    }
+  }
 
   release(run, dt);
   walkBodies(run, dt);
@@ -577,6 +654,8 @@ function release(run: Run, dt: number): void {
 function drift(run: Run, dt: number): void {
   const w = run.wave;
   const uStream = streamingSpeed(w.amplitude);
+  const ix = indexStructures(run.structures);
+  const scratch: Structure[] = [];
 
   for (const e of run.entities) {
     const p = particleOf(e);
@@ -617,13 +696,15 @@ function drift(run: Run, dt: number): void {
     // What you built pulls on what answers to it, whether or not you are here —
     // on every plane the body it belongs to can reach.
     if (contrastFactor(p, water) > 0) {
-      for (const s of run.structures) {
+      for (const s of nearStructures(ix, e.x, e.y, scratch)) {
         if (!s.serves.includes(e.layer)) continue;
-        for (const [hx, hy] of holdPoints(s)) {
-          const qx = hx - e.x, qy = hy - e.y;
+        const grab = s.reach * 1.1;
+        for (const [lx, ly] of s.lobes) {
+          const qx = s.x + lx * s.reach - e.x;
+          const qy = s.y + ly * s.reach - e.y;
           const r = Math.hypot(qx, qy);
-          if (r > 1e-9 && r < s.reach * 1.1) {
-            const pull = (s.ruin ? 2.2e-5 : 4.4e-5) * (1 - r / (s.reach * 1.1));
+          if (r > 1e-9 && r < grab) {
+            const pull = (s.ruin ? 2.2e-5 : 4.4e-5) * (1 - r / grab);
             dx += (qx / r) * pull;
             dy += (qy / r) * pull;
           }
@@ -764,6 +845,58 @@ export function kill(run: Run, e: Entity): void {
 // ── merging, and what your buildings do while you are away ──────────────────
 
 /**
+ * The buildings near a point, without asking about all of them.
+ *
+ * Two passes ask "which structures reach this spot?" for every entity in the
+ * water — the pull in `drift` and the binding in `underStructure` — and both
+ * were written when a player had twenty-six buildings. A report came back with
+ * FOUR HUNDRED AND TEN of them and 636 motifs, which is a million distance
+ * checks a frame in each pass: measured at 53.5 ms of simulation per frame,
+ * so the game was running at nineteen frames a second before anything was
+ * drawn, and the player was in slow motion without being told why.
+ *
+ * A building's influence stops at its arm tips plus their catch, so 2.1 reaches
+ * from its centre bounds it. A grid of that pitch puts every structure that can
+ * possibly matter in the nine squares around a point. It is rebuilt every frame
+ * rather than cached because inserting 410 structures twice is nothing against
+ * what it saves, and a cache would have to be invalidated by walking, lifting,
+ * discharging and the king's appetite — four places to forget.
+ */
+interface Near {
+  cell: number;
+  grid: Map<number, Structure[]>;
+}
+
+function indexStructures(ss: readonly Structure[]): Near {
+  let cell = 40e-6;
+  for (const s of ss) cell = Math.max(cell, s.reach * 2.1);
+  const grid = new Map<number, Structure[]>();
+  for (const s of ss) {
+    const key = (Math.floor(s.x / cell) + KEY_ORIGIN) * KEY_STRIDE
+      + (Math.floor(s.y / cell) + KEY_ORIGIN);
+    const at = grid.get(key);
+    if (at) at.push(s);
+    else grid.set(key, [s]);
+  }
+  return { cell, grid };
+}
+
+/** Fills `out` with the structures that could reach (x, y). Reuses the array,
+ *  because this is called once per entity per pass per frame. */
+function nearStructures(ix: Near, x: number, y: number, out: Structure[]): Structure[] {
+  out.length = 0;
+  const cx = Math.floor(x / ix.cell);
+  const cy = Math.floor(y / ix.cell);
+  for (let ox = -1; ox <= 1; ox++) {
+    for (let oy = -1; oy <= 1; oy++) {
+      const at = ix.grid.get((cx + ox + KEY_ORIGIN) * KEY_STRIDE + (cy + oy + KEY_ORIGIN));
+      if (at) for (const s of at) out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
  * How wide a catch each of a building's arm tips has, as a fraction of its
  * holding radius.
  *
@@ -783,12 +916,19 @@ export function kill(run: Run, e: Entity): void {
  */
 export const HOLD_CATCH = 0.55;
 
-/** True if this point is inside some structure's holding field. */
-function underStructure(run: Run, x: number, y: number, layer: number): boolean {
-  for (const s of run.structures) {
+/** True if this point is inside some structure's holding field. The hold points
+ *  are computed inline rather than through `holdPoints`, which allocates an
+ *  array per structure and was being called once per motif per frame. */
+function underStructure(
+  ix: Near, scratch: Structure[], x: number, y: number, layer: number,
+): boolean {
+  for (const s of nearStructures(ix, x, y, scratch)) {
     if (!s.serves.includes(layer)) continue;
-    for (const [hx, hy] of holdPoints(s)) {
-      if (Math.hypot(hx - x, hy - y) < s.reach * HOLD_CATCH) return true;
+    const catchR = s.reach * HOLD_CATCH;
+    for (const [lx, ly] of s.lobes) {
+      const hx = s.x + lx * s.reach - x;
+      const hy = s.y + ly * s.reach - y;
+      if (Math.hypot(hx, hy) < catchR) return true;
     }
   }
   return false;
@@ -840,6 +980,8 @@ function mergePass(run: Run, dt: number): void {
   const gripping = handed(run.you);
   const gone = new Set<number>();
   const grid = neighbourhood(ms);
+  const ix = indexStructures(run.structures);
+  const scratch: Structure[] = [];
 
   for (let i = 0; i < ms.length; i++) {
     const a = ms[i];
@@ -866,7 +1008,7 @@ function mergePass(run: Run, dt: number): void {
 
     // A structure holds them together as well as your hand does. This is why
     // building is worth anything: what you left standing keeps working.
-    const bound = gripping || underStructure(run, a.x, a.y, a.layer);
+    const bound = gripping || underStructure(ix, scratch, a.x, a.y, a.layer);
     if (!bound) { a.dwell = 0; a.partner = -1; continue; }
 
     const asm = assemble([...a.parts, ...best.parts]);
@@ -1690,8 +1832,13 @@ export function enterWorld(run: Run): void {
   const site = throneSite(run, fell.x, fell.y);
   run.throne = emptyThrone(site.x, site.y);
   run.bolts = [];
+  // NEW WORLD, NEW WATER. This is the only place the count resets, and that is
+  // the whole of the pressure to crown: gather this world out and the only way
+  // to more is through the throne.
   run.entities = run.entities.filter((e) => e.faction === "motif").slice(0, 6);
   for (let i = run.entities.length; i < suspension(run); i++) run.entities.push(newMotif(run, true));
+  run.delivered = suspension(run);
+  run.arriving = 0;
   run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
   run.spawnIn = 4;
   run.phase = "settle";
