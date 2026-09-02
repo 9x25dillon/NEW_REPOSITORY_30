@@ -28,7 +28,7 @@ import {
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
 import {
-  epitaphFor, sovereignParticle, volley,
+  epitaphFor, inheritanceOf, sovereignParticle, volley,
 } from "../game/world.js";
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
@@ -1692,6 +1692,19 @@ export class Game {
         g.font = `600 8px ${MONO}`;
         g.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
       }
+
+      // AND WHAT THE FEEDING BOUGHT, which nothing said until the king was
+      // already dead and the epitaph came up. Only the cost was ever on screen
+      // — more hit points, more discharges — so feeding as little as possible
+      // was the rational read, and it compounds: a player reached the fourth
+      // aeon with a four-cell body and none of the chip in reach, every world
+      // poorer than the last, with no line anywhere connecting the two.
+      const keep = inheritanceOf(run.throne);
+      g.font = `700 9px ${MONO}`;
+      g.fillStyle = keep < 0.2 ? "#ffa24a" : JADE;
+      g.fillText(
+        `NEXT WORLD KEEPS ${(keep * 100).toFixed(0)}% OF WHAT YOU BUILD`,
+        x, y - R - (beyond ? 50 : 39));
     }
 
     // The hold that wakes it, drawn while it is being made.
@@ -2605,6 +2618,17 @@ export class Game {
     }
     if (run.bodies.length > 1 && !run.bodies.some((b) => b.cells.length >= 3)) {
       return "YOUR CELLS ARE SCATTERED. PUT THEM ON ADJACENT SITES AND THEY BECOME ONE";
+    }
+    // THE POVERTY STATE, which reads as bad luck and is not. A report came back
+    // at aeon 4 holding sixteen cells with a four-cell body standing: the pool
+    // opens with the largest body you have BUILT, so cells in the rack open
+    // nothing, and none of the chip was in reach. Being told to go feed the
+    // throne there is true and useless — there is nothing to feed it with worth
+    // crowning until the water is open again.
+    if (run.phase === "settle" && run.cells.length > 6
+      && (run.bodies[0]?.cells.length ?? 0) < 8) {
+      return "YOUR BODY IS SMALLER THAN YOUR RACK. THE WATER YOU CAN DRIVE OPENS WITH "
+        + "WHAT YOU HAVE PUT DOWN - CELLS IN HAND OPEN NOTHING";
     }
     // A report came back at 909 s: 3440 cells built, 410 buildings standing, the
     // bound field freed, and a throne that had never once been visited. This

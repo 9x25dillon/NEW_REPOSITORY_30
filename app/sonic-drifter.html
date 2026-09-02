@@ -1713,7 +1713,7 @@
       mode: modeFor(s.mass, aeon),
       current: 9e-6 + aeon * 14e-7,
       // A richer king leaves more of the old world standing.
-      inheritance: Math.min(0.6, 0.12 + s.mass * 0.016)
+      inheritance: inheritanceOf(s)
     };
   }
   function poolFor(s, aeon) {
@@ -1722,6 +1722,9 @@
     if (axial === "a2" || axial === "a4") out.push("d");
     if (aeon >= 3) out.push("a5");
     return out;
+  }
+  function inheritanceOf(s) {
+    return Math.min(0.6, 0.12 + s.mass * 0.016);
   }
   function epitaphFor(s, w) {
     const g2 = pointGroup(s.hm === "" ? "1" : s.hm);
@@ -4671,6 +4674,14 @@
           g2.font = `600 8px ${MONO}`;
           g2.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
         }
+        const keep = inheritanceOf(run.throne);
+        g2.font = `700 9px ${MONO}`;
+        g2.fillStyle = keep < 0.2 ? "#ffa24a" : JADE;
+        g2.fillText(
+          `NEXT WORLD KEEPS ${(keep * 100).toFixed(0)}% OF WHAT YOU BUILD`,
+          x,
+          y - R - (beyond ? 50 : 39)
+        );
       }
       if (this.crownHeld > 0) {
         const f = Math.min(1, this.crownHeld / _Game.CROWN_HOLD);
@@ -5512,6 +5523,9 @@
       }
       if (run.bodies.length > 1 && !run.bodies.some((b) => b.cells.length >= 3)) {
         return "YOUR CELLS ARE SCATTERED. PUT THEM ON ADJACENT SITES AND THEY BECOME ONE";
+      }
+      if (run.phase === "settle" && run.cells.length > 6 && (run.bodies[0]?.cells.length ?? 0) < 8) {
+        return "YOUR BODY IS SMALLER THAN YOUR RACK. THE WATER YOU CAN DRIVE OPENS WITH WHAT YOU HAVE PUT DOWN - CELLS IN HAND OPEN NOTHING";
       }
       if (run.throne.awake && run.structures.length > 4 && n("discharge") === 0) {
         return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";

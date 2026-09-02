@@ -423,7 +423,7 @@ export function worldFrom(s: Sovereign, aeon: number): World {
     mode: modeFor(s.mass, aeon),
     current: 0.9e-5 + aeon * 1.4e-6,
     // A richer king leaves more of the old world standing.
-    inheritance: Math.min(0.6, 0.12 + s.mass * 0.016),
+    inheritance: inheritanceOf(s),
   };
 }
 
@@ -482,6 +482,24 @@ const RECIPE_PARTS = new Map<string, readonly string[]>([
 export interface Epitaph {
   name: string;
   lines: Array<[string, string]>;
+}
+
+/**
+ * How much of what you built survives into the world this king will make.
+ *
+ * Its own function because the SURFACE needs it while you are still deciding
+ * what to feed, and a rule restated in the renderer is a rule with two homes.
+ *
+ * It compounds, which is the part that was invisible. The throne showed the
+ * COST of another cell — the hit points go up and the discharges to kill it go
+ * up with them — and said nothing about what the cell bought. A player who
+ * reasonably fed as little as possible reached the fourth aeon with a four-cell
+ * body, six buildings, none of the chip in reach and a pool small enough that
+ * the throne could not stand at a landmark at all. Every world had been poorer
+ * than the one before it, and nothing had ever said why.
+ */
+export function inheritanceOf(s: Sovereign): number {
+  return Math.min(0.6, 0.12 + s.mass * 0.016);
 }
 
 export function epitaphFor(s: Sovereign, w: World): Epitaph {
