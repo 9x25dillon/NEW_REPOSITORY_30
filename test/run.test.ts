@@ -1105,3 +1105,61 @@ test("but fifteen minutes of it does not stay quiet", () => {
     `after ten minutes in one water it held ${late} hunters; the reported run met one in fifteen`,
   );
 });
+
+// ── the fight must not defund you ───────────────────────────────────────────
+
+test("the discharge count says how many MORE, once it is a fight", () => {
+  // A player ground a 270 hp king down to 82 — one 23 discharge, 96 damage,
+  // from killing it — and the readout said THREE the whole way down, because it
+  // divided maxHp instead of what was left. That is the difference between a
+  // fight you can see the end of and one that looks like it never moved.
+  const run = startRun(3);
+  run.cells.push(cellFor("23"));
+  feed(run.throne, cellFor("23"));
+  feed(run.throne, cellFor("23"));
+
+  const full = dischargesToKill(run);
+  assert.ok(full > 1, `while you are still feeding it, it forecasts the whole bar (${full})`);
+
+  run.throne.awake = true;
+  run.throne.hp = 82;
+  assert.equal(dischargesToKill(run), 1, "awake and nearly dead, one more finishes it");
+
+  run.throne.hp = run.throne.maxHp;
+  assert.equal(dischargesToKill(run), full, "and at full health the two agree");
+});
+
+test("spending your arsenal does not shrink the water you are fighting in", () => {
+  // THE SPIRAL THIS EXISTS TO STOP. Killing a king means discharging buildings,
+  // every discharge deletes a structure, and the pool was read off the body
+  // live — so a player who fought from forty buildings down to two watched the
+  // channel close to the opening arena, the chip go from twelve features in
+  // reach to none, and the water fall from 636 motifs to 30, with a king still
+  // standing in front of them.
+  const run = startRun(3);
+  const pitch = latticePitch(run);
+  for (let i = 0; i < 40; i++) {
+    run.structures.push(structureFrom(run.nextId++, "23",
+      run.bounds.x + run.bounds.w / 2 + (i % 7) * pitch,
+      run.bounds.y + run.bounds.h / 2 + Math.floor(i / 7) * pitch, 0));
+  }
+  retune(run);
+  const opened = { ...run.bounds };
+  const water = suspension(run);
+  assert.ok(opened.w > ARENA_W * 3, "forty buildings opened most of the channel");
+
+  while (run.structures.length > 2) run.structures.pop();
+  retune(run);
+  assert.equal(run.bounds.w, opened.w, "the pool you drove open stays open");
+  assert.equal(suspension(run), water, "and so does the water in it");
+
+  // But a NEW WORLD starts from what it inherits, not from the last one's mark.
+  run.phase = "birth";
+  run.world = { ...run.world, inheritance: 0 };
+  enterWorld(run);
+  assert.ok(
+    run.bounds.w < opened.w,
+    `a new world opens with its own ruins (${(run.bounds.w * 1e6).toFixed(0)}um), `
+    + "not with the high-water mark of the world you left",
+  );
+});

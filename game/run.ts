@@ -388,6 +388,23 @@ export interface Run {
    */
   bornAt: number;
   /**
+   * The largest body this world has ever seen, in cells.
+   *
+   * The pool opens with your crystal — that is the phononic argument in
+   * `boundsFor` — but it must not CLOSE when you spend it, and closing is
+   * exactly what it did. Killing a king means discharging buildings, each
+   * discharge deletes a structure, and `boundsFor` read the body live: a player
+   * who fought their way from forty buildings down to two watched the pool go
+   * from the whole channel to the opening arena, the chip from twelve features
+   * in reach to none, and the water from 636 motifs to 30 — while a king with
+   * 82 hp left stood in front of them.
+   *
+   * So the fight cannot defund you. You drove that water and it stays driven
+   * for as long as this world lasts; a new world gets a new high-water mark
+   * from what it inherits.
+   */
+  opened: number;
+  /**
    * Fractional motifs owed by the co-flow, carried between frames.
    *
    * The other half of the same correction, and the half a pure batch got wrong.
@@ -436,6 +453,7 @@ export function startRun(seed = 1): Run {
     delivered: 0,
     arriving: 0,
     bornAt: 0,
+    opened: 0,
     bolts: [],
     throne: emptyThrone(START.x + ARENA_W / 2, START.y + ARENA_H / 2),
     cells: [],
@@ -1124,7 +1142,8 @@ export function latticePitch(run: Run): number {
 export function reshape(run: Run): void {
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
-  run.bounds = boundsFor(run.bodies[0]?.cells.length ?? 0);
+  run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
+  run.bounds = boundsFor(run.opened);
   for (const b of run.bodies) {
     const zs = reaches(b, pitch);
     for (const c of b.cells) c.serves = zs;
@@ -1212,7 +1231,8 @@ export function retune(run: Run): void {
   run.gap = gapOf(run.crystal);
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
-  run.bounds = boundsFor(run.bodies[0]?.cells.length ?? 0);
+  run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
+  run.bounds = boundsFor(run.opened);
 
   // WHAT A LEG IS FOR. A body that hangs a limb onto another plane can work
   // there, and every cell of it can — which is the first thing an organism does
@@ -1370,7 +1390,14 @@ export function dischargesToKill(run: Run): number {
     ...run.cells.map((c) => structureFrom(-1, c.group.hm, 0, 0).strength),
   );
   if (best <= 0) return Infinity;
-  return Math.ceil(run.throne.maxHp / (best * DISCHARGE_GAIN));
+  // HOW MANY MORE. While you are feeding the throne this is a forecast and the
+  // full bar is the right question; once it is awake it is a fight, and the
+  // right question is what is left. It used to answer with maxHp in both cases,
+  // so a player who had ground a 270 hp king down to 82 — one discharge from
+  // killing it — was still being told THREE, which is the difference between a
+  // fight you are winning and one you cannot see the end of.
+  const left = run.throne.awake ? Math.max(0, run.throne.hp) : run.throne.maxHp;
+  return Math.ceil(left / (best * DISCHARGE_GAIN));
 }
 
 /** Put a cell on the ground. It never feeds — that is its own verb now. */
@@ -1866,6 +1893,9 @@ export function enterWorld(run: Run): void {
     run.bounds.x + run.bounds.w * (0.2 + run.rand() * 0.6),
     run.bounds.y + run.bounds.h * (0.2 + run.rand() * 0.6));
   run.spacing = workableSpacing(run.bound.omega, w.medium, reachOf(BUILDABLE[0]));
+  // A NEW WORLD IS NEW WATER, and the pool it opens with is whatever ruins came
+  // through with you — not the high-water mark of the world you just left.
+  run.opened = 0;
   retune(run);
   const site = throneSite(run, fell.x, fell.y);
   run.throne = emptyThrone(site.x, site.y);
