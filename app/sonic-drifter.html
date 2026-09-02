@@ -2389,6 +2389,7 @@
     run.events.push({ kind: "crown", group: run.throne.hm, mass: run.throne.mass });
     return "crowned";
   }
+  var CHIP_FASTEST = streamingSpeed(MAX_AMPLITUDE) * EDGE_GAIN;
   function chargeTime(s) {
     return 0.55 + s.strength * 0.075;
   }
@@ -2405,7 +2406,9 @@
         s.charge += dt / chargeTime(s);
         if (s.charge >= 1) spent.push(s);
       } else {
-        s.charge = Math.max(0, s.charge - dt * 0.35);
+        const f = chipFlow(run, s.x, s.y);
+        const held = Math.min(1, Math.hypot(f.x, f.y) / CHIP_FASTEST);
+        s.charge = Math.max(held, s.charge - dt * 0.35);
       }
     }
     for (const s of spent) discharge(run, s);

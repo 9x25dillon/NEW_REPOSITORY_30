@@ -13,8 +13,8 @@ import {
   boundsFor, chipFlow, enterWorld, latticePitch, newMotif, onThrone, retune,
   startRun, step, suspension, throneSite,
 } from "../game/run.js";
-import { BUILDABLE } from "../game/lattice.js";
-import { reachOf, structureFrom } from "../game/world.js";
+import { BUILDABLE, cellFor } from "../game/lattice.js";
+import { feed, reachOf, structureFrom } from "../game/world.js";
 import { lobes } from "../game/shape.js";
 import { CRUISE_AMPLITUDE, YOU, speed } from "../game/pilot.js";
 import { advance, aimAt, newWave, streamingSpeed } from "../game/wave.js";
@@ -572,4 +572,50 @@ test("a throne is always in water you can stand in", () => {
       assert.ok(onThrone(run, k.x, k.y), "standing on it counts as standing on it");
     }
   }
+});
+
+test("the water holds a charge in what you built, and never fires it", () => {
+  // chip.ts: "it is powered by YOUR drive". Streaming is the second-order flow
+  // of the same field, so a building standing in a tip jet is being worked on
+  // by water you drove from somewhere you are not. The player below is parked
+  // on the far side of the channel and never goes near any of these.
+  const run = startRun(9);
+  run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  run.you.x = CHANNEL_W / 2;
+  run.you.y = CHANNEL_H / 2;
+  feed(run.throne, cellFor(BUILDABLE[0]));
+  run.throne.awake = true;
+  run.phase = "reign";
+
+  const tip = edges[0];
+  const put = (x: number, y: number) => {
+    const s = structureFrom(run.nextId++, BUILDABLE[0], x, y, 0);
+    run.structures.push(s);
+    return s;
+  };
+  const inJet = put(tip.x + tip.jx * 40e-6, tip.y + tip.jy * 40e-6);
+  const inLee = put(tip.x - tip.jx * 120e-6, tip.y - tip.jy * 120e-6);
+  const inOpen = put(CHANNEL_W / 2, CHANNEL_H * 0.32);
+  const standing = run.structures.length;
+
+  const dt = 1 / 60;
+  let fired = 0;
+  for (let i = 0; i < 40 / dt; i++) {
+    run.events.length = 0;
+    step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, dt);
+    fired += run.events.filter((e) => e.kind === "discharge").length;
+    run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+    run.throne.hp = run.throne.maxHp;   // hold the reign open for the whole run
+  }
+
+  assert.ok(inJet.charge > 0.5, `a building in a tip jet is most of the way there (${inJet.charge.toFixed(2)})`);
+  assert.equal(inLee.charge, 0, "a building in the tip's lee is in dead water and gets nothing");
+  assert.equal(inOpen.charge, 0, "and so is one in open water, which is most of the channel");
+
+  // THE PROPERTY THAT MATTERS MORE THAN THE BONUS. Discharging is still your
+  // hand and only your hand. A building that spent itself because it happened
+  // to be standing in a current would be spending it at whatever was in front
+  // of it, which is nothing anybody decided.
+  assert.equal(fired, 0, "nothing on this chip goes off by itself");
+  assert.equal(run.structures.length, standing, "and nothing was consumed");
 });

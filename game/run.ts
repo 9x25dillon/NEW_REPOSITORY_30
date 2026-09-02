@@ -29,7 +29,7 @@ import {
   type Body, autonomous, bodiesOf, gaitDirection, reaches, snap, walkSpeed,
 } from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
-import { type Feature, features, flowAt } from "./chip.js";
+import { type Feature, EDGE_GAIN, features, flowAt } from "./chip.js";
 import { mediumAt, streamAt } from "./streams.js";
 import {
   type Bound, RELEASE_TIME, catches, crystalOf, gapOf, newBound, workableSpacing,
@@ -1273,6 +1273,16 @@ export function crown(run: Run): CrownResult {
 }
 
 /** How long a structure takes to charge, seconds. Bigger takes longer. */
+/**
+ * The fastest water this chip can make, m/s.
+ *
+ * Bulk streaming at the amplifier's ceiling times the sharp-edge ratio, which
+ * is the flow right at a tip at full drive. Derived from the two figures that
+ * already exist rather than measured off the geometry, so it cannot drift away
+ * from them.
+ */
+const CHIP_FASTEST = streamingSpeed(MAX_AMPLITUDE) * EDGE_GAIN;
+
 export function chargeTime(s: Structure): number {
   return 0.55 + s.strength * 0.075;
 }
@@ -1298,7 +1308,26 @@ function driveStructures(run: Run, dt: number): void {
       s.charge += dt / chargeTime(s);
       if (s.charge >= 1) spent.push(s);
     } else {
-      s.charge = Math.max(0, s.charge - dt * 0.35);
+      // WHAT THE GLASS DOES TO IT. A building standing in a tip jet is being
+      // worked on by water that YOU drove — chip.ts: "it is powered by your
+      // drive", and streaming is the second-order flow of the same field — only
+      // from somewhere you are not. So the water holds a charge in it, and a
+      // building in the wall lanes is a rack that is already most of the way
+      // there when you arrive.
+      //
+      // Normalised against the fastest water this chip can make, which is a
+      // ratio of like to like rather than a new number: at a tip at full drive
+      // it is one, eighty microns down the plume it is 0.79, and out at the end
+      // of the reach it is nothing.
+      //
+      // IT NEVER FIRES ON ITS OWN. Discharging is still `driving && near` and
+      // only that. A building that spent itself because it was standing in a
+      // current would be spending it at whatever happened to be in front of it,
+      // which is nothing you decided — and this game does not have anything
+      // that goes off by itself.
+      const f = chipFlow(run, s.x, s.y);
+      const held = Math.min(1, Math.hypot(f.x, f.y) / CHIP_FASTEST);
+      s.charge = Math.max(held, s.charge - dt * 0.35);
     }
   }
   for (const s of spent) discharge(run, s);

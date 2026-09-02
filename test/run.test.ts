@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  ARENA_H, ARENA_W, BEASTS, MAX_INTEGRITY, START,
+  ARENA_H, ARENA_W, BEASTS, CHANNEL_H, CHANNEL_W, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
   latticePitch, liftCell, placeCell, readoutFor, wearRate,
@@ -820,13 +820,16 @@ function makeBot(feedTarget = 2): (r: Run) => Input {
   };
 }
 
-function playRun(seed: number, seconds: number, feedTarget = 2): Run {
+function playRun(
+  seed: number, seconds: number, feedTarget = 2, watch?: (run: Run) => void,
+): Run {
   const run = startRun(seed);
   const bot = makeBot(feedTarget);
   const steps = Math.round(seconds / DT);
   for (let i = 0; i < steps; i++) {
     if (run.phase === "dead") break;
     step(run, bot(run), DT);
+    watch?.(run);
     run.events.length = 0;
   }
   return run;
@@ -836,12 +839,30 @@ const SEEDS = [17, 42, 88, 5, 101, 7];
 
 test("a bot can settle a world, crown it, and kill what it crowned", () => {
   let aeons = 0;
+  // AND IT STILL WORKS WHERE THE THRONE ACTUALLY GOES. From the second aeon the
+  // throne stands at a chip landmark instead of the centre of the channel, up
+  // to two millimetres from where the pool opens. A cycle that only closes when
+  // everything is in the middle would pass the assertion below and still be a
+  // game nobody can finish, so the reign is watched for where it happened.
+  let reignsAtALandmark = 0;
   for (const seed of SEEDS) {
-    const run = playRun(seed, 700, 1);
+    let away = false;
+    const run = playRun(seed, 700, 1, (r) => {
+      if (r.phase === "reign"
+        && Math.hypot(r.throne.x - CHANNEL_W / 2, r.throne.y - CHANNEL_H / 2) > 200e-6) {
+        away = true;
+      }
+    });
     aeons += run.aeonsSurvived;
+    if (away) reignsAtALandmark++;
     assert.ok(run.built > 0, `seed ${seed} built no cells`);
   }
   assert.ok(aeons >= 2, `the cycle must close (${aeons} aeons over ${SEEDS.length} runs)`);
+  assert.ok(
+    reignsAtALandmark > 0,
+    `and at least one of those reigns must have been fought at a landmark rather `
+    + `than in the middle (${reignsAtALandmark}/${SEEDS.length} runs got that far)`,
+  );
 });
 
 test("what you feed the throne changes what it is, in every direction at once", () => {
