@@ -43,10 +43,10 @@ it is which claim just leaked into which.**
 ## State
 
 ```
-branch   main   (pushed to origin/main 2026-09-02, chip session included; the
-                repo is PRIVATE, which is what config/subject.ts assumes — check
-                before that ever changes)
-tests    282, all passing
+branch   main   (pushed to origin/main 2026-09-02, through the first play
+                report; the repo is PRIVATE, which is what config/subject.ts
+                assumes — check before that ever changes)
+tests    288, all passing
 build    npm test | npm run typecheck | npm run drifter
 play     app/sonic-drifter.html — one file, no build step, no network
 ```
@@ -120,7 +120,25 @@ These are not preferences. Breaking one breaks something else two modules away.
    water holds a charge, but discharging is `driving && near` and only that. A
    structure that fired because it was in a current would be spending itself at
    whatever happened to be in front of it, which is nothing the player decided.
-12. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
+12. **The water is not a spring.** Arrivals are a RATE — `arrivalRate`, derived
+   from how fast the co-flow and bulk streaming carry water across your pool —
+   and what you gather out comes back only that fast. It used to be
+   `motifs < suspension`, one pushed per frame, which is sixty a second and
+   never runs dry; the first play report came back with 3440 cells and an unfed
+   throne because of it. Opening new water is a SEPARATE and instant thing
+   (`delivered`), because reaching further reaches water that already had cells
+   in it. Do not merge those two back together.
+13. **Standing water breeds, and the first two minutes do not.** `settleCap`
+   grows by one hunter every `STANDING` seconds in the same world, capped at a
+   reign's crowd. Settling is meant to be quiet — it is the phase people learn
+   the game in — so the fix for "settling never ends" must never become
+   "settling is a fight". There is a test on each side of that.
+14. **Anything asking "which buildings reach this point" goes through
+   `indexStructures`.** `drift` and `underStructure` run per entity per frame;
+   at 410 buildings and 636 motifs the direct loops cost 53.5 ms a frame. Do not
+   reintroduce `holdPoints()` into either — it allocates an array per structure
+   per entity.
+15. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
    the nine-square lookup complete — every possible partner is in it and nothing
    else can be. If you change `BIND_RADIUS`, the grid follows it automatically;
    if you change the grid's pitch independently, motes stop finding each other
@@ -152,6 +170,22 @@ session. Every change below started as a probe that printed its own reasons:
   never the problem, so no time was spent on it.
 - "nearest tip to core 53 um (catch 20 um) → merges=0" against "nearest tip to
   core 0 um → merges=22" → the difference between the two probes WAS the design.
+
+**The first play report of the chip work, and what one paste was worth.** It
+read: 909 s, aeon 1, 3440 cells built, 410 buildings standing, bound field
+FREED, one hit taken, throne EMPTY. Each of those was a separate finding and
+none had been reached by a day of measuring:
+
+- 3440 cells against a table that calls 16–35 per three minutes normal — the
+  suspension change had removed the ceiling on an aeon's economy, and the commit
+  that shipped it contained the false claim that did it ("the count near you
+  does not change": true of a player standing still, false of one whose
+  buildings cover the channel).
+- 410 buildings — a number nobody had simulated, and enough to cost 53.5 ms a
+  frame in two O(entities × structures) loops. The player was in slow motion and
+  nothing on the screen said so.
+- throne empty at 909 s — settling had no end, and the diagnosis line answered
+  that run with a combat tip.
 
 If the user reports a problem in prose, **ask for a report before building
 anything.**
@@ -226,11 +260,14 @@ appendages, tools, armour, and an open world. Most of that now exists.
 
 ### What is still open, in the order the geometry argues for
 
-- **The reward for going is a farm, and a farm has no ceiling.** Measured: one
-  well-placed building at a cavity made 22 merges and 6 cells in 40 s with the
-  player parked on the far side of the channel and never gripping. The tuning
-  table in `world.ts` puts *active play* at 16–35 cells in three minutes, so an
-  unattended cavity is in the same range as playing. The intended brake is that the
+- ~~**The reward for going is a farm, and a farm has no ceiling.**~~ It had
+  none, it was reported, and it is bounded by the water now rather than by your
+  industry. Measured over the report's own 909 s: actively playing yields
+  96–111 cells (was 3440); 408 buildings with no player at all yield 6.
+  **What has NOT been checked is whether the throne-at-a-landmark brake still
+  matters** — the king eating buildings within 150 µm was the intended limit on
+  a cavity farm, and the farm is now a fortieth of the size it was meant to
+  brake, so it may be doing nothing at all. The intended brake is that the
   throne now stands at a landmark, so a cavity farm is contested — the king eats
   buildings within 150 µm of itself. **That brake has been reasoned about and
   not measured.** It is the first thing to probe: play an aeon with a cavity
@@ -253,11 +290,14 @@ appendages, tools, armour, and an open world. Most of that now exists.
   build on is still that everything drawn already *is* the physics. The chip
   session added two things worth looking at that nobody has looked at yet: 636
   motifs instead of 30, and four cavities visibly hoarding them.
-- **Nobody has played any of this.** Three commits of mechanics went in on
-  measurements and headless bots alone. The bot proves the cycle closes and that
-  at least one reign happens at a landmark; it cannot tell you whether walking
-  two millimetres to a fight is *good*. **Ask for a `drifter.report()` before
-  building anything further on top of it.**
+- **One report exists, and it was about the economy.** It never got as far as
+  saying whether the chip is any *good* — whether walking two millimetres to a
+  fight is worth it, whether landing an arm tip on a cavity core reads as a
+  decision, whether a cavity visibly hoarding motifs is worth looking at. Those
+  are still entirely unknown. The next report should come from a run that
+  actually crowns something.
+- **`report()` now carries the water** — standing, delivered, arrivals/s and
+  hunters allowed — and where the throne is. Read those two lines first.
 
 ## How to work on this
 
