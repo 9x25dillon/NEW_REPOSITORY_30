@@ -42,7 +42,8 @@ it is which claim just leaked into which.**
 ## State
 
 ```
-branch   main   (29 commits ahead of origin/main — NOT pushed; that is the user's call)
+branch   main   (pushed to origin/main 2026-09-02; the repo is PRIVATE, which is what
+                config/subject.ts assumes — check before that ever changes)
 tests    274, all passing
 build    npm test | npm run typecheck | npm run drifter
 play     app/sonic-drifter.html — one file, no build step, no network
