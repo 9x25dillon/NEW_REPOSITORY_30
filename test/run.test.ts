@@ -4,7 +4,8 @@ import { test } from "node:test";
 import {
   ARENA_H, ARENA_W, BEASTS, CHANNEL_H, CHANNEL_W, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
-  DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargesToKill, feedThrone,
+  DEVOUR_REACH, DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargeFalloff,
+  dischargesToKill, feedThrone,
   STANDING, latticePitch, liftCell, placeCell, readoutFor, retune, settleCap,
   suspension, wearRate,
   startRun, step,
@@ -1248,4 +1249,36 @@ test("a loaded building waits for the king instead of firing into water", () => 
   assert.equal(off.fired, 0, "a gun with the king square off its arm does not");
   assert.equal(off.left, 1, "and is still standing, not spent on nothing");
   assert.ok(off.charge >= 1, "it is loaded and waiting, which is what the surface says");
+});
+
+test("there is a distance where a building can hurt the king and survive it", () => {
+  // THE PAIR THIS EXISTS TO HOLD TOGETHER. A discharge falls off across its arm
+  // and the king eats buildings within DEVOUR_REACH of itself. If the falloff
+  // is steep enough that the worthwhile damage all lies inside that radius,
+  // then good damage and a surviving building are mutually exclusive — which is
+  // not a decision, it is a vice, and it shipped for one commit.
+  //
+  // A player reported that the king's health "wouldn't go down". They were
+  // exactly right: seven discharges, all of them landing, for 61 damage, while
+  // it healed 144 off the eight buildings it took. Its health went UP.
+  for (const hm of ["222", "23", "32"]) {
+    const gun = structureFrom(1, hm, 0, 0, 0);
+    const muzzle = gun.strength * DISCHARGE_GAIN;
+    const range = gun.reach * LOBE_RANGE;
+    assert.ok(range > DEVOUR_REACH,
+      `a ${hm}'s arm has to outreach the king's mouth (${(range * 1e6).toFixed(0)} `
+      + `against ${(DEVOUR_REACH * 1e6).toFixed(0)}um)`);
+
+    // Standing just outside its mouth, which is the closest a building can be
+    // and still be there afterwards.
+    const safe = Math.round(muzzle * dischargeFalloff(gun, DEVOUR_REACH * 1.02, 0));
+    assert.ok(safe > muzzle * 0.4,
+      `a ${hm} firing from just outside the eat radius must be worth a real `
+      + `fraction of its muzzle (${safe} of ${muzzle})`);
+
+    // And distance must still cost something, or the falloff is decoration.
+    const far = Math.round(muzzle * dischargeFalloff(gun, range * 0.85, 0));
+    assert.ok(far < safe / 2,
+      `but the far end of the arm is still much weaker (${far} against ${safe})`);
+  }
 });

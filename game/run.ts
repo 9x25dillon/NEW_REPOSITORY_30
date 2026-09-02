@@ -1611,17 +1611,31 @@ export const DISCHARGE_GAIN = 16;
 /**
  * How much of a discharge survives the distance to the king, 0..1.
  *
- * The same shape `chip.ts` uses for a tip jet's plume — squared, so it reaches
- * the end of its arm with zero slope and there is no line in the water where
- * the damage switches off. Reusing that curve rather than inventing a second
- * one is the point: this repository has one falloff and it is that one.
+ * LINEAR, and it was squared for one commit. Squared was chosen to match the
+ * curve `chip.ts` uses for a tip jet's plume — one falloff in the repository
+ * rather than two — which was a good reason about the wrong quantity. A plume
+ * is a flow decaying into still water. This is a released field crossing a gap,
+ * and the check that mattered was not consistency with the chip, it was the
+ * OTHER radius in the same fight.
+ *
+ * The king eats buildings within 150 um of itself. A 32's arm carries 330. So
+ * the squared curve put nine tenths of a discharge's worth inside the radius
+ * that eats it, and good damage and a surviving building became mutually
+ * exclusive — which is not a decision, it is a vice. A player reported that the
+ * king's health "wouldn't go down" and was exactly right: seven discharges all
+ * landed, for 61 damage, while it healed 144 off the eight buildings it took.
+ * Its health went UP.
+ *
+ * Linear, the same arm is worth 52 at the edge of safety instead of 29 and 38
+ * at two hundred microns instead of 15. Distance still costs — which is what
+ * the falloff is for — but standing outside its mouth is now a way to fight
+ * rather than a way to lose slowly.
  */
 export function dischargeFalloff(s: Structure, x: number, y: number): number {
   const range = s.reach * LOBE_RANGE;
   const r = Math.hypot(x - s.x, y - s.y);
   if (r >= range) return 0;
-  const k = 1 - r / range;
-  return k * k;
+  return 1 - r / range;
 }
 
 /**
@@ -1740,6 +1754,19 @@ export const VOLLEY_WIND = 0.55;
  * stops being an exception — it is this formula at zero. Nothing was balanced
  * to make either of those true.
  */
+/**
+ * How near a building has to be for the king to eat it, m.
+ *
+ * Named because it is half of a pair. The other half is how far a discharge
+ * carries, and the two together decide whether there is any distance at which a
+ * building can both hurt the king and survive doing it. There was not, for one
+ * commit: a squared falloff put nine tenths of a discharge's worth inside this
+ * radius, so a player's seven landed hits came to 61 damage while the king
+ * healed 144 off the buildings it took. See `dischargeFalloff`, and the test
+ * that holds the two of them to each other.
+ */
+export const DEVOUR_REACH = 150e-6;
+
 export const WEAR_PER_COMPONENT = 2;
 
 /** Damage a second your hand does to this king, and it may well be none. */
@@ -1806,7 +1833,7 @@ function reign(run: Run, dt: number): void {
       const d = Math.hypot(s.x - k.x, s.y - k.y);
       if (d < vr) { vr = d; victim = s; }
     }
-    if (vr < 150e-6) {
+    if (vr < DEVOUR_REACH) {
       run.structures = run.structures.filter((s) => s !== victim);
       const before = k.hp;
       k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);

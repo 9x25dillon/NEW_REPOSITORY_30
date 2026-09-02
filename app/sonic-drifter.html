@@ -2534,8 +2534,7 @@
     const range = s.reach * LOBE_RANGE;
     const r = Math.hypot(x - s.x, y - s.y);
     if (r >= range) return 0;
-    const k = 1 - r / range;
-    return k * k;
+    return 1 - r / range;
   }
   function bearsOn(s, x, y) {
     const dx = x - s.x, dy = y - s.y;
@@ -2592,6 +2591,7 @@
   var BOLT_SPEED = 24e-5;
   var BOLT_LIFE = 3.4;
   var VOLLEY_WIND = 0.55;
+  var DEVOUR_REACH = 15e-5;
   var WEAR_PER_COMPONENT = 2;
   function wearRate(k) {
     if (k.hm === "") return 0;
@@ -2636,7 +2636,7 @@
           victim = s;
         }
       }
-      if (vr < 15e-5) {
+      if (vr < DEVOUR_REACH) {
         run.structures = run.structures.filter((s) => s !== victim);
         const before = k.hp;
         k.hp = Math.min(k.maxHp, k.hp + victim.strength * 3);
@@ -4458,6 +4458,15 @@
           g2.beginPath();
           g2.arc(x, y, 10, -Math.PI / 2, -Math.PI / 2 + s.charge * Math.PI * 2);
           g2.stroke();
+          if (loaded && fighting && bearsOn(s, k.x, k.y)) {
+            const worth = Math.round(s.strength * DISCHARGE_GAIN * dischargeFalloff(s, k.x, k.y));
+            const best = s.strength * DISCHARGE_GAIN;
+            g2.fillStyle = worth > best * 0.5 ? "#8ce9ff" : "#ffa24a";
+            g2.font = `700 9px ${MONO}`;
+            g2.textAlign = "center";
+            g2.fillText(`-${worth}  OF ${best}`, x, y - R - 8);
+            g2.textAlign = "left";
+          }
           if (loaded && fighting && !bearsOn(s, k.x, k.y)) {
             g2.fillStyle = "rgba(140,233,255,0.8)";
             g2.font = `700 8px ${MONO}`;

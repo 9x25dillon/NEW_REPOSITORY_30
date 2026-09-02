@@ -20,7 +20,8 @@ import {
   type Entity, type Run,
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   arrivalRate, settleCap, suspension,
-  HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND, bearsOn, wearing,
+  DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
+  bearsOn, dischargeFalloff, wearing,
   CHANNEL_H, beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
   liftCell,
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
@@ -1462,6 +1463,19 @@ export class Game {
         g.beginPath();
         g.arc(x, y, 10, -Math.PI / 2, -Math.PI / 2 + s.charge * Math.PI * 2);
         g.stroke();
+        // WHAT THIS SHOT IS ACTUALLY WORTH, before you spend it. Damage falls
+        // off across the arm and the only feedback was the -9 that floated up
+        // afterwards, by which time the building was gone. A player fired seven
+        // and could not work out why the bar was not moving.
+        if (loaded && fighting && bearsOn(s, k.x, k.y)) {
+          const worth = Math.round(s.strength * DISCHARGE_GAIN * dischargeFalloff(s, k.x, k.y));
+          const best = s.strength * DISCHARGE_GAIN;
+          g.fillStyle = worth > best * 0.5 ? "#8ce9ff" : "#ffa24a";
+          g.font = `700 9px ${MONO}`;
+          g.textAlign = "center";
+          g.fillText(`-${worth}  OF ${best}`, x, y - R - 8);
+          g.textAlign = "left";
+        }
         if (loaded && fighting && !bearsOn(s, k.x, k.y)) {
           g.fillStyle = "rgba(140,233,255,0.8)";
           g.font = `700 8px ${MONO}`;
