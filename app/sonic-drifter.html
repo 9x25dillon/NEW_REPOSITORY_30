@@ -3124,6 +3124,7 @@
   var JADE = "160,255,214";
   var RED = "#ff4d6d";
   var MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
+  var CARD_TIME = 8;
   var LESSONS = {
     node: {
       id: "node",
@@ -3163,7 +3164,7 @@
     aim: {
       id: "aim",
       title: "YOU CANNOT AIM A BUILDING",
-      body: "A STRUCTURE FIRES ALONG ITS OWN GROUP'S DIRECTIONS AND THEY WERE FIXED WHEN YOU PLACED IT. THE CONES ARE WHERE IT REACHES. THE KING IS DENSE AND YOU ARE NOT, SO IT ANSWERS TO THE OTHER LATTICE AND YOUR OWN NODE SHOVES IT - ABOUT EIGHT TIMES FASTER THAN IT WALKS. YOU DO NOT AIM THE GUN. YOU AIM THE KING."
+      body: "STAND ON ONE OF YOUR OWN BUILDINGS AND CLOSE YOUR HAND: IT FIRES ALONG ITS GROUP'S DIRECTIONS AND IS SPENT. THIS IS HOW THE KING DIES - YOUR BARE HAND LOSES TO WHAT IT HEALS BY EATING THEM. THE ARMS WERE FIXED WHEN YOU PLACED IT, SO YOU DO NOT AIM THE GUN: THE KING IS DENSE AND YOUR NODE SHOVES IT EIGHT TIMES FASTER THAN IT WALKS. YOU AIM THE KING."
     },
     coil: {
       id: "coil",
@@ -3297,6 +3298,8 @@
       __publicField(this, "seen", /* @__PURE__ */ new Set());
       __publicField(this, "card", null);
       __publicField(this, "cardT", 0);
+      /** Lessons waiting behind the one on screen. See `teach`. */
+      __publicField(this, "queued", []);
       __publicField(this, "toast", "");
       __publicField(this, "toastT", 0);
       __publicField(this, "last", 0);
@@ -3593,6 +3596,9 @@
       this.youTrail.push(run.you.x, run.you.y);
       while (this.youTrail.length > 26) this.youTrail.shift();
       if (run.structures.length > 0) this.teach("build");
+      if (run.phase === "reign" && run.throne.awake && run.throne.hp > 0 && run.structures.some((st) => bearsOn(st, run.throne.x, run.throne.y))) {
+        this.teach("aim");
+      }
       if (run.entities.some((e) => e.species === "mote" && Math.hypot(e.x - run.you.x, e.y - run.you.y) < 12e-5)) this.teach("mote");
       const on = nearestFeature(CHIP, run.you.x, run.you.y);
       if (on) {
@@ -3659,7 +3665,6 @@
             this.say(`THE THRONE TAKES ${ev.group}  \xB7  C TO CROWN`);
             break;
           case "crown":
-            this.teach("aim");
             this.flash = 0.9;
             this.flashRed = false;
             this.shake = 10;
@@ -3778,7 +3783,14 @@
       if (this.toastT > 0) this.toastT -= dt;
       if (this.cardT > 0) {
         this.cardT -= dt;
-        if (this.cardT <= 0) this.card = null;
+        if (this.cardT <= 0) {
+          const next = this.queued.shift();
+          if (next) {
+            this.card = next;
+            this.cardT = CARD_TIME;
+            this.sfx.lesson();
+          } else this.card = null;
+        }
       }
     }
     burst(x, y, n, rgb) {
@@ -3797,13 +3809,30 @@
       this.toast = text;
       this.toastT = 2.2;
     }
+    /**
+     * Show a lesson, once, ever.
+     *
+     * IT QUEUES. It used to assign `this.card = l`, which clobbers — and three
+     * lessons fire on the single frame a king is crowned. `aim` was set and
+     * overwritten by `crown` on that same frame, and `seen` had already recorded
+     * it, so the lesson explaining HOW THE FIGHT IS WON has never been displayed
+     * to anybody in any run since it was written.
+     *
+     * A player asked, after three runs and a hundred and fourteen buildings,
+     * "what is that big blue 23 circle anyway, what am I supposed to do to it".
+     * The answer had been written, queued, and thrown away every time.
+     */
     teach(id) {
       if (this.seen.has(id)) return;
       const l = LESSONS[id];
       if (!l) return;
       this.seen.add(id);
+      if (this.card) {
+        this.queued.push(l);
+        return;
+      }
       this.card = l;
-      this.cardT = 8;
+      this.cardT = CARD_TIME;
       this.sfx.lesson();
     }
     // ── draw ──────────────────────────────────────────────────────────────────
@@ -5269,7 +5298,7 @@
     drawCard() {
       if (!this.card) return;
       const g2 = this.ctx;
-      const a = Math.min(1, this.cardT / 0.8) * Math.min(1, (8 - this.cardT) / 0.35);
+      const a = Math.min(1, this.cardT / 0.8) * Math.min(1, (CARD_TIME - this.cardT) / 0.35);
       const h = 78;
       const y = VIEW_H - 182;
       g2.globalAlpha = a;

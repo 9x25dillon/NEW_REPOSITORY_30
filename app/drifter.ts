@@ -75,6 +75,9 @@ interface Tracer { x: number; y: number; px: number; py: number; life: number; f
 
 interface Lesson { id: string; title: string; body: string }
 
+/** How long a lesson stays up, seconds. */
+const CARD_TIME = 8;
+
 const LESSONS: Readonly<Record<string, Lesson>> = {
   node: {
     id: "node", title: "CONTRAST FACTOR",
@@ -128,10 +131,11 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
   },
   aim: {
     id: "aim", title: "YOU CANNOT AIM A BUILDING",
-    body: "A STRUCTURE FIRES ALONG ITS OWN GROUP'S DIRECTIONS AND THEY WERE FIXED WHEN YOU "
-      + "PLACED IT. THE CONES ARE WHERE IT REACHES. THE KING IS DENSE AND YOU ARE NOT, SO "
-      + "IT ANSWERS TO THE OTHER LATTICE AND YOUR OWN NODE SHOVES IT - ABOUT EIGHT TIMES "
-      + "FASTER THAN IT WALKS. YOU DO NOT AIM THE GUN. YOU AIM THE KING.",
+    body: "STAND ON ONE OF YOUR OWN BUILDINGS AND CLOSE YOUR HAND: IT FIRES ALONG ITS "
+      + "GROUP'S DIRECTIONS AND IS SPENT. THIS IS HOW THE KING DIES - YOUR BARE HAND LOSES "
+      + "TO WHAT IT HEALS BY EATING THEM. THE ARMS WERE FIXED WHEN YOU PLACED IT, SO YOU DO "
+      + "NOT AIM THE GUN: THE KING IS DENSE AND YOUR NODE SHOVES IT EIGHT TIMES FASTER THAN "
+      + "IT WALKS. YOU AIM THE KING.",
   },
   coil: {
     id: "coil", title: "IT IS TELLING YOU",
@@ -277,6 +281,8 @@ export class Game {
   private seen = new Set<string>();
   private card: Lesson | null = null;
   private cardT = 0;
+  /** Lessons waiting behind the one on screen. See `teach`. */
+  private queued: Lesson[] = [];
   private toast = "";
   private toastT = 0;
 
@@ -617,6 +623,19 @@ export class Game {
     while (this.youTrail.length > 26) this.youTrail.shift();
 
     if (run.structures.length > 0) this.teach("build");
+
+    // HOW THE KING DIES, said the first time it is actually true.
+    //
+    // This used to fire on the `crown` event, which is the worst frame in the
+    // game to explain anything: the screen flashes, the view shakes, a banner
+    // announces the group, and two other lessons fire on the same tick. Told
+    // there, "you aim the king" is a sentence about nothing. Told the moment
+    // one of your own arms covers it, it is the answer to the question you are
+    // already asking — and by then you can see the cone lit up.
+    if (run.phase === "reign" && run.throne.awake && run.throne.hp > 0
+      && run.structures.some((st) => bearsOn(st, run.throne.x, run.throne.y))) {
+      this.teach("aim");
+    }
     if (run.entities.some((e) => e.species === "mote"
       && Math.hypot(e.x - run.you.x, e.y - run.you.y) < 120e-6)) this.teach("mote");
 
@@ -683,7 +702,6 @@ export class Game {
           this.say(`THE THRONE TAKES ${ev.group}  ·  C TO CROWN`);
           break;
         case "crown":
-          this.teach("aim");
           this.flash = 0.9; this.flashRed = false; this.shake = 10;
           this.sfx.spent();
           this.say(`${ev.group} WAKES  ·  MASS ${ev.mass}`);
@@ -786,7 +804,14 @@ export class Game {
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2);
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 22);
     if (this.toastT > 0) this.toastT -= dt;
-    if (this.cardT > 0) { this.cardT -= dt; if (this.cardT <= 0) this.card = null; }
+    if (this.cardT > 0) {
+      this.cardT -= dt;
+      if (this.cardT <= 0) {
+        const next = this.queued.shift();
+        if (next) { this.card = next; this.cardT = CARD_TIME; this.sfx.lesson(); }
+        else this.card = null;
+      }
+    }
   }
 
   private burst(x: number, y: number, n: number, rgb: string): void {
@@ -805,12 +830,26 @@ export class Game {
 
   private say(text: string): void { this.toast = text; this.toastT = 2.2; }
 
+  /**
+   * Show a lesson, once, ever.
+   *
+   * IT QUEUES. It used to assign `this.card = l`, which clobbers — and three
+   * lessons fire on the single frame a king is crowned. `aim` was set and
+   * overwritten by `crown` on that same frame, and `seen` had already recorded
+   * it, so the lesson explaining HOW THE FIGHT IS WON has never been displayed
+   * to anybody in any run since it was written.
+   *
+   * A player asked, after three runs and a hundred and fourteen buildings,
+   * "what is that big blue 23 circle anyway, what am I supposed to do to it".
+   * The answer had been written, queued, and thrown away every time.
+   */
   private teach(id: string): void {
     if (this.seen.has(id)) return;
     const l = LESSONS[id];
     if (!l) return;
     this.seen.add(id);
-    this.card = l; this.cardT = 8;
+    if (this.card) { this.queued.push(l); return; }
+    this.card = l; this.cardT = CARD_TIME;
     this.sfx.lesson();
   }
 
@@ -2380,7 +2419,7 @@ export class Game {
   private drawCard(): void {
     if (!this.card) return;
     const g = this.ctx;
-    const a = Math.min(1, this.cardT / 0.8) * Math.min(1, (8 - this.cardT) / 0.35);
+    const a = Math.min(1, this.cardT / 0.8) * Math.min(1, (CARD_TIME - this.cardT) / 0.35);
     const h = 78;
     const y = VIEW_H - 182;
     g.globalAlpha = a;
