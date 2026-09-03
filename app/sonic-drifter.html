@@ -1566,12 +1566,10 @@
     aimAt(w, tx, ty, ridesAntinodes(p, w));
     return { x: tx, y: ty };
   }
-  function carry(p, w, dt, current, bounds, flow = { x: 0, y: 0 }) {
+  function carry(p, w, dt, bounds, flow = { x: 0, y: 0 }) {
     const moved = advance(w, p.x, p.y, p.particle, dt);
-    const ca = Math.PI * (p.x - bounds.x) / bounds.w;
-    const cb = Math.PI * (p.y - bounds.y) / bounds.h;
-    const cx = current * Math.sin(ca) * Math.cos(cb) + flow.x;
-    const cy = -current * Math.cos(ca) * Math.sin(cb) + flow.y;
+    const cx = flow.x;
+    const cy = flow.y;
     p.vx = moved.vx + cx;
     p.vy = moved.vy + cy;
     const rad = p.particle.radius;
@@ -1786,6 +1784,15 @@
   var CHANNEL_W = 42e-4;
   var CHANNEL_H = 3e-3;
   var CHIP = features(CHANNEL_W, CHANNEL_H);
+  function currentAt(run, x, y) {
+    const b = run.bounds;
+    const ca = Math.PI * (x - b.x) / b.w;
+    const cb = Math.PI * (y - b.y) / b.h;
+    return {
+      x: run.world.current * Math.sin(ca) * Math.cos(cb),
+      y: -run.world.current * Math.cos(ca) * Math.sin(cb)
+    };
+  }
   function chipFlow(run, x, y) {
     return flowAt(CHIP, x, y, run.wave.amplitude);
   }
@@ -1970,7 +1977,9 @@
     const trap = alive ? aimFor(you, w, input.move.x, input.move.y) : aimFor(you, w, 0, 0);
     run.aim.x = trap.x;
     run.aim.y = trap.y;
-    carry(you, w, dt, run.world.current, run.bounds, chipFlow(run, you.x, you.y));
+    const cur = currentAt(run, you.x, you.y);
+    const glass = chipFlow(run, you.x, you.y);
+    carry(you, w, dt, run.bounds, { x: cur.x + glass.x, y: cur.y + glass.y });
     if (run.iframe > 0) run.iframe -= dt;
     if (!alive) {
       drift(run, dt);
@@ -2002,6 +2011,7 @@
     drift(run, dt);
     settle(run, dt);
     mergePass(run, dt);
+    washOut(run, dt);
     crystallise(run);
     driveStructures(run, dt);
     if (run.phase === "reign") reign(run, dt);
@@ -2038,10 +2048,9 @@
         dx += uStream * Math.cos(e.ang);
         dy += uStream * Math.sin(e.ang);
       }
-      const ca = Math.PI * e.x / run.bounds.w;
-      const cb = Math.PI * e.y / run.bounds.h;
-      dx += run.world.current * Math.sin(ca) * Math.cos(cb);
-      dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
+      const cur = currentAt(run, e.x, e.y);
+      dx += cur.x;
+      dy += cur.y;
       const flow = flowAt(CHIP, e.x, e.y, w.amplitude);
       dx += flow.x;
       dy += flow.y;
@@ -2299,6 +2308,24 @@
         gone.add(best.id);
         run.events.push({ kind: "merge", x: a.x, y: a.y });
       }
+    }
+    if (gone.size) run.entities = run.entities.filter((e) => !gone.has(e.id));
+  }
+  function washOut(run, dt) {
+    const past = run.world.current + streamingSpeed(run.wave.amplitude);
+    if (past <= 0) return;
+    const leaving = past / run.bounds.w;
+    if (leaving <= 0) return;
+    const ix = indexStructures(run.structures);
+    const scratch = [];
+    const gone = /* @__PURE__ */ new Set();
+    for (const e of run.entities) {
+      if (e.faction !== "motif") continue;
+      if (e.parts.length > 1) continue;
+      if (run.rand() >= leaving * dt) continue;
+      if (capturedAt(run.wave, e.x, e.y, particleOf(e))) continue;
+      if (underStructure(ix, scratch, e.x, e.y, e.layer)) continue;
+      gone.add(e.id);
     }
     if (gone.size) run.entities = run.entities.filter((e) => !gone.has(e.id));
   }
@@ -3934,6 +3961,7 @@
       }
       g2.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
       this.drawWalls();
+      this.drawCurrent();
       this.drawChip();
       this.drawField();
       this.drawLattice();
@@ -4597,6 +4625,56 @@
      * "A BUBBLE CAVITY - 1.4 MM" is a direction a player can learn once and use
      * for the rest of the run. An arrow is only ever good for this trip.
      */
+    /**
+     * The water's own circulation, which was never drawn at all.
+     *
+     * `world.current` is a single cell spanning the pool — zero in the middle,
+     * fastest at the walls, turning over — and it grows 1.4 um/s an aeon, so by
+     * the fifth it is 16 um/s. That is a real fraction of what a player can do
+     * about it, and there has never been a mark on screen for it. The wash behind
+     * everything draws the acoustic FIELD; the chip draws its own jets; this was
+     * simply absent, and a player reported being "drawn in a direction i couldnt
+     * figure out".
+     *
+     * Drawn as what it is: short marks lying along the flow, brighter where it is
+     * faster, sliding so that it reads as water rather than as hatching. Nothing
+     * here is decoration — every mark is `currentAt` sampled at that spot, which
+     * is the same function that moves you and everything else.
+     */
+    drawCurrent() {
+      const run = this.run;
+      if (run.world.current <= 0) return;
+      const g2 = this.ctx;
+      const b = run.bounds;
+      const gap = 58;
+      const x0 = Math.floor(this.cam.x / gap) * gap;
+      const y0 = Math.floor(this.cam.y / gap) * gap;
+      g2.lineCap = "round";
+      for (let sx = x0; sx < this.cam.x + VIEW_W + gap; sx += gap) {
+        for (let sy = y0; sy < this.cam.y + VIEW_H + gap; sy += gap) {
+          const wx = mx(sx), wy = mx(sy);
+          if (wx < b.x || wx > b.x + b.w || wy < b.y || wy > b.y + b.h) continue;
+          const c = currentAt(run, wx, wy);
+          const u = Math.hypot(c.x, c.y);
+          const f = u / run.world.current;
+          if (f < 0.06) continue;
+          const ux = c.x / u, uy = c.y / u;
+          const ph = (this.t * 0.34 + (sx * 7 + sy * 13) * 7e-4) % 1;
+          const travel = gap * 0.8;
+          const cx = sx + ux * (ph - 0.5) * travel;
+          const cy = sy + uy * (ph - 0.5) * travel;
+          const len = 5 + 13 * f;
+          const a = 0.3 * f * Math.sin(Math.PI * ph);
+          if (a < 0.012) continue;
+          g2.strokeStyle = `rgba(120,170,205,${a.toFixed(3)})`;
+          g2.lineWidth = 1 + f;
+          g2.beginPath();
+          g2.moveTo(cx - ux * len * 0.5, cy - uy * len * 0.5);
+          g2.lineTo(cx + ux * len * 0.5, cy + uy * len * 0.5);
+          g2.stroke();
+        }
+      }
+    }
     drawThroneBearing() {
       const run = this.run;
       if (run.phase === "birth" || run.phase === "dead") return;

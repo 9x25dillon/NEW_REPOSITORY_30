@@ -6,7 +6,9 @@ import {
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DEVOUR_REACH, DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargeFalloff,
   dischargesToKill, feedThrone,
-  STANDING, latticePitch, liftCell, placeCell, readoutFor, retune, settleCap,
+  STANDING, currentAt, latticePitch, liftCell, newMotif, placeCell, readoutFor,
+  retune,
+  settleCap,
   suspension, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
@@ -14,7 +16,9 @@ import {
 import { assemble, cellFor, motif } from "../game/lattice.js";
 import { lobes } from "../game/shape.js";
 import { snap } from "../game/body.js";
-import { cadence, emptyThrone, feed, structureFrom, volley } from "../game/world.js";
+import {
+  cadence, emptyThrone, feed, structureFrom, volley, worldFrom,
+} from "../game/world.js";
 import { CROSSOVER_RADIUS_ORDER, WATER, contrastFactor } from "../src/gorkov.js";
 
 const DT = 1 / 60;
@@ -1280,5 +1284,146 @@ test("there is a distance where a building can hurt the king and survive it", ()
     const far = Math.round(muzzle * dischargeFalloff(gun, range * 0.85, 0));
     assert.ok(far < safe / 2,
       `but the far end of the arm is still much weaker (${far} against ${safe})`);
+  }
+});
+
+test("a long-lived water does not silt up with what cannot be used", () => {
+  // THE SLOW FAULT THIS EXISTS TO CATCH, and it was invisible for the whole of
+  // a fifteen-minute run. From the third aeon a water carries pentamers, and the
+  // crystallographic restriction theorem says a five-fold axis generates no
+  // lattice — so they join NOTHING, ever, and the game says so on a card.
+  // Everything else gets consumed into cells. With arrivals but no departures
+  // the standing population therefore converges on the one thing in it that is
+  // useless: measured at 35% pentamers after a minute, 59% after seven, 80%
+  // after fifteen. Gathering got quietly worse the longer you played.
+  const k = emptyThrone(0, 0);
+  for (const hm of ["622", "622", "6"]) feed(k, cellFor(hm));
+  const run = startRun(5);
+  run.world = worldFrom(k, 4);
+  assert.ok(run.world.pool.includes("a5"), "a late water carries pentamers");
+  run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+  run.delivered = 0;
+  run.entities = [];
+  run.you.x = CHANNEL_W / 2;
+  run.you.y = CHANNEL_H / 2;
+
+  const dead = () => {
+    const ms = run.entities.filter((e) => e.faction === "motif");
+    const five = ms.filter((e) => e.parts.length === 1 && e.parts[0] === "a5").length;
+    return five / Math.max(1, ms.length);
+  };
+
+  const run60 = (secs: number) => {
+    for (let i = 0; i < secs * 60; i++) {
+      step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+      run.events.length = 0;
+      run.bounds = { x: 0, y: 0, w: CHANNEL_W, h: CHANNEL_H };
+    }
+  };
+
+  run60(120);
+  const early = dead();
+  run60(480);
+  const late = dead();
+
+  assert.ok(late < 0.55,
+    `after ten minutes the water must still be mostly usable `
+    + `(${(late * 100).toFixed(0)}% pentamers)`);
+  assert.ok(late < early + 0.2,
+    `and it must have SETTLED rather than kept climbing `
+    + `(${(early * 100).toFixed(0)}% -> ${(late * 100).toFixed(0)}%)`);
+  assert.ok(run.built > 0, "while still making cells the whole time");
+});
+
+test("what is held does not wash out, which is what a trap is for", () => {
+  // The rule that makes washout a part of the game rather than a tax on it.
+  const held = (build: boolean) => {
+    const run = startRun(31);
+    run.world = { ...run.world, density: 0 };     // nobody else in the water
+    run.entities = [];
+    const pitch = latticePitch(run);
+    const at = { x: run.bounds.x + run.bounds.w / 2, y: run.bounds.y + run.bounds.h / 2 };
+    if (build) {
+      const s = structureFrom(run.nextId++, "222", at.x, at.y, 0);
+      run.structures.push(s);
+      retune(run);
+      // On an arm tip, which is where a building actually holds.
+      const [lx, ly] = s.lobes[0];
+      at.x = s.x + lx * s.reach;
+      at.y = s.y + ly * s.reach;
+    }
+    for (let i = 0; i < 12; i++) {
+      const e = newMotif(run, true);
+      e.x = at.x; e.y = at.y;
+      e.parts = ["a5"];                            // cannot merge, so only washout removes it
+      run.entities.push(e);
+    }
+    const before = run.entities.length;
+    for (let i = 0; i < 60 * 400; i++) {
+      // Parked far away with hands open, so nothing here is your grip.
+      run.you.x = run.bounds.x + 5e-6;
+      run.you.y = run.bounds.y + 5e-6;
+      step(run, IDLE, DT);
+      run.events.length = 0;
+      void pitch;
+    }
+    return { before, after: run.entities.filter((e) => e.faction === "motif").length };
+  };
+
+  const loose = held(false);
+  assert.ok(loose.after < loose.before / 2,
+    `motifs in open water are carried away (${loose.before} -> ${loose.after})`);
+
+  const kept = held(true);
+  assert.ok(kept.after > loose.after,
+    `and a building's arm keeps what it is holding (${kept.before} -> ${kept.after} `
+    + `against ${loose.after} loose)`);
+});
+
+test("you and the water are in the same current", () => {
+  // A player reported being "drawn in a direction i couldnt figure out". They
+  // were: `pilot.carry` measured the circulation cell from the POOL's corner
+  // and `run.drift` measured it from the CHANNEL's, so whenever the pool was
+  // smaller than the channel — which is every aeon until you have opened the
+  // whole thing — the player and every other body in the water were being
+  // pushed by two different fields. At a 2000 um pool they point opposite ways
+  // in the middle of it.
+  const run = startRun(12);
+  run.bounds = { x: (CHANNEL_W - 2000e-6) / 2, y: (CHANNEL_H - 1400e-6) / 2, w: 2000e-6, h: 1400e-6 };
+  const b = run.bounds;
+
+  // Zero in the middle, fastest at the walls, and turning over: one cell.
+  const mid = currentAt(run, b.x + b.w / 2, b.y + b.h / 2);
+  assert.ok(Math.hypot(mid.x, mid.y) < run.world.current * 0.01,
+    "a circulation has a still point and it is in the middle");
+
+  const top = currentAt(run, b.x + b.w / 2, b.y + 4e-6);
+  const bottom = currentAt(run, b.x + b.w / 2, b.y + b.h - 4e-6);
+  assert.ok(Math.abs(top.x) > run.world.current * 0.9, "and it runs hard along the walls");
+  assert.ok(top.x * bottom.x < 0, "in opposite directions on opposite walls, which is what turning over is");
+
+  // The claim that failed: a motif and the player standing on the SAME SPOT are
+  // carried by the same water.
+  const at = { x: b.x + b.w * 0.3, y: b.y + b.h * 0.3 };
+  run.you.x = at.x; run.you.y = at.y;
+  run.entities = [];
+  const e = newMotif(run, true);
+  e.x = at.x; e.y = at.y;
+  e.parts = ["a5"];                       // cannot merge, so nothing else moves it
+  run.entities.push(e);
+
+  const before = { x: run.you.x - e.x, y: run.you.y - e.y };
+  for (let i = 0; i < 60; i++) {
+    step(run, IDLE, DT);
+    run.events.length = 0;
+    run.bounds = b;
+  }
+  const drifted = run.entities.find((x) => x.id === e.id);
+  if (drifted) {
+    const after = { x: run.you.x - drifted.x, y: run.you.y - drifted.y };
+    const apart = Math.hypot(after.x - before.x, after.y - before.y);
+    assert.ok(apart < 60e-6,
+      `a second of still water must not tear you apart from what is beside you `
+      + `(${(apart * 1e6).toFixed(0)}um)`);
   }
 });

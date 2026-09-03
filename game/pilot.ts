@@ -293,16 +293,21 @@ export function aimFor(
  * anyone chose.
  */
 export function carry(
-  p: Pilot, w: Wave, dt: number, current: number,
+  p: Pilot, w: Wave, dt: number,
   bounds: { x: number; y: number; w: number; h: number },
+  /**
+   * Everything the water is doing to you here, m/s — the world's circulation
+   * plus whatever the glass is adding. Passed in rather than derived, because
+   * this module used to compute the circulation itself from a different origin
+   * than run.drift did, which put the player and every other body in the
+   * channel into two different current fields.
+   */
   flow: { x: number; y: number } = { x: 0, y: 0 },
 ): void {
   const moved = advance(w, p.x, p.y, p.particle, dt);
 
-  const ca = (Math.PI * (p.x - bounds.x)) / bounds.w;
-  const cb = (Math.PI * (p.y - bounds.y)) / bounds.h;
-  const cx = current * Math.sin(ca) * Math.cos(cb) + flow.x;
-  const cy = -current * Math.cos(ca) * Math.sin(cb) + flow.y;
+  const cx = flow.x;
+  const cy = flow.y;
 
   p.vx = moved.vx + cx;
   p.vy = moved.vy + cy;

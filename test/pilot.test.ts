@@ -32,7 +32,7 @@ function run(
     grip(w, gripping, DT);
     concentrate(p, w, gripping, DT);
     aimFor(p, w, mx, my);
-    carry(p, w, DT, 0, BOUNDS);
+    carry(p, w, DT, BOUNDS);
   }
   return { travelled: Math.hypot(p.x - x0, p.y - y0), stamina: w.stamina };
 }
@@ -49,7 +49,7 @@ test("nothing moves you but the field", () => {
   for (let i = 0; i < 60; i++) {
     aimFor(p, w, 1, 0);
     w.amplitude = 0;
-    carry(p, w, DT, 0, BOUNDS);
+    carry(p, w, DT, BOUNDS);
   }
   assert.equal(p.x, x0, "no drive, no motion");
 });
@@ -82,10 +82,10 @@ test("the stick is an offset, and it is capped where sin(2ku) peaks", () => {
 test("letting go of the stick drops the node onto you and you settle", () => {
   const { w, p } = rig();
   w.amplitude = MAX;
-  for (let i = 0; i < 40; i++) { aimFor(p, w, 1, 0); carry(p, w, DT, 0, BOUNDS); }
+  for (let i = 0; i < 40; i++) { aimFor(p, w, 1, 0); carry(p, w, DT, BOUNDS); }
   assert.ok(speed(p) > 300e-6, "moving under full stick");
 
-  for (let i = 0; i < 40; i++) { aimFor(p, w, 0, 0); carry(p, w, DT, 0, BOUNDS); }
+  for (let i = 0; i < 40; i++) { aimFor(p, w, 0, 0); carry(p, w, DT, BOUNDS); }
   assert.ok(speed(p) < 5e-6, `released, you should sit in your own node (${speed(p) * 1e6} um/s)`);
 });
 
@@ -172,7 +172,7 @@ test("a dash covers ground no amount of grip does", () => {
     grip(w, false, DT);
     concentrate(p, w, false, DT);
     aimFor(p, w, 0, 0);   // a dash does not steer: it goes where it committed
-    carry(p, w, DT, 0, BOUNDS);
+    carry(p, w, DT, BOUNDS);
     frames++;
   }
   const burst = p.x - x0;

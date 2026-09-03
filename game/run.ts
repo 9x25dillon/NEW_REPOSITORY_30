@@ -91,6 +91,34 @@ export {
 } from "./chip.js";
 
 /** What the glass is doing to the water at a point, m/s. */
+/**
+ * The world's own circulation at a point, m/s.
+ *
+ * ONE HOME, because it had two and they disagreed. `pilot.carry` measured the
+ * cell from the pool's corner and `run.drift` measured it from the channel's,
+ * so the player and everything else in the water were in DIFFERENT current
+ * fields whenever the pool was smaller than the channel — which is every aeon
+ * until you have opened the whole thing. In a 2000 um pool the player at the
+ * centre is pushed one way at 16 um/s and the motifs beside them the other, and
+ * a player reported being "drawn in a direction i couldnt figure out". They
+ * were: the water they could see was not the water they were standing in.
+ *
+ * A single cell spanning the pool — zero in the middle, fastest at the walls,
+ * turning over. It grows 1.4 um/s an aeon, so by the fifth it is 16 um/s, which
+ * is a real fraction of what you can do about it.
+ */
+export function currentAt(
+  run: Run, x: number, y: number,
+): { x: number; y: number } {
+  const b = run.bounds;
+  const ca = (Math.PI * (x - b.x)) / b.w;
+  const cb = (Math.PI * (y - b.y)) / b.h;
+  return {
+    x: run.world.current * Math.sin(ca) * Math.cos(cb),
+    y: -run.world.current * Math.cos(ca) * Math.sin(cb),
+  };
+}
+
 export function chipFlow(run: Run, x: number, y: number): { x: number; y: number } {
   return flowAt(CHIP, x, y, run.wave.amplitude);
 }
@@ -652,7 +680,11 @@ export function step(run: Run, input: Input, dt: number): void {
   // The glass moves the water, and you are standing in the water. It is
   // powered by the drive, so gripping makes every jet on the chip fiercer —
   // including the one you are trying to get out of.
-  carry(you, w, dt, run.world.current, run.bounds, chipFlow(run, you.x, you.y));
+  // The same water everything else is standing in — see `currentAt`, which used
+  // to be computed twice, differently, in two modules.
+  const cur = currentAt(run, you.x, you.y);
+  const glass = chipFlow(run, you.x, you.y);
+  carry(you, w, dt, run.bounds, { x: cur.x + glass.x, y: cur.y + glass.y });
 
   if (run.iframe > 0) run.iframe -= dt;
   if (!alive) { drift(run, dt); return; }
@@ -691,6 +723,7 @@ export function step(run: Run, input: Input, dt: number): void {
   drift(run, dt);
   settle(run, dt);
   mergePass(run, dt);
+  washOut(run, dt);
   crystallise(run);
   driveStructures(run, dt);
   if (run.phase === "reign") reign(run, dt);
@@ -747,10 +780,9 @@ function drift(run: Run, dt: number): void {
       dy += uStream * Math.sin(e.ang);
     }
 
-    const ca = (Math.PI * e.x) / run.bounds.w;
-    const cb = (Math.PI * e.y) / run.bounds.h;
-    dx += run.world.current * Math.sin(ca) * Math.cos(cb);
-    dy += -run.world.current * Math.cos(ca) * Math.sin(cb);
+    const cur = currentAt(run, e.x, e.y);
+    dx += cur.x;
+    dy += cur.y;
 
     // And the glass. Nothing here asks how big the thing is: a flow carries
     // whatever is in it. The size dependence is already in the room — `advance`
@@ -1111,6 +1143,50 @@ function mergePass(run: Run, dt: number): void {
       gone.add(best.id);
       run.events.push({ kind: "merge", x: a.x, y: a.y });
     }
+  }
+  if (gone.size) run.entities = run.entities.filter((e) => !gone.has(e.id));
+}
+
+/**
+ * What the water carries away again.
+ *
+ * THE OTHER HALF OF A FLOW, and it was missing. Arrivals became a rate when the
+ * suspension stopped being a spring, but nothing ever left, and a channel that
+ * only fills is not a channel. The consequence was slow and invisible:
+ * everything usable gets consumed into cells, pentamers can be consumed by
+ * NOTHING — the crystallographic restriction theorem, and the game says so —
+ * so a long-lived water silts up with the one thing in it that cannot be used.
+ * Measured before this existed: 35 per cent pentamers at a minute, 59 at seven,
+ * 80 at fifteen. Gathering got quietly worse the longer you played and the only
+ * symptom was a refusal count nobody could read.
+ *
+ * A particle's residence time is the pool's width over the speed the water
+ * crosses it — the same figure `arrivalRate` is built from, used the other way
+ * round, so what comes in and what goes out are the same physics and cannot
+ * drift apart.
+ *
+ * WHAT IS HELD STAYS. That is the whole of what a trap is for, and it is what
+ * makes this a rule about the game rather than a tax on it: your grip holds
+ * things, a building's arm tips hold things, and anything already part-assembled
+ * has begun to aggregate. Everything else is in transit and always was.
+ */
+function washOut(run: Run, dt: number): void {
+  const past = run.world.current + streamingSpeed(run.wave.amplitude);
+  if (past <= 0) return;
+  const leaving = past / run.bounds.w;          // 1 / residence time
+  if (leaving <= 0) return;
+
+  const ix = indexStructures(run.structures);
+  const scratch: Structure[] = [];
+  const gone = new Set<number>();
+
+  for (const e of run.entities) {
+    if (e.faction !== "motif") continue;
+    if (e.parts.length > 1) continue;           // already aggregating
+    if (run.rand() >= leaving * dt) continue;
+    if (capturedAt(run.wave, e.x, e.y, particleOf(e))) continue;
+    if (underStructure(ix, scratch, e.x, e.y, e.layer)) continue;
+    gone.add(e.id);
   }
   if (gone.size) run.entities = run.entities.filter((e) => !gone.has(e.id));
 }

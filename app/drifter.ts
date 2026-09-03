@@ -22,7 +22,8 @@ import {
   arrivalRate, settleCap, suspension,
   DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
   bearsOn, dischargeFalloff, wearing,
-  CHANNEL_H, beast, crown, dischargesToKill, enterWorld, feedThrone, latticePitch,
+  CHANNEL_H, beast, crown, currentAt, dischargesToKill, enterWorld, feedThrone,
+  latticePitch,
   liftCell,
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
   startRun, step,
@@ -907,6 +908,7 @@ export class Game {
     }
     g.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
     this.drawWalls();
+    this.drawCurrent();
     this.drawChip();
     this.drawField();
     this.drawLattice();
@@ -1611,6 +1613,60 @@ export class Game {
    * "A BUBBLE CAVITY - 1.4 MM" is a direction a player can learn once and use
    * for the rest of the run. An arrow is only ever good for this trip.
    */
+  /**
+   * The water's own circulation, which was never drawn at all.
+   *
+   * `world.current` is a single cell spanning the pool — zero in the middle,
+   * fastest at the walls, turning over — and it grows 1.4 um/s an aeon, so by
+   * the fifth it is 16 um/s. That is a real fraction of what a player can do
+   * about it, and there has never been a mark on screen for it. The wash behind
+   * everything draws the acoustic FIELD; the chip draws its own jets; this was
+   * simply absent, and a player reported being "drawn in a direction i couldnt
+   * figure out".
+   *
+   * Drawn as what it is: short marks lying along the flow, brighter where it is
+   * faster, sliding so that it reads as water rather than as hatching. Nothing
+   * here is decoration — every mark is `currentAt` sampled at that spot, which
+   * is the same function that moves you and everything else.
+   */
+  private drawCurrent(): void {
+    const run = this.run;
+    if (run.world.current <= 0) return;
+    const g = this.ctx;
+    const b = run.bounds;
+    const gap = 58;
+    const x0 = Math.floor(this.cam.x / gap) * gap;
+    const y0 = Math.floor(this.cam.y / gap) * gap;
+
+    g.lineCap = "round";
+    for (let sx = x0; sx < this.cam.x + VIEW_W + gap; sx += gap) {
+      for (let sy = y0; sy < this.cam.y + VIEW_H + gap; sy += gap) {
+        const wx = mx(sx), wy = mx(sy);
+        if (wx < b.x || wx > b.x + b.w || wy < b.y || wy > b.y + b.h) continue;
+        const c = currentAt(run, wx, wy);
+        const u = Math.hypot(c.x, c.y);
+        const f = u / run.world.current;
+        if (f < 0.06) continue;
+        const ux = c.x / u, uy = c.y / u;
+        // A mark that slides along its own direction and fades at both ends, so
+        // the eye reads a flow rather than a grid.
+        const ph = ((this.t * 0.34 + (sx * 7 + sy * 13) * 0.0007) % 1);
+        const travel = gap * 0.8;
+        const cx = sx + ux * (ph - 0.5) * travel;
+        const cy = sy + uy * (ph - 0.5) * travel;
+        const len = 5 + 13 * f;
+        const a = 0.30 * f * Math.sin(Math.PI * ph);
+        if (a < 0.012) continue;
+        g.strokeStyle = `rgba(120,170,205,${a.toFixed(3)})`;
+        g.lineWidth = 1 + f;
+        g.beginPath();
+        g.moveTo(cx - ux * len * 0.5, cy - uy * len * 0.5);
+        g.lineTo(cx + ux * len * 0.5, cy + uy * len * 0.5);
+        g.stroke();
+      }
+    }
+  }
+
   private drawThroneBearing(): void {
     const run = this.run;
     if (run.phase === "birth" || run.phase === "dead") return;
