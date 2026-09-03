@@ -8,7 +8,7 @@ import {
   dischargesToKill, feedThrone,
   STANDING, currentAt, latticePitch, liftCell, newMotif, placeCell, readoutFor,
   retune,
-  settleCap,
+  retuneChannel, settleCap,
   suspension, wearRate,
   startRun, step,
   type Entity, type Input, type Run,
@@ -1425,5 +1425,44 @@ test("you and the water are in the same current", () => {
     assert.ok(apart < 60e-6,
       `a second of still water must not tear you apart from what is beside you `
       + `(${(apart * 1e6).toFixed(0)}um)`);
+  }
+});
+
+test("a channel retune rebuilds what it reshaped", () => {
+  // Moving every cell between planes changes what is JOINED to what — `joined`
+  // refuses a step of more than one layer, and a leg is a limb that spans two.
+  // retuneChannel mutated every structure's layer in place and rebuilt nothing,
+  // so `c.serves` stayed stale: `underStructure` and `drift` both test it, and
+  // a building went on holding the plane it used to be on until the next time
+  // anything was placed or lifted. It also fed a stale answer to the limb memo.
+  //
+  // Mode 1 to 3 SPECIFICALLY, and the first version of this test used 3 to 1,
+  // which collapses every plane onto zero — so nothing moved, the assertion
+  // held trivially, and planting the bug back did not fail it. A test that
+  // cannot fail is a comment with a longer runtime.
+  const run = startRun(19);
+  run.world = { ...run.world, mode: 1 };
+  const pitch = latticePitch(run);
+  for (let i = 0; i < 9; i++) {
+    run.structures.push(structureFrom(
+      run.nextId++, "222",
+      run.bounds.x + run.bounds.w / 2 + (i % 3) * pitch,
+      run.bounds.y + run.bounds.h / 2 + Math.floor(i / 3) * pitch, 0));
+  }
+  retune(run);
+  const before = run.structures.map((s) => [...s.serves]);
+  assert.ok(before.every((v) => v.length > 0), "every cell serves at least its own plane");
+
+  const wasOn = run.structures[0].layer;
+  const moved = retuneChannel(run, 3);
+  assert.ok(moved, "the channel actually retuned");
+  assert.notEqual(run.structures[0].layer, wasOn,
+    "and this retune genuinely moves cells between planes, or it proves nothing");
+
+  // Whatever the layers became, `serves` must describe the planes they are on
+  // NOW — not the ones they were on before.
+  for (const s of run.structures) {
+    assert.ok(s.serves.includes(s.layer),
+      `a building on plane ${s.layer} must serve it, and served [${s.serves.join(",")}]`);
   }
 });

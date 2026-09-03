@@ -1234,7 +1234,15 @@
     return out.sort((a, b) => b.mass - a.mass);
   }
   var LIMB_ARC = 0.45;
+  var LIMB_MEMO = /* @__PURE__ */ new WeakMap();
   function limbsOf(body, pitch) {
+    const seen = LIMB_MEMO.get(body);
+    if (seen && seen.pitch === pitch) return seen.limbs;
+    const limbs = computeLimbs(body, pitch);
+    LIMB_MEMO.set(body, { pitch, limbs });
+    return limbs;
+  }
+  function computeLimbs(body, pitch) {
     const cells = body.cells;
     if (cells.length < 3) return [];
     const step3 = pitch * 1.5;
@@ -2424,6 +2432,7 @@
     for (const e of run.entities) e.layer = move(e.layer);
     for (const s of run.structures) s.layer = move(s.layer);
     run.world.mode = want;
+    reshape(run);
     run.events.push({ kind: "retune", mode: want, layer: run.layer });
     return true;
   }
@@ -4522,12 +4531,14 @@
       const k = run.throne;
       const fighting = run.phase === "reign" && k.awake && k.hp > 0;
       for (const s of run.structures) {
-        if (!this.onCamera(s.x, s.y, px(s.reach * LOBE_RANGE) + 40)) continue;
+        const inPlay = fighting && Math.hypot(s.x - k.x, s.y - k.y) < s.reach * LOBE_RANGE;
+        const margin = inPlay ? px(s.reach * LOBE_RANGE) + 40 : px(s.reach) * 2 + 40;
+        if (!this.onCamera(s.x, s.y, margin)) continue;
         const x = px(s.x), y = px(s.y);
         const R = px(s.reach);
         const rgb = s.ruin ? "110,140,160" : JADE;
         const a = s.ruin ? 0.4 : 0.85;
-        if (fighting) {
+        if (inPlay) {
           const live = bearsOn(s, k.x, k.y);
           const far = px(s.reach * LOBE_RANGE);
           const cone = g2.createRadialGradient(x, y, R * 0.6, x, y, far);
@@ -4596,7 +4607,7 @@
           g2.beginPath();
           g2.arc(x, y, 10, -Math.PI / 2, -Math.PI / 2 + s.charge * Math.PI * 2);
           g2.stroke();
-          if (loaded && fighting && bearsOn(s, k.x, k.y)) {
+          if (loaded && inPlay && bearsOn(s, k.x, k.y)) {
             const worth = Math.round(s.strength * DISCHARGE_GAIN * dischargeFalloff(s, k.x, k.y));
             const best = s.strength * DISCHARGE_GAIN;
             g2.fillStyle = worth > best * 0.5 ? "#8ce9ff" : "#ffa24a";

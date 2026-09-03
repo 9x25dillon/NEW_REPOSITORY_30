@@ -1496,7 +1496,16 @@ export class Game {
       // two and a half thousand gradient objects a frame. The report was "it
       // starts to lag when the screen is full". The margin is a full arm, so a
       // building whose cone reaches into the view is still drawn.
-      if (!this.onCamera(s.x, s.y, px(s.reach * LOBE_RANGE) + 40)) continue;
+      // IN PLAY, meaning its arm can actually reach the king from here. During
+      // a fight EVERY building drew its cones, which at 353 of them is both a
+      // gradient and four filled wedges apiece for buildings that could not
+      // touch the king from where they stand — slow, and telling the player
+      // nothing. The handful whose arms reach it is the actual information.
+      const inPlay = fighting
+        && Math.hypot(s.x - k.x, s.y - k.y) < s.reach * LOBE_RANGE;
+      // and the wide margin is only needed by the ones drawing a cone
+      const margin = inPlay ? px(s.reach * LOBE_RANGE) + 40 : px(s.reach) * 2 + 40;
+      if (!this.onCamera(s.x, s.y, margin)) continue;
       const x = px(s.x), y = px(s.y);
       const R = px(s.reach);
       const rgb = s.ruin ? "110,140,160" : JADE;
@@ -1507,7 +1516,7 @@ export class Game {
       // forty-micron stub and handed a three-hundred-micron gun — which makes
       // the only decision in the fight, where the king is standing, invisible.
       // A building cannot be aimed. The king can.
-      if (fighting) {
+      if (inPlay) {
         const live = bearsOn(s, k.x, k.y);
         const far = px(s.reach * LOBE_RANGE);
         // ONE GRADIENT, NOT ONE PER ARM. It is centred on the building and
@@ -1596,7 +1605,7 @@ export class Game {
         // off across the arm and the only feedback was the -9 that floated up
         // afterwards, by which time the building was gone. A player fired seven
         // and could not work out why the bar was not moving.
-        if (loaded && fighting && bearsOn(s, k.x, k.y)) {
+        if (loaded && inPlay && bearsOn(s, k.x, k.y)) {
           const worth = Math.round(s.strength * DISCHARGE_GAIN * dischargeFalloff(s, k.x, k.y));
           const best = s.strength * DISCHARGE_GAIN;
           g.fillStyle = worth > best * 0.5 ? "#8ce9ff" : "#ffa24a";

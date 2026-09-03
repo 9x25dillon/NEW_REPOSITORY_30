@@ -159,7 +159,27 @@ export interface Limb {
 /** How near a lobe direction a chain has to run to be an appendage. */
 export const LIMB_ARC = 0.45;
 
+/**
+ * Memo, keyed on the body itself.
+ *
+ * `bodiesOf` builds new Body objects every time the set of structures changes,
+ * so an entry here dies exactly when the answer it holds stops being true —
+ * there is no invalidation to forget. Without it the surface recomputed this
+ * TWICE PER BODY PER FRAME: at a 352-cell organism that is about two
+ * milliseconds a frame spent re-deriving a shape that had not moved, and a
+ * player reported the game lagging when the screen was full.
+ */
+const LIMB_MEMO = new WeakMap<Body, { pitch: number; limbs: Limb[] }>();
+
 export function limbsOf(body: Body, pitch: number): Limb[] {
+  const seen = LIMB_MEMO.get(body);
+  if (seen && seen.pitch === pitch) return seen.limbs;
+  const limbs = computeLimbs(body, pitch);
+  LIMB_MEMO.set(body, { pitch, limbs });
+  return limbs;
+}
+
+function computeLimbs(body: Body, pitch: number): Limb[] {
   const cells = body.cells;
   if (cells.length < 3) return [];
 

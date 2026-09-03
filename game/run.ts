@@ -1367,6 +1367,14 @@ export function retuneChannel(run: Run, mode: number): boolean {
   for (const s of run.structures) s.layer = move(s.layer);
 
   run.world.mode = want;
+  // THE BODY CHANGED SHAPE. Moving every cell between planes alters what is
+  // joined to what — `joined` refuses a step of more than one layer, and a leg
+  // is precisely a limb that spans two — so the bodies and the planes each cell
+  // SERVES have to be rebuilt. They were not, which left `c.serves` stale after
+  // every channel retune: `underStructure` and `drift` both test it, so a
+  // building went on holding the plane it used to be on until the next time
+  // anything was placed or lifted.
+  reshape(run);
   run.events.push({ kind: "retune", mode: want, layer: run.layer });
   return true;
 }
