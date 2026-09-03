@@ -3201,8 +3201,8 @@
   var mx = (p) => p / PX;
   var GLOW_W = 300;
   var GLOW_H = 220;
-  var BLOOM_REST = 0.15;
-  var BLOOM_DRIVE = 0.17;
+  var BLOOM_REST = 0.1;
+  var BLOOM_DRIVE = 0.12;
   var WASH_W = 100;
   var WASH_H = 74;
   var INK = "#cfe9f5";
@@ -4435,15 +4435,32 @@
         if (body.cells.length < 2) continue;
         const live = autonomous(body);
         const path = new Path2D();
+        const cell = near;
+        const grid = /* @__PURE__ */ new Map();
+        for (const c of body.cells) {
+          const key3 = (Math.floor(c.x / cell) + 4096) * 8192 + (Math.floor(c.y / cell) + 4096);
+          const at = grid.get(key3);
+          if (at) at.push(c);
+          else grid.set(key3, [c]);
+        }
+        const margin = px(pitch) * 2;
         for (const a of body.cells) {
-          path.addPath(new Path2D(`M ${px(a.x)} ${px(a.y)} l 0.01 0`));
-          for (const b of body.cells) {
-            if (b === a) continue;
-            if (Math.hypot(b.x - a.x, b.y - a.y) > near) continue;
-            const seg = new Path2D();
-            seg.moveTo(px(a.x), px(a.y));
-            seg.lineTo(px(b.x), px(b.y));
-            path.addPath(seg);
+          if (!this.onCamera(a.x, a.y, margin)) continue;
+          const ax = px(a.x), ay = px(a.y);
+          path.moveTo(ax, ay);
+          path.lineTo(ax + 0.01, ay);
+          const gx = Math.floor(a.x / cell), gy = Math.floor(a.y / cell);
+          for (let ox = -1; ox <= 1; ox++) {
+            for (let oy = -1; oy <= 1; oy++) {
+              const at = grid.get((gx + ox + 4096) * 8192 + (gy + oy + 4096));
+              if (!at) continue;
+              for (const b of at) {
+                if (b === a) continue;
+                if (Math.hypot(b.x - a.x, b.y - a.y) > near) continue;
+                path.moveTo(ax, ay);
+                path.lineTo(px(b.x), px(b.y));
+              }
+            }
           }
         }
         g2.lineCap = "round";
@@ -4505,6 +4522,7 @@
       const k = run.throne;
       const fighting = run.phase === "reign" && k.awake && k.hp > 0;
       for (const s of run.structures) {
+        if (!this.onCamera(s.x, s.y, px(s.reach * LOBE_RANGE) + 40)) continue;
         const x = px(s.x), y = px(s.y);
         const R = px(s.reach);
         const rgb = s.ruin ? "110,140,160" : JADE;
@@ -4512,11 +4530,11 @@
         if (fighting) {
           const live = bearsOn(s, k.x, k.y);
           const far = px(s.reach * LOBE_RANGE);
+          const cone = g2.createRadialGradient(x, y, R * 0.6, x, y, far);
+          cone.addColorStop(0, `rgba(${rgb},${live ? 0.3 : 0.075})`);
+          cone.addColorStop(1, "rgba(0,0,0,0)");
           for (const [dx, dy] of s.lobes) {
             const th = Math.atan2(dy, dx);
-            const cone = g2.createRadialGradient(x, y, R * 0.6, x, y, far);
-            cone.addColorStop(0, `rgba(${rgb},${live ? 0.3 : 0.075})`);
-            cone.addColorStop(1, "rgba(0,0,0,0)");
             g2.fillStyle = cone;
             g2.beginPath();
             g2.moveTo(x, y);
@@ -4553,17 +4571,7 @@
           g2.lineTo(x + dx * R, y + dy * R);
           g2.stroke();
           const cr = R * HOLD_CATCH;
-          const catchment = g2.createRadialGradient(
-            x + dx * R,
-            y + dy * R,
-            0,
-            x + dx * R,
-            y + dy * R,
-            cr
-          );
-          catchment.addColorStop(0, `rgba(${rgb},${(a * 0.16).toFixed(3)})`);
-          catchment.addColorStop(1, "rgba(0,0,0,0)");
-          g2.fillStyle = catchment;
+          g2.fillStyle = `rgba(${rgb},${(a * 0.07).toFixed(3)})`;
           g2.beginPath();
           g2.arc(x + dx * R, y + dy * R, cr, 0, Math.PI * 2);
           g2.fill();
@@ -4716,7 +4724,7 @@
       const lit = w.maxAmplitude > 0 ? w.amplitude / w.maxAmplitude : 0;
       gc.globalCompositeOperation = "source-over";
       gc.clearRect(0, 0, GLOW_W, GLOW_H);
-      gc.filter = "brightness(1.18) saturate(1.12) blur(4px)";
+      gc.filter = "brightness(1.10) saturate(1.08) blur(4px)";
       gc.drawImage(this.canvas, 0, 0, VIEW_W, VIEW_H, 0, 0, GLOW_W, GLOW_H);
       gc.filter = "none";
       g2.save();

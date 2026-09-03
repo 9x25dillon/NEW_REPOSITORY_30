@@ -74,8 +74,8 @@ const GLOW_H = 220;
  * carries meaning: gripping makes the water blaze, it just no longer blows the
  * frame out while doing it.
  */
-const BLOOM_REST = 0.15;
-const BLOOM_DRIVE = 0.17;
+const BLOOM_REST = 0.10;
+const BLOOM_DRIVE = 0.12;
 
 const WASH_W = 100;
 const WASH_H = 74;
@@ -1379,16 +1379,46 @@ export class Game {
       if (body.cells.length < 2) continue;
       const live = autonomous(body);
 
+      // ONE PATH, A GRID, AND ONLY WHAT IS ON SCREEN.
+      //
+      // This compared every cell to every other cell and allocated a Path2D per
+      // cell AND per segment, every frame. A player's report — "it starts to
+      // lag when the screen is full" — came from a 211-cell body: forty-four
+      // thousand distance checks and about eighteen hundred objects a frame, to
+      // draw a shape that had not changed.
+      //
+      // Cells sit on a lattice and `near` is one and a half pitches, so a grid
+      // of that size puts every neighbour in the nine squares around a cell.
+      // The fourth time this exact shape has turned up in this project: the
+      // merge pass, the structure lookups, limbsOf, and now the thing that
+      // draws them.
       const path = new Path2D();
+      const cell = near;
+      const grid = new Map<number, typeof body.cells>();
+      for (const c of body.cells) {
+        const key = (Math.floor(c.x / cell) + 4096) * 8192 + (Math.floor(c.y / cell) + 4096);
+        const at = grid.get(key);
+        if (at) at.push(c);
+        else grid.set(key, [c]);
+      }
+      const margin = px(pitch) * 2;
       for (const a of body.cells) {
-        path.addPath(new Path2D(`M ${px(a.x)} ${px(a.y)} l 0.01 0`));
-        for (const b of body.cells) {
-          if (b === a) continue;
-          if (Math.hypot(b.x - a.x, b.y - a.y) > near) continue;
-          const seg = new Path2D();
-          seg.moveTo(px(a.x), px(a.y));
-          seg.lineTo(px(b.x), px(b.y));
-          path.addPath(seg);
+        if (!this.onCamera(a.x, a.y, margin)) continue;
+        const ax = px(a.x), ay = px(a.y);
+        path.moveTo(ax, ay);
+        path.lineTo(ax + 0.01, ay);
+        const gx = Math.floor(a.x / cell), gy = Math.floor(a.y / cell);
+        for (let ox = -1; ox <= 1; ox++) {
+          for (let oy = -1; oy <= 1; oy++) {
+            const at = grid.get((gx + ox + 4096) * 8192 + (gy + oy + 4096));
+            if (!at) continue;
+            for (const b of at) {
+              if (b === a) continue;
+              if (Math.hypot(b.x - a.x, b.y - a.y) > near) continue;
+              path.moveTo(ax, ay);
+              path.lineTo(px(b.x), px(b.y));
+            }
+          }
         }
       }
 
@@ -1460,6 +1490,13 @@ export class Game {
     const fighting = run.phase === "reign" && k.awake && k.hp > 0;
 
     for (const s of run.structures) {
+      // CULLED, which it never was. A player with 212 buildings was drawing
+      // every one of them every frame, most of them off screen — and each one
+      // built a radial gradient PER LOBE, so a six-lobed crystal came to about
+      // two and a half thousand gradient objects a frame. The report was "it
+      // starts to lag when the screen is full". The margin is a full arm, so a
+      // building whose cone reaches into the view is still drawn.
+      if (!this.onCamera(s.x, s.y, px(s.reach * LOBE_RANGE) + 40)) continue;
       const x = px(s.x), y = px(s.y);
       const R = px(s.reach);
       const rgb = s.ruin ? "110,140,160" : JADE;
@@ -1473,11 +1510,15 @@ export class Game {
       if (fighting) {
         const live = bearsOn(s, k.x, k.y);
         const far = px(s.reach * LOBE_RANGE);
+        // ONE GRADIENT, NOT ONE PER ARM. It is centred on the building and
+        // depends on nothing the loop below changes, so every arm of a
+        // six-lobed crystal was building an identical object and throwing it
+        // away.
+        const cone = g.createRadialGradient(x, y, R * 0.6, x, y, far);
+        cone.addColorStop(0, `rgba(${rgb},${live ? 0.3 : 0.075})`);
+        cone.addColorStop(1, "rgba(0,0,0,0)");
         for (const [dx, dy] of s.lobes) {
           const th = Math.atan2(dy, dx);
-          const cone = g.createRadialGradient(x, y, R * 0.6, x, y, far);
-          cone.addColorStop(0, `rgba(${rgb},${live ? 0.3 : 0.075})`);
-          cone.addColorStop(1, "rgba(0,0,0,0)");
           g.fillStyle = cone;
           g.beginPath();
           g.moveTo(x, y);
@@ -1521,12 +1562,11 @@ export class Game {
         g.moveTo(x + dx * 6, y + dy * 6);
         g.lineTo(x + dx * R, y + dy * R);
         g.stroke();
+        // A flat disc rather than a gradient per arm tip. At twenty microns
+        // across the falloff was invisible and it was another gradient object
+        // per lobe per building per frame.
         const cr = R * HOLD_CATCH;
-        const catchment = g.createRadialGradient(
-          x + dx * R, y + dy * R, 0, x + dx * R, y + dy * R, cr);
-        catchment.addColorStop(0, `rgba(${rgb},${(a * 0.16).toFixed(3)})`);
-        catchment.addColorStop(1, "rgba(0,0,0,0)");
-        g.fillStyle = catchment;
+        g.fillStyle = `rgba(${rgb},${(a * 0.07).toFixed(3)})`;
         g.beginPath(); g.arc(x + dx * R, y + dy * R, cr, 0, Math.PI * 2); g.fill();
         g.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
         g.beginPath(); g.arc(x + dx * R, y + dy * R, 2.6, 0, Math.PI * 2); g.fill();
@@ -1766,7 +1806,7 @@ export class Game {
     gc.clearRect(0, 0, GLOW_W, GLOW_H);
     // brightness first so the dark stays dark and only the lit smears; the blur
     // radius is in buffer pixels, so it is three times this on screen.
-    gc.filter = "brightness(1.18) saturate(1.12) blur(4px)";
+    gc.filter = "brightness(1.10) saturate(1.08) blur(4px)";
     gc.drawImage(this.canvas, 0, 0, VIEW_W, VIEW_H, 0, 0, GLOW_W, GLOW_H);
     gc.filter = "none";
 
