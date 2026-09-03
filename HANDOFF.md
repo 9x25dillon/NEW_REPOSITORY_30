@@ -43,10 +43,13 @@ it is which claim just leaked into which.**
 ## State
 
 ```
-branch   main   (pushed to origin/main 2026-09-02, through the first play
-                report; the repo is PRIVATE, which is what config/subject.ts
-                assumes — check before that ever changes)
-tests    288, all passing
+branch   main   (pushed to origin/main 2026-09-02, through six play reports and
+                the first aeon-6 run; the repo is PRIVATE, which is what
+                config/subject.ts assumes — check before that ever changes)
+tests    301, all passing
+serve    python3 -m http.server on app/ WITH no-store headers — a plain
+         http.server let a browser cache a build and cost a whole play session
+         debugging code that had already been fixed
 build    npm test | npm run typecheck | npm run drifter
 play     app/sonic-drifter.html — one file, no build step, no network
 ```
@@ -71,7 +74,8 @@ DOM so `src/` cannot reach for a browser; `tsconfig.build.json` covers `app/`.
 | `game/body.ts` | the lattice, what is joined to what, its space group, limbs, legs, gait |
 | `game/depth.ts` | the channel's harmonics. Mode *n* puts *n* node planes in the fluid |
 | `game/streams.ts` | laminar co-flow: the channel carries three waters, not one |
-| `game/chip.ts` | what is etched into the glass — sharp edges, bubble cavities — and the streaming that comes off it. The only thing in the game older than the current world. **A cavity collects, an edge pumps, and both now have a job** |
+| `game/chip.ts` | what is etched into the glass — sharp edges, bubble cavities — and the streaming that comes off it. The only thing in the game older than the current world. A cavity collects, an edge pumps, and both have a job |
+| `game/thermal.ts` | the water's temperature, and what your own drive does to it. Standard fits for water — Marczak, Kell, Vogel — which land on the three constants `src/` had already pinned. Viscosity halves by 65 C, so **hot water is thin water and the whole game runs faster** |
 | `game/run.ts` | the aeon: settle, crown, reign, birth |
 | `app/pad.ts` | controller and keyboard, one intent shape |
 | `app/drifter.ts` | the surface. Renders only what is true |
@@ -138,7 +142,37 @@ These are not preferences. Breaking one breaks something else two modules away.
    at 410 buildings and 636 motifs the direct loops cost 53.5 ms a frame. Do not
    reintroduce `holdPoints()` into either — it allocates an array per structure
    per entity.
-15. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
+15. **A flow has two ends.** Arrivals are a rate (`arrivalRate`) and departures
+   are the same figure used the other way round (`washOut`), so what comes in
+   and what goes out cannot drift apart. Without the second one a late water
+   silts up with pentamers — which by the crystallographic restriction theorem
+   join nothing, ever, while everything else is consumed into cells: measured at
+   80 per cent of the standing population after fifteen minutes. **What is held
+   does not wash out**, and that is what makes it part of the game rather than a
+   tax on it.
+16. **`currentAt` is the only place the world's circulation is computed.** It
+   was computed twice, from two different origins — `pilot.carry` from the
+   pool's corner and `run.drift` from the channel's — so the player and every
+   other body were in different current fields whenever the pool was smaller
+   than the channel. In a 2000 um pool they point OPPOSITE WAYS at the centre.
+   The player's report was "being drawn in a direction i couldnt figure out".
+17. **A discharge's falloff and `DEVOUR_REACH` are a pair.** Damage falls off
+   across an arm; the king eats buildings within 150 um. If the falloff is steep
+   enough that the worthwhile damage lies inside that radius, then good damage
+   and a surviving building are mutually exclusive — which is not a decision, it
+   is a vice, and a squared curve shipped that way for one commit. There is a
+   test holding the two to each other.
+18. **Nothing fires without a target.** A fully charged building holds until the
+   king is in its arm. Measured on a real layout: four of 81 buildings bear at
+   any moment and at 44 per cent of the positions the king can stand in, none
+   do. Firing on a timer was a coin toss with a building as the stake.
+19. **Every animation phase must be wrapped, not left to `%`.** JavaScript's
+   modulo is signed. One negative frame time made `this.t` negative, every
+   `(t * k) % 1` went negative with it, and `drawBound` turned one into a
+   circle with a radius of minus twenty-two — which the canvas refuses, killing
+   the render loop. `dt` is clamped to [0, 0.05] now; a negative dt was also
+   stepping the simulation backwards, with no symptom at all.
+20. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
    the nine-square lookup complete — every possible partner is in it and nothing
    else can be. If you change `BIND_RADIUS`, the grid follows it automatically;
    if you change the grid's pitch independently, motes stop finding each other
@@ -258,46 +292,45 @@ appendages, tools, armour, and an open world. Most of that now exists.
 - ~~**The outer channel is empty water.**~~ `world.density` is a concentration
   now. This was the unlock — none of the above is worth anything without it.
 
-### What is still open, in the order the geometry argues for
+### What the play reports fixed, in order
 
-- ~~**The reward for going is a farm, and a farm has no ceiling.**~~ It had
-  none, it was reported, and it is bounded by the water now rather than by your
-  industry. Measured over the report's own 909 s: actively playing yields
-  96–111 cells (was 3440); 408 buildings with no player at all yield 6.
-  **What has NOT been checked is whether the throne-at-a-landmark brake still
-  matters** — the king eating buildings within 150 µm was the intended limit on
-  a cavity farm, and the farm is now a fortieth of the size it was meant to
-  brake, so it may be doing nothing at all. The intended brake is that the
-  throne now stands at a landmark, so a cavity farm is contested — the king eats
-  buildings within 150 µm of itself. **That brake has been reasoned about and
-  not measured.** It is the first thing to probe: play an aeon with a cavity
-  farm and count what survives. If it is not contested enough, the honest lever
-  is the king's appetite or its reach, not a cap on the farm.
-- **Tools and armour.** `Cell.ability` (thrust / weave / anchor) exists and is
-  barely used — `world.ts:143` (`anchor` sets `s.anchored`) is the only place it
-  changes anything, and `drifter.ts` otherwise only tints a cell by it. The chip now gives
-  `anchor` an obvious job it did not have before (hold station in a jet; the lee
-  and the jet differ by 363 µm/s and nothing exploits that yet) and `thrust` an
-  obvious place to matter. The 432 is literally armour: order 24, zero
-  piezoelectric components, "the field cannot touch it".
-- **Levels and rewards.** Still the thinnest part. Every world sets the same
-  kind of objective at a different frequency, and freeing a bound field grants
-  +1 integrity and 80 score. The chip gives a new handle that did not exist
-  before: an aeon could ask for something *at a named place* rather than at a
-  frequency, and the place is one the player has learned.
-- **Beauty.** Explicitly asked for — *"distractingly beautiful as well as being
-  shaped by its functions"* — and deferred twice now. The strongest thing to
-  build on is still that everything drawn already *is* the physics. The chip
-  session added two things worth looking at that nobody has looked at yet: 636
-  motifs instead of 30, and four cavities visibly hoarding them.
-- **One report exists, and it was about the economy.** It never got as far as
-  saying whether the chip is any *good* — whether walking two millimetres to a
-  fight is worth it, whether landing an arm tip on a cavity core reads as a
-  decision, whether a cavity visibly hoarding motifs is worth looking at. Those
-  are still entirely unknown. The next report should come from a run that
-  actually crowns something.
-- **`report()` now carries the water** — standing, delivered, arrivals/s and
-  hunters allowed — and where the throne is. Read those two lines first.
+Six reports, and between them they found more real defects than a day of
+measuring did. Every one of these was invisible until somebody played:
+
+- **3440 cells and an unfed throne at 909 s.** The suspension had no ceiling —
+  `motifs < suspension` refilled sixty a second forever. Arrivals are a rate
+  now. The same report exposed 53.5 ms/frame at 410 buildings.
+- **A throne never visited, then a king at full health after nine minutes.**
+  `drawThrone` printed the discharges-to-kill and returned early the moment the
+  king woke, so the one actionable number vanished exactly when it mattered.
+- **The `aim` lesson had never been shown to anybody, ever.** `teach()` clobbered
+  instead of queueing and three lessons fired on the crown frame. The lesson
+  explaining how the fight is won was set and overwritten every single game.
+- **"The kings hp wouldnt go down."** It was going UP: seven landed discharges
+  for 61 damage against 144 healed. A squared falloff had put the damage inside
+  the radius the king eats buildings from.
+- **"Drawn in a direction i couldnt figure out."** Two current fields, and the
+  circulation had never been drawn at all.
+- **A blank screen.** One negative frame time, and `%` is signed.
+
+### What is still open
+
+- **Volleys are most of what kills.** For several runs `hit:volley` was 100 per
+  cent of the damage taken; it is now roughly half, since the bestiary started
+  landing hits too. Whether that balance is right is unmeasured.
+- **Limbs come and go and nothing depends on them.** Reports show 0, 1, 3, 6 and
+  7 limbs with no apparent consequence. A limb needs a cell with exactly one
+  neighbour, so building solid — which is what people do — grows none. `Cell.
+  ability` (thrust / weave / anchor) is still read in exactly one place, and the
+  chip gives `anchor` an obvious job it has never had.
+- **P432 appeared in a real run** — order 24, zero piezoelectric components, the
+  body "the field cannot touch". Nobody has checked what it is like to play.
+- **Beauty**, still. It has been asked for once and deferred three times, and
+  there is now more worth looking at than there was: 636 motifs where there were
+  30, four cavities visibly hoarding them, the water's own circulation drawn,
+  and a temperature that changes what everything does.
+- **The deep aeons are unexplored past six.** Mode rises with the sovereign's
+  mass, so the channel gets more node planes; nobody has been there.
 
 ## How to work on this
 

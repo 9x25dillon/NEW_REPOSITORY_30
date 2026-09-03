@@ -5667,7 +5667,7 @@
           return ` limbs ${l.length - legs} legs ${legs}`;
         })() : ""}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
-        `water: ${run.entities.filter((e) => e.faction === "motif").length} standing of ${suspension(run)}; delivered ${run.delivered}; arrivals ${arrivalRate(run).toFixed(2)}/s; hunters allowed ${run.phase === "reign" ? "reign" : settleCap(run)}`,
+        `water: ${run.entities.filter((e) => e.faction === "motif").length} standing of ${suspension(run)}${run.phase === "birth" ? " (next world's, pool not rebuilt)" : ""}; delivered ${run.delivered}; arrivals ${arrivalRate(run).toFixed(2)}/s; hunters allowed ${run.phase === "reign" ? "reign" : settleCap(run)}`,
         `heat: ${run.wave.tC.toFixed(1)}C (ambient ${AMBIENT_C})  viscosity x${(viscosity(run.wave.tC) / viscosity(AMBIENT_C)).toFixed(2)}  everything moves x${(viscosity(AMBIENT_C) / viscosity(run.wave.tC)).toFixed(2)}  water c=${waterAt(run, run.you.y).c.toFixed(0)}`,
         `chip: ${(() => {
           const on = nearestFeature(CHIP, run.you.x, run.you.y);

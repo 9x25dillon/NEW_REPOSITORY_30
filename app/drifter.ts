@@ -2793,7 +2793,12 @@ export class Game {
         + `  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}`
         + `  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
       `water: ${run.entities.filter((e) => e.faction === "motif").length} standing of `
-        + `${suspension(run)}; delivered ${run.delivered}; arrivals `
+        // During BIRTH the new world's density is already installed but its pool
+        // has not been rebuilt yet, so these two are measured against different
+        // worlds for one screen and `delivered` can read higher than the
+        // capacity. Said, rather than left for a future reader to chase.
+        + `${suspension(run)}${run.phase === "birth" ? " (next world's, pool not rebuilt)" : ""}`
+        + `; delivered ${run.delivered}; arrivals `
         + `${arrivalRate(run).toFixed(2)}/s; hunters allowed ${
           run.phase === "reign" ? "reign" : settleCap(run)}`,
       `heat: ${run.wave.tC.toFixed(1)}C (ambient ${AMBIENT_C})`
