@@ -228,44 +228,43 @@ anything.**
 
 ## Open, known, not fixed
 
-1. **The controller does not deliver input on the user's machine.** The browser
-   sees it (`mapping="standard"`, 4 axes, 17 buttons) and `getGamepads()` returns
-   nothing but zeroes. The page says `CLICK THE GAME - A PAGE WITHOUT FOCUS GETS
-   NO PAD INPUT` when unfocused, and logs `[pad] first input received` when
-   anything arrives. Neither has been confirmed on their machine.
+1. ~~**The controller does not deliver input on the user's machine.**~~ SOLVED
+   2026-09-02, and not by any of the code written for it. **It works over USB.**
+   The player plugged the pad in with a cable and reported it "way better with
+   controller".
 
-   **Three hypotheses have been killed, all on 2026-09-02, none of them by
-   writing code.** Do not spend a fourth commit on any of these:
+   The whole saga is worth keeping because of how it ended. Four commits of
+   browser-side work went in on hypotheses across earlier sessions. Then two
+   read-only shell commands killed three theories at once:
 
-   - *Flatpak/Snap browser sandbox with no `/dev/input`.* Dead: `flatpak list
-     --app` and `snap list` both return nothing. The browser is not sandboxed.
-     This also removes the one theory that covered the broken `file://` link as
-     the same cause, so that is now unexplained and separate.
-   - *Our own polling caching a stale `Gamepad` object* — the classic version of
-     this bug, since `getGamepads()` returns a snapshot. Dead: `pad.gamepad()`
-     re-calls `navigator.getGamepads()` every poll and holds no reference.
-     `app/pad.ts` is not at fault.
-   - *A device-permission problem at `/dev/input`.* Dead in a more interesting
-     way: **there was no gamepad attached to the machine at all.** `joydev` is
-     loaded with usage count 0, no `/dev/input/js*` node exists, and nothing in
-     `/proc/bus/input/devices` is a pad — the only HID there is a Compx (vendor
-     3554) 2.4G keyboard/mouse dongle and an FDUCE audio interface.
+   - `flatpak list --app` and `snap list` were both empty, so the browser was
+     never sandboxed — which had been the leading theory AND the one that also
+     explained a broken `file://` link.
+   - `pad.gamepad()` re-calls `navigator.getGamepads()` every poll and holds no
+     reference, so the classic stale-snapshot bug was not it either. `app/pad.ts`
+     was never at fault.
+   - `/proc/bus/input/devices` had **no gamepad in it at all**. joydev loaded,
+     usage count 0, no `/dev/input/js*`, and the only HID present was a Compx
+     (vendor 3554) 2.4G keyboard/mouse dongle.
 
-   **So the next step is not a code change, it is one measurement with the pad
-   actually connected.** Plug it in or pair it, then:
+   That last one was the answer: the pad was on its wireless dongle, in a mode
+   that enumerates as a keyboard and a mouse rather than as a gamepad. The
+   browser was right, the code was right, and no amount of either could reach a
+   device the kernel was not being shown one of. A cable bypasses the dongle.
 
-   ```
-   ls /dev/input/js* ; grep -E "^N: " /proc/bus/input/devices
-   ```
+   **The lesson, which is the reason this stays in the file:** the bug was never
+   in the layer it was reported from. Before writing a fourth commit against a
+   symptom, ask what the OS can see — `ls /dev/input/js*` and
+   `grep '^N: ' /proc/bus/input/devices` cost nothing and would have ended it at
+   the first session.
 
-   If a joystick node and a pad name appear, the OS is fine and the fault is
-   browser-side — which at this point means page focus, and `everMoved` /
-   `[pad] first input received` are already there to prove it. If nothing
-   appears, it is the controller's own mode (many 2.4G pads ship in a
-   keyboard-emulation mode and need a button combo to switch to X-input) and no
-   amount of browser code will ever reach it.
-2. **Mouse and keyboard are the supported path.** Point to steer (the offset
-   grows over ~130 µm), left button grips, right bursts, WASD overrides.
+2. **Both paths work now.** Pad over USB is what the player prefers. Mouse and
+   keyboard remain fully supported: point to steer (the offset grows over
+   ~130 µm), left button grips, right bursts, WASD overrides. `GLYPH` switches
+   every prompt in the game between the two, driven by `pad.connected`, so
+   anything new that names a control must go through it — and the title
+   screen's difficulty toggle is bound to both `E` and the pad's cycle button
+   for that reason.
 3. `personal/` and the bench app have not been touched this session.
 
 ---

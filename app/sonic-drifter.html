@@ -3201,6 +3201,8 @@
   var mx = (p) => p / PX;
   var GLOW_W = 300;
   var GLOW_H = 220;
+  var BLOOM_REST = 0.15;
+  var BLOOM_DRIVE = 0.17;
   var WASH_W = 100;
   var WASH_H = 74;
   var INK = "#cfe9f5";
@@ -3613,7 +3615,7 @@
       const run = this.run;
       if (it.mute) this.sfx.muted = !this.sfx.muted;
       if (this.screen === "title" || this.screen === "dead") {
-        if (this.pad.tapped("KeyE")) {
+        if (this.pad.tapped("KeyE") || it.cycle !== 0) {
           this.ebb = !this.ebb;
           return;
         }
@@ -4714,12 +4716,12 @@
       const lit = w.maxAmplitude > 0 ? w.amplitude / w.maxAmplitude : 0;
       gc.globalCompositeOperation = "source-over";
       gc.clearRect(0, 0, GLOW_W, GLOW_H);
-      gc.filter = "brightness(1.35) saturate(1.2) blur(4px)";
+      gc.filter = "brightness(1.18) saturate(1.12) blur(4px)";
       gc.drawImage(this.canvas, 0, 0, VIEW_W, VIEW_H, 0, 0, GLOW_W, GLOW_H);
       gc.filter = "none";
       g2.save();
       g2.globalCompositeOperation = "lighter";
-      g2.globalAlpha = 0.3 + lit * 0.34;
+      g2.globalAlpha = BLOOM_REST + lit * BLOOM_DRIVE;
       g2.imageSmoothingEnabled = true;
       g2.drawImage(this.glowCanvas, 0, 0, GLOW_W, GLOW_H, 0, 0, VIEW_W, VIEW_H);
       g2.restore();
@@ -5801,7 +5803,7 @@
         `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
         `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
         "",
-        `${pad("E")}${this.ebb ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER." : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
+        `${pad(on ? `E / ${G.cycle}` : "E")}${this.ebb ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER." : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
         "",
         "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
         "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",

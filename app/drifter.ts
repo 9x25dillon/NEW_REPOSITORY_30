@@ -65,6 +65,18 @@ const mx = (p: number): number => p / PX;
 const GLOW_W = 300;
 const GLOW_H = 220;
 
+/**
+ * How much of the glow is added back, at rest and at full drive.
+ *
+ * One place, because it is the number most likely to want changing and it was
+ * too strong on the first attempt — the player's word was "a little bit too
+ * much". Halved. The glow still answers to the drive, which is the part that
+ * carries meaning: gripping makes the water blaze, it just no longer blows the
+ * frame out while doing it.
+ */
+const BLOOM_REST = 0.15;
+const BLOOM_DRIVE = 0.17;
+
 const WASH_W = 100;
 const WASH_H = 74;
 
@@ -464,7 +476,9 @@ export class Game {
     if (this.screen === "title" || this.screen === "dead") {
       // Chosen before a run and never during one, so it cannot be reached for
       // as a way out of a fight that is going badly.
-      if (this.pad.tapped("KeyE")) { this.ebb = !this.ebb; return; }
+      // Reachable from the pad as well as the keyboard, now that a controller
+      // actually works: cycle is the spare verb on a menu.
+      if (this.pad.tapped("KeyE") || it.cycle !== 0) { this.ebb = !this.ebb; return; }
       if (it.confirm) { this.sfx.unlock(); this.begin(); }
       return;
     }
@@ -1752,13 +1766,13 @@ export class Game {
     gc.clearRect(0, 0, GLOW_W, GLOW_H);
     // brightness first so the dark stays dark and only the lit smears; the blur
     // radius is in buffer pixels, so it is three times this on screen.
-    gc.filter = "brightness(1.35) saturate(1.2) blur(4px)";
+    gc.filter = "brightness(1.18) saturate(1.12) blur(4px)";
     gc.drawImage(this.canvas, 0, 0, VIEW_W, VIEW_H, 0, 0, GLOW_W, GLOW_H);
     gc.filter = "none";
 
     g.save();
     g.globalCompositeOperation = "lighter";
-    g.globalAlpha = 0.30 + lit * 0.34;
+    g.globalAlpha = BLOOM_REST + lit * BLOOM_DRIVE;
     g.imageSmoothingEnabled = true;
     g.drawImage(this.glowCanvas, 0, 0, GLOW_W, GLOW_H, 0, 0, VIEW_W, VIEW_H);
     g.restore();
@@ -2973,7 +2987,7 @@ export class Game {
       `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
       `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
       "",
-      `${pad("E")}${this.ebb
+      `${pad(on ? `E / ${G.cycle}` : "E")}${this.ebb
         ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER."
         : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
       "",
