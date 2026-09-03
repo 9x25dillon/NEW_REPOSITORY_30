@@ -43,10 +43,10 @@ it is which claim just leaked into which.**
 ## State
 
 ```
-branch   main   (pushed to origin/main 2026-09-02, through six play reports and
-                the first aeon-6 run; the repo is PRIVATE, which is what
+branch   main   (pushed to origin/main 2026-09-02, through eleven play reports,
+                an aeon-6 run and a killed 432; the repo is PRIVATE, which is what
                 config/subject.ts assumes — check before that ever changes)
-tests    301, all passing
+tests    302, all passing
 serve    python3 -m http.server on app/ WITH no-store headers — a plain
          http.server let a browser cache a build and cost a whole play session
          debugging code that had already been fixed
@@ -172,7 +172,22 @@ These are not preferences. Breaking one breaks something else two modules away.
    circle with a radius of minus twenty-two — which the canvas refuses, killing
    the render loop. `dt` is clamped to [0, 0.05] now; a negative dt was also
    stepping the simulation backwards, with no symptom at all.
-20. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
+20. **The SURFACE is subject to every rule above, and was the last to learn it.**
+   `drawBodies` compared every cell to every other cell and allocated a Path2D
+   per segment, `drawStructures` was not culled at all and built a radial
+   gradient per lobe, and `limbsOf` ran twice per body per frame. That is the
+   same O(n^2)-written-for-a-dozen shape as `mergePass`, the structure lookups
+   and `limbsOf` itself — **four times in the simulation and three more in the
+   renderer.** If you add a loop over bodies, cells, structures or entities in
+   `app/`, cull it to the camera and grid it, or it will be found by a player
+   with three hundred buildings rather than by you.
+21. **`retuneChannel` must `reshape`.** It moves every structure between planes
+   IN PLACE. That changes what is joined to what — `joined` refuses a step of
+   more than one layer — so bodies, limbs and `c.serves` all have to be rebuilt.
+   For a long time they were not, and `underStructure` and `drift` both test
+   `serves`: a building went on holding the plane it used to be on until the
+   next place or lift, 19 to 26 times a run.
+22. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
    the nine-square lookup complete — every possible partner is in it and nothing
    else can be. If you change `BIND_RADIUS`, the grid follows it automatically;
    if you change the grid's pitch independently, motes stop finding each other
@@ -311,25 +326,39 @@ measuring did. Every one of these was invisible until somebody played:
 - **"Drawn in a direction i couldnt figure out."** Two current fields, and the
   circulation had never been drawn at all.
 - **A blank screen.** One negative frame time, and `%` is signed.
+- **"It starts to lag when the screen is full."** Three uncmiled render loops at
+  353 buildings, none of which the simulation's own performance work had
+  touched, because nobody had looked at `app/` with the same eye.
+- **The controller, over USB.** Closed at last, and not by any of the four
+  commits of browser code written for it. See *Open, known, not fixed*.
 
 ### What is still open
 
-- **Volleys are most of what kills.** For several runs `hit:volley` was 100 per
-  cent of the damage taken; it is now roughly half, since the bestiary started
-  landing hits too. Whether that balance is right is unmeasured.
-- **Limbs come and go and nothing depends on them.** Reports show 0, 1, 3, 6 and
-  7 limbs with no apparent consequence. A limb needs a cell with exactly one
-  neighbour, so building solid — which is what people do — grows none. `Cell.
-  ability` (thrust / weave / anchor) is still read in exactly one place, and the
-  chip gives `anchor` an obvious job it has never had.
-- **P432 appeared in a real run** — order 24, zero piezoelectric components, the
-  body "the field cannot touch". Nobody has checked what it is like to play.
-- **Beauty**, still. It has been asked for once and deferred three times, and
-  there is now more worth looking at than there was: 636 motifs where there were
-  30, four cavities visibly hoarding them, the water's own circulation drawn,
-  and a temperature that changes what everything does.
-- **The deep aeons are unexplored past six.** Mode rises with the sovereign's
-  mass, so the channel gets more node planes; nobody has been there.
+- **Volleys are still most of what lands.** Latest reports: `hit:struck` 1 to 4
+  against `hit:volley` 6 to 16. With a pad the player dodges beasts almost
+  perfectly and the king's arms are nearly the only thing reaching them. Whether
+  that is the right shape for the fight is unmeasured.
+- **Feeding is now a real decision and nobody has explored the top of it.** A
+  king has gone from 150 hp to 2730 across the session as the player learned
+  that feeding buys inheritance. `devour` scales with it — a 2730 hp king ate 26
+  buildings and healed about 470 back. Where that stops being worth it is
+  unknown.
+- **Limbs still depend on nothing.** Reports show 0, 1, 2, 3, 6 and 7 limbs with
+  no consequence. A limb needs a cell with exactly one neighbour, so building
+  solid grows none, and nothing rewards building otherwise. `Cell.ability`
+  (thrust / weave / anchor) is read in exactly one place; the chip gives
+  `anchor` an obvious job it has never had.
+- **P432 has been crowned and killed** — order 24, no drivable piezoelectric
+  component, `wearing` nearly useless against it, only buildings can reach it.
+  It works. Whether it is *good* has not been thought about.
+- **Beauty is one pass deep.** The field draws its sign, the water has a
+  temperature you can see, the co-flow interfaces refract and there is a bloom.
+  Untouched: the depth planes, the chip reading as etched glass, and the motifs
+  themselves — six hundred of them now glow in cavity cores and nobody has
+  looked at whether that is the best thing on screen.
+- **If lag returns**, the two remaining candidates are the bloom's full-canvas
+  blur (`BLOOM_REST` / `BLOOM_DRIVE`, one place) and `drawTrails`, which issues
+  eight separate strokes per visible motif.
 
 ## How to work on this
 
@@ -359,6 +388,16 @@ Things that worked, and are worth repeating:
   cavity farm makes nothing and the one that said it makes six cells differed
   only in where the building stood. Chasing that difference produced the actual
   design; picking the "right" probe and moving on would have lost it.
+- **A test that cannot fail is a comment with a longer runtime — and you only
+  find out by planting the bug.** A test written this session retuned the
+  channel 3 -> 1, which collapses every plane onto zero; nothing moved, the
+  assertion held trivially, and putting the bug back did not fail it. It was
+  caught because planting the violation is the routine, not because it looked
+  wrong. Do it every time, on every new test.
+- **Two constants that constrain each other need a test that names both.** The
+  discharge falloff and `DEVOUR_REACH` were each defensible alone and together
+  they made good damage and a surviving building mutually exclusive. Nothing
+  catches that except an assertion that mentions the pair.
 - **When you make something bigger, ask what the change breaks that was fine
   before.** Raising the population 13× made an O(n²) merge pass matter and made
   an unculled renderer matter. Moving the throne two millimetres away made a
