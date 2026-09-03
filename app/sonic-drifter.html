@@ -3199,6 +3199,8 @@
   var VIEW_H = 660;
   var px = (m) => m * PX;
   var mx = (p) => p / PX;
+  var GLOW_W = 300;
+  var GLOW_H = 220;
   var WASH_W = 100;
   var WASH_H = 74;
   var INK = "#cfe9f5";
@@ -3395,6 +3397,8 @@
       __publicField(this, "toastT", 0);
       __publicField(this, "last", 0);
       __publicField(this, "running", false);
+      __publicField(this, "glowCanvas");
+      __publicField(this, "glowCtx");
       __publicField(this, "washCanvas");
       __publicField(this, "washCtx");
       __publicField(this, "wash");
@@ -3406,6 +3410,78 @@
       __publicField(this, "wasMouseDash", false);
       /** Whether the water ebbs back as you spend your crystal. See `Run.ebb`. */
       __publicField(this, "ebb", false);
+      /**
+       * WHICH WAY THE THRONE IS, when it is not on the screen.
+       *
+       * There was never a need for one. The throne stood at the exact centre of the
+       * channel in every aeon and the pool you started in was one screen wide, so
+       * it was always either in front of you or a short walk. It stands at a
+       * landmark now, which from the far wall is two millimetres and three screens
+       * away.
+       *
+       * There is a report in this file already — see the hint line below — about a
+       * player who placed twenty-six buildings, fed nothing, and never visited a
+       * throne that was in plain sight the whole time. Moving it further away
+       * without saying which way it went would be making that exact report worse,
+       * on purpose, which is worse than not having moved it.
+       *
+       * It NAMES the landmark rather than only pointing at it. The chip is the one
+       * thing in this game that is the same in the tenth aeon as in the first, so
+       * "A BUBBLE CAVITY - 1.4 MM" is a direction a player can learn once and use
+       * for the rest of the run. An arrow is only ever good for this trip.
+       */
+      /**
+       * The water's own circulation, which was never drawn at all.
+       *
+       * `world.current` is a single cell spanning the pool — zero in the middle,
+       * fastest at the walls, turning over — and it grows 1.4 um/s an aeon, so by
+       * the fifth it is 16 um/s. That is a real fraction of what a player can do
+       * about it, and there has never been a mark on screen for it. The wash behind
+       * everything draws the acoustic FIELD; the chip draws its own jets; this was
+       * simply absent, and a player reported being "drawn in a direction i couldnt
+       * figure out".
+       *
+       * Drawn as what it is: short marks lying along the flow, brighter where it is
+       * faster, sliding so that it reads as water rather than as hatching. Nothing
+       * here is decoration — every mark is `currentAt` sampled at that spot, which
+       * is the same function that moves you and everything else.
+       */
+      /**
+       * What the water is doing to the light.
+       *
+       * NOT A FILTER OVER A GAME. Everything bright on this screen is bright
+       * because energy is being put into it — the field where the drive is
+       * strongest, a node holding a body, a building discharging, a king winding
+       * up — and light spilling off those is what an intense field looks like
+       * through a fluid. So the glow is taken from the frame that was just drawn
+       * and added back, which means it can only ever say what was already there.
+       *
+       * It answers to the drive, because the energy density does: `w.amplitude`
+       * over its maximum, the same p^2 quantity the stamina cost, the streaming
+       * speed and the heating all go as. Gripping does not merely move you faster,
+       * it makes the water blaze.
+       *
+       * Taken before the vignette and the HUD, so the interface stays crisp and
+       * only the world blooms.
+       */
+      /**
+       * Whether this browser can blur on a canvas.
+       *
+       * Checked rather than assumed, because the failure is not "no glow" — an
+       * unsupported `filter` is silently ignored, and the bloom would then add a
+       * sharp copy of the frame on top of itself and wash the whole screen out.
+       * Worse than not having it.
+       */
+      __publicField(this, "canBlur", (() => {
+        try {
+          const c = document.createElement("canvas").getContext("2d");
+          if (!c) return false;
+          c.filter = "blur(2px)";
+          return c.filter !== "none" && c.filter !== "";
+        } catch {
+          return false;
+        }
+      })());
       const ctx = canvas2.getContext("2d");
       if (!ctx) throw new Error("no 2d context");
       this.ctx = ctx;
@@ -3419,6 +3495,12 @@
       if (!wc) throw new Error("no 2d context for the field buffer");
       this.washCtx = wc;
       this.wash = wc.createImageData(WASH_W, WASH_H);
+      this.glowCanvas = document.createElement("canvas");
+      this.glowCanvas.width = GLOW_W;
+      this.glowCanvas.height = GLOW_H;
+      const gc = this.glowCanvas.getContext("2d");
+      if (!gc) throw new Error("no 2d context for the glow buffer");
+      this.glowCtx = gc;
       const v = ctx.createRadialGradient(
         VIEW_W / 2,
         VIEW_H / 2,
@@ -3980,6 +4062,7 @@
       this.drawYou();
       this.drawPopups();
       g2.restore();
+      this.bloom();
       g2.fillStyle = this.vignette;
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
       if (this.screen === "title") this.drawTitle();
@@ -4012,14 +4095,28 @@
           px(Math.min(hi, b.y + b.h) - Math.max(lo, b.y))
         );
         if (lo > b.y && lo < b.y + b.h) {
-          g2.strokeStyle = "rgba(200,235,255,0.09)";
+          const above = mediumAt(run.world.medium, lo - 6e-6, CHANNEL_H);
+          const below = mediumAt(run.world.medium, lo + 6e-6, CHANNEL_H);
+          const jump = Math.min(1, Math.abs(below.c - above.c) / 320);
+          const y0 = px(lo);
+          const band = g2.createLinearGradient(0, y0 - 7, 0, y0 + 7);
+          const a = (0.05 + jump * 0.16).toFixed(3);
+          band.addColorStop(0, "rgba(200,235,255,0)");
+          band.addColorStop(0.5, `rgba(210,240,255,${a})`);
+          band.addColorStop(1, "rgba(200,235,255,0)");
+          g2.fillStyle = band;
+          g2.fillRect(px(b.x), y0 - 7, px(b.w), 14);
+          g2.strokeStyle = `rgba(220,245,255,${(0.1 + jump * 0.14).toFixed(3)})`;
           g2.lineWidth = 1;
-          g2.setLineDash([9, 7]);
           g2.beginPath();
-          g2.moveTo(px(b.x), px(lo));
-          g2.lineTo(px(b.x + b.w), px(lo));
+          const step3 = 14;
+          for (let sx = px(b.x); sx <= px(b.x + b.w); sx += step3) {
+            const u = sx * 0.021 + this.t * 0.9;
+            const yy = y0 + Math.sin(u) * 1.6 + Math.sin(u * 0.37 + 1.7) * 1.1;
+            if (sx === px(b.x)) g2.moveTo(sx, yy);
+            else g2.lineTo(sx, yy);
+          }
           g2.stroke();
-          g2.setLineDash([]);
         }
       }
       g2.strokeStyle = "rgba(120,225,245,0.16)";
@@ -4157,19 +4254,21 @@
       }
       const data = this.wash.data;
       const gain = 0.05 + lit * 0.4;
-      const cr = w.inverted ? 190 : 70;
-      const cg = w.inverted ? 90 : 150;
-      const cb = w.inverted ? 150 : 200;
+      const heat = Math.min(1, Math.max(0, (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C)));
+      const nr = 70 + heat * 150, ng = 150 - heat * 40, nb = 200 - heat * 90;
+      const ar = 200 + heat * 40, ag = 95 - heat * 20, ab = 150 - heat * 60;
       let o = 0;
       for (let j = 0; j < WASH_H; j++) {
         const cy = this.cosY[j];
         const ey = this.envY[j];
         for (let i = 0; i < WASH_W; i++) {
-          const p = Math.abs(this.cosX[i] * cy);
+          const sgn = this.cosX[i] * cy;
+          const p = Math.abs(sgn);
+          const up = w.inverted ? sgn < 0 : sgn >= 0;
           const v = 0.022 + p * gain * this.envX[i] * ey;
-          data[o] = cr;
-          data[o + 1] = cg;
-          data[o + 2] = cb;
+          data[o] = up ? nr : ar;
+          data[o + 1] = up ? ng : ag;
+          data[o + 2] = up ? nb : ab;
           data[o + 3] = Math.min(1, v) * 255 | 0;
           o += 4;
         }
@@ -4607,42 +4706,24 @@
         y + h + 20
       );
     }
-    /**
-     * WHICH WAY THE THRONE IS, when it is not on the screen.
-     *
-     * There was never a need for one. The throne stood at the exact centre of the
-     * channel in every aeon and the pool you started in was one screen wide, so
-     * it was always either in front of you or a short walk. It stands at a
-     * landmark now, which from the far wall is two millimetres and three screens
-     * away.
-     *
-     * There is a report in this file already — see the hint line below — about a
-     * player who placed twenty-six buildings, fed nothing, and never visited a
-     * throne that was in plain sight the whole time. Moving it further away
-     * without saying which way it went would be making that exact report worse,
-     * on purpose, which is worse than not having moved it.
-     *
-     * It NAMES the landmark rather than only pointing at it. The chip is the one
-     * thing in this game that is the same in the tenth aeon as in the first, so
-     * "A BUBBLE CAVITY - 1.4 MM" is a direction a player can learn once and use
-     * for the rest of the run. An arrow is only ever good for this trip.
-     */
-    /**
-     * The water's own circulation, which was never drawn at all.
-     *
-     * `world.current` is a single cell spanning the pool — zero in the middle,
-     * fastest at the walls, turning over — and it grows 1.4 um/s an aeon, so by
-     * the fifth it is 16 um/s. That is a real fraction of what a player can do
-     * about it, and there has never been a mark on screen for it. The wash behind
-     * everything draws the acoustic FIELD; the chip draws its own jets; this was
-     * simply absent, and a player reported being "drawn in a direction i couldnt
-     * figure out".
-     *
-     * Drawn as what it is: short marks lying along the flow, brighter where it is
-     * faster, sliding so that it reads as water rather than as hatching. Nothing
-     * here is decoration — every mark is `currentAt` sampled at that spot, which
-     * is the same function that moves you and everything else.
-     */
+    bloom() {
+      if (!this.canBlur) return;
+      const g2 = this.ctx;
+      const gc = this.glowCtx;
+      const w = this.run.wave;
+      const lit = w.maxAmplitude > 0 ? w.amplitude / w.maxAmplitude : 0;
+      gc.globalCompositeOperation = "source-over";
+      gc.clearRect(0, 0, GLOW_W, GLOW_H);
+      gc.filter = "brightness(1.35) saturate(1.2) blur(4px)";
+      gc.drawImage(this.canvas, 0, 0, VIEW_W, VIEW_H, 0, 0, GLOW_W, GLOW_H);
+      gc.filter = "none";
+      g2.save();
+      g2.globalCompositeOperation = "lighter";
+      g2.globalAlpha = 0.3 + lit * 0.34;
+      g2.imageSmoothingEnabled = true;
+      g2.drawImage(this.glowCanvas, 0, 0, GLOW_W, GLOW_H, 0, 0, VIEW_W, VIEW_H);
+      g2.restore();
+    }
     drawCurrent() {
       const run = this.run;
       if (run.world.current <= 0) return;

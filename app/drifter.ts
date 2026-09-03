@@ -56,6 +56,15 @@ const VIEW_W = 900;
 const VIEW_H = 660;
 const px = (m: number): number => m * PX;
 const mx = (p: number): number => p / PX;
+/**
+ * The glow buffer, at a third of the view.
+ *
+ * Bloom on a downscale is most of the point: the blur is cheaper AND wider in
+ * screen terms, and the upscale does half the smoothing for free.
+ */
+const GLOW_W = 300;
+const GLOW_H = 220;
+
 const WASH_W = 100;
 const WASH_H = 74;
 
@@ -301,6 +310,8 @@ export class Game {
   private last = 0;
   private running = false;
 
+  private readonly glowCanvas: HTMLCanvasElement;
+  private readonly glowCtx: CanvasRenderingContext2D;
   private readonly washCanvas: HTMLCanvasElement;
   private readonly washCtx: CanvasRenderingContext2D;
   private readonly wash: ImageData;
@@ -325,6 +336,13 @@ export class Game {
     if (!wc) throw new Error("no 2d context for the field buffer");
     this.washCtx = wc;
     this.wash = wc.createImageData(WASH_W, WASH_H);
+
+    this.glowCanvas = document.createElement("canvas");
+    this.glowCanvas.width = GLOW_W;
+    this.glowCanvas.height = GLOW_H;
+    const gc = this.glowCanvas.getContext("2d");
+    if (!gc) throw new Error("no 2d context for the glow buffer");
+    this.glowCtx = gc;
 
     const v = ctx.createRadialGradient(
       VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.34, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.86);
@@ -937,6 +955,8 @@ export class Game {
     this.drawPopups();
     g.restore();
 
+    this.bloom();
+
     g.fillStyle = this.vignette;
     g.fillRect(0, 0, VIEW_W, VIEW_H);
 
@@ -976,11 +996,35 @@ export class Game {
       g.fillRect(px(b.x), px(Math.max(lo, b.y)),
         px(b.w), px(Math.min(hi, b.y + b.h) - Math.max(lo, b.y)));
       if (lo > b.y && lo < b.y + b.h) {
-        g.strokeStyle = "rgba(200,235,255,0.09)";
+        // AN INTERFACE BETWEEN TWO FLUIDS, not a line on a map. The waters
+        // either side have different densities and sound speeds — that is what
+        // makes them different waters — so light crossing here is refracted,
+        // and a co-flow boundary in a real channel is visible for exactly that
+        // reason. Drawn as a thin band that breathes rather than a dashed rule,
+        // brighter where the two waters differ more.
+        const above = mediumAt(run.world.medium, lo - 6e-6, CHANNEL_H);
+        const below = mediumAt(run.world.medium, lo + 6e-6, CHANNEL_H);
+        const jump = Math.min(1, Math.abs(below.c - above.c) / 320);
+        const y0 = px(lo);
+        const band = g.createLinearGradient(0, y0 - 7, 0, y0 + 7);
+        const a = (0.05 + jump * 0.16).toFixed(3);
+        band.addColorStop(0, "rgba(200,235,255,0)");
+        band.addColorStop(0.5, `rgba(210,240,255,${a})`);
+        band.addColorStop(1, "rgba(200,235,255,0)");
+        g.fillStyle = band;
+        g.fillRect(px(b.x), y0 - 7, px(b.w), 14);
+
+        // and the surface of it, rippling along its own length
+        g.strokeStyle = `rgba(220,245,255,${(0.10 + jump * 0.14).toFixed(3)})`;
         g.lineWidth = 1;
-        g.setLineDash([9, 7]);
-        g.beginPath(); g.moveTo(px(b.x), px(lo)); g.lineTo(px(b.x + b.w), px(lo)); g.stroke();
-        g.setLineDash([]);
+        g.beginPath();
+        const step = 14;
+        for (let sx = px(b.x); sx <= px(b.x + b.w); sx += step) {
+          const u = sx * 0.021 + this.t * 0.9;
+          const yy = y0 + Math.sin(u) * 1.6 + Math.sin(u * 0.37 + 1.7) * 1.1;
+          if (sx === px(b.x)) g.moveTo(sx, yy); else g.lineTo(sx, yy);
+        }
+        g.stroke();
       }
     }
 
@@ -1132,19 +1176,38 @@ export class Game {
       this.envY[j] = Math.exp(-(d * d) / f2);
     }
 
+    // THE FIELD HAS A SIGN AND THIS USED TO THROW IT AWAY. It drew
+    // |cos(kx)cos(ky)|, so a pressure node and an antinode came out the same
+    // colour — which is half of what a standing wave is, and precisely the half
+    // that decides where anything ends up. This file has had two colours for
+    // that distinction since it was written and the field used neither.
+    //
+    // Drawn signed, the checkerboard is the actual structure: the cells where
+    // the two axes agree and the cells where they fight. A body with positive
+    // contrast goes to one of them and a body with negative contrast to the
+    // other, which is the whole bestiary in one picture.
+    //
+    // And it warms. The water's temperature is tracked now, so the field is
+    // tinted by it — not a mood, the same number that halves the viscosity and
+    // moves everything a third faster.
     const data = this.wash.data;
     const gain = 0.05 + lit * 0.4;
-    const cr = w.inverted ? 190 : 70;
-    const cg = w.inverted ? 90 : 150;
-    const cb = w.inverted ? 150 : 200;
+    const heat = Math.min(1, Math.max(0, (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C)));
+    // node cyan and antinode rose, pulled toward ember as the water heats
+    const nr = 70 + heat * 150, ng = 150 - heat * 40, nb = 200 - heat * 90;
+    const ar = 200 + heat * 40, ag = 95 - heat * 20, ab = 150 - heat * 60;
     let o = 0;
     for (let j = 0; j < WASH_H; j++) {
       const cy = this.cosY[j];
       const ey = this.envY[j];
       for (let i = 0; i < WASH_W; i++) {
-        const p = Math.abs(this.cosX[i] * cy);
+        const sgn = this.cosX[i] * cy;
+        const p = Math.abs(sgn);
+        const up = w.inverted ? sgn < 0 : sgn >= 0;
         const v = 0.022 + p * gain * this.envX[i] * ey;
-        data[o] = cr; data[o + 1] = cg; data[o + 2] = cb;
+        data[o] = up ? nr : ar;
+        data[o + 1] = up ? ng : ag;
+        data[o + 2] = up ? nb : ab;
         data[o + 3] = (Math.min(1, v) * 255) | 0;
         o += 4;
       }
@@ -1643,6 +1706,64 @@ export class Game {
    * here is decoration — every mark is `currentAt` sampled at that spot, which
    * is the same function that moves you and everything else.
    */
+  /**
+   * What the water is doing to the light.
+   *
+   * NOT A FILTER OVER A GAME. Everything bright on this screen is bright
+   * because energy is being put into it — the field where the drive is
+   * strongest, a node holding a body, a building discharging, a king winding
+   * up — and light spilling off those is what an intense field looks like
+   * through a fluid. So the glow is taken from the frame that was just drawn
+   * and added back, which means it can only ever say what was already there.
+   *
+   * It answers to the drive, because the energy density does: `w.amplitude`
+   * over its maximum, the same p^2 quantity the stamina cost, the streaming
+   * speed and the heating all go as. Gripping does not merely move you faster,
+   * it makes the water blaze.
+   *
+   * Taken before the vignette and the HUD, so the interface stays crisp and
+   * only the world blooms.
+   */
+  /**
+   * Whether this browser can blur on a canvas.
+   *
+   * Checked rather than assumed, because the failure is not "no glow" — an
+   * unsupported `filter` is silently ignored, and the bloom would then add a
+   * sharp copy of the frame on top of itself and wash the whole screen out.
+   * Worse than not having it.
+   */
+  private readonly canBlur: boolean = (() => {
+    try {
+      const c = document.createElement("canvas").getContext("2d");
+      if (!c) return false;
+      c.filter = "blur(2px)";
+      return c.filter !== "none" && c.filter !== "";
+    } catch { return false; }
+  })();
+
+  private bloom(): void {
+    if (!this.canBlur) return;
+    const g = this.ctx;
+    const gc = this.glowCtx;
+    const w = this.run.wave;
+    const lit = w.maxAmplitude > 0 ? w.amplitude / w.maxAmplitude : 0;
+
+    gc.globalCompositeOperation = "source-over";
+    gc.clearRect(0, 0, GLOW_W, GLOW_H);
+    // brightness first so the dark stays dark and only the lit smears; the blur
+    // radius is in buffer pixels, so it is three times this on screen.
+    gc.filter = "brightness(1.35) saturate(1.2) blur(4px)";
+    gc.drawImage(this.canvas, 0, 0, VIEW_W, VIEW_H, 0, 0, GLOW_W, GLOW_H);
+    gc.filter = "none";
+
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    g.globalAlpha = 0.30 + lit * 0.34;
+    g.imageSmoothingEnabled = true;
+    g.drawImage(this.glowCanvas, 0, 0, GLOW_W, GLOW_H, 0, 0, VIEW_W, VIEW_H);
+    g.restore();
+  }
+
   private drawCurrent(): void {
     const run = this.run;
     if (run.world.current <= 0) return;
