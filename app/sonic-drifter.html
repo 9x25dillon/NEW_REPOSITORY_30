@@ -3639,6 +3639,7 @@
       const frame = (now) => {
         let dt = (now - this.last) / 1e3;
         this.last = now;
+        if (!Number.isFinite(dt) || dt < 0) dt = 0;
         if (dt > 0.05) dt = 0.05;
         if (this.hitstop > 0) {
           this.hitstop -= dt;
@@ -4523,7 +4524,8 @@
       const caught = catches(run.gap, b.omega);
       const rgb = caught ? "160,255,214" : "190,170,255";
       for (let i = 0; i < 4; i++) {
-        const phase = (this.t * (1.1 + near * 3.4) + i * 0.25) % 1;
+        const raw = (this.t * (1.1 + near * 3.4) + i * 0.25) % 1;
+        const phase = raw < 0 ? raw + 1 : raw;
         g2.strokeStyle = `rgba(${rgb},${((1 - phase) * (0.16 + near * 0.4)).toFixed(3)})`;
         g2.lineWidth = 1.4;
         g2.beginPath();
@@ -4659,7 +4661,8 @@
           const f = u / run.world.current;
           if (f < 0.06) continue;
           const ux = c.x / u, uy = c.y / u;
-          const ph = (this.t * 0.34 + (sx * 7 + sy * 13) * 7e-4) % 1;
+          const rawPh = (this.t * 0.34 + (sx * 7 + sy * 13) * 7e-4) % 1;
+          const ph = rawPh < 0 ? rawPh + 1 : rawPh;
           const travel = gap * 0.8;
           const cx = sx + ux * (ph - 0.5) * travel;
           const cy = sy + uy * (ph - 0.5) * travel;
@@ -4690,12 +4693,12 @@
         Math.abs((VIEW_W / 2 - inset) / Math.cos(a)),
         Math.abs((VIEW_H / 2 - inset) / Math.sin(a))
       );
-      const mx2 = cx + Math.cos(a) * d, my = cy + Math.sin(a) * d;
+      const markX = cx + Math.cos(a) * d, markY = cy + Math.sin(a) * d;
       const awake = k.awake && k.hp > 0;
       const rgb = awake ? "255,90,90" : "255,201,74";
       const pulse = 0.55 + 0.45 * Math.sin(this.t * (awake ? 6 : 2.4));
       g2.save();
-      g2.translate(mx2, my);
+      g2.translate(markX, markY);
       g2.rotate(a);
       g2.fillStyle = `rgba(${rgb},${pulse.toFixed(2)})`;
       g2.beginPath();

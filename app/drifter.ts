@@ -571,6 +571,16 @@ export class Game {
     const frame = (now: number) => {
       let dt = (now - this.last) / 1000;
       this.last = now;
+      // CLAMPED AT BOTH ENDS. It was only clamped above. `this.last` is seeded
+      // from performance.now() while `now` is the rAF timestamp, and those can
+      // arrive out of order — one negative frame is enough to make `this.t`
+      // negative, and a negative time is not a small error here: JavaScript's %
+      // returns a NEGATIVE remainder for a negative operand, so every animation
+      // phase written as `(t * k) % 1` goes negative with it. drawBound turns
+      // one of those straight into a radius, and the canvas threw:
+      //   DOMException: CanvasRenderingContext2D.arc: Negative radius
+      // A negative dt would also have stepped the whole simulation backwards.
+      if (!Number.isFinite(dt) || dt < 0) dt = 0;
       if (dt > 0.05) dt = 0.05;
       if (this.hitstop > 0) { this.hitstop -= dt; this.decay(dt); }
       else this.update(dt);
@@ -1508,7 +1518,11 @@ export class Game {
     const rgb = caught ? "160,255,214" : "190,170,255";
 
     for (let i = 0; i < 4; i++) {
-      const phase = (this.t * (1.1 + near * 3.4) + i * 0.25) % 1;
+      // Wrapped into [0,1) rather than left to `%`, which is signed. This is
+      // the arc that threw; the radius below is 8 + phase * 34 and a phase of
+      // -0.3 is a circle with a negative radius, which the canvas refuses.
+      const raw = (this.t * (1.1 + near * 3.4) + i * 0.25) % 1;
+      const phase = raw < 0 ? raw + 1 : raw;
       g.strokeStyle = `rgba(${rgb},${((1 - phase) * (0.16 + near * 0.4)).toFixed(3)})`;
       g.lineWidth = 1.4;
       g.beginPath(); g.arc(x, y, 8 + phase * 34, 0, Math.PI * 2); g.stroke();
@@ -1650,7 +1664,8 @@ export class Game {
         const ux = c.x / u, uy = c.y / u;
         // A mark that slides along its own direction and fades at both ends, so
         // the eye reads a flow rather than a grid.
-        const ph = ((this.t * 0.34 + (sx * 7 + sy * 13) * 0.0007) % 1);
+        const rawPh = (this.t * 0.34 + (sx * 7 + sy * 13) * 0.0007) % 1;
+        const ph = rawPh < 0 ? rawPh + 1 : rawPh;
         const travel = gap * 0.8;
         const cx = sx + ux * (ph - 0.5) * travel;
         const cy = sy + uy * (ph - 0.5) * travel;
@@ -1685,14 +1700,14 @@ export class Game {
       Math.abs((VIEW_W / 2 - inset) / Math.cos(a)),
       Math.abs((VIEW_H / 2 - inset) / Math.sin(a)),
     );
-    const mx = cx + Math.cos(a) * d, my = cy + Math.sin(a) * d;
+    const markX = cx + Math.cos(a) * d, markY = cy + Math.sin(a) * d;
 
     const awake = k.awake && k.hp > 0;
     const rgb = awake ? "255,90,90" : "255,201,74";
     const pulse = 0.55 + 0.45 * Math.sin(this.t * (awake ? 6 : 2.4));
 
     g.save();
-    g.translate(mx, my);
+    g.translate(markX, markY);
     g.rotate(a);
     g.fillStyle = `rgba(${rgb},${pulse.toFixed(2)})`;
     g.beginPath();
