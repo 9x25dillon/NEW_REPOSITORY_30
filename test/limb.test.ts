@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { bodiesOf, joined, limbsOf, reaches } from "../game/body.js";
+import { bodiesOf, growable, joined, limbsOf, reaches } from "../game/body.js";
 import { structureFrom } from "../game/world.js";
 import { lobes } from "../game/shape.js";
 
@@ -15,9 +15,10 @@ function at(hm: string, i: number, j: number, layer = 0) {
 
 test("a limb runs along a direction the body's own symmetry has", () => {
   // Not a design decision. shape.lobes is the orbit of a horizontal vector
-  // under the group's operations, so a 222 has two directions to grow in and a
-  // 622 has six — the same rule that decides where a building fires and how a
-  // king throws its arms, spent a third time.
+  // under the group's operations, and `growable` is the part of that orbit the
+  // square trap lattice will actually seat — the same rule that decides which
+  // way a body may walk, spent a second time. (A building's own firing arms are
+  // the full orbit: a released field is not standing on a site.)
   const east = lobes("222").some(([x, y]) => x > 0.9 && Math.abs(y) < 0.1);
   assert.ok(east, "a 222 distinguishes east, which is what this test grows in");
 
@@ -49,8 +50,17 @@ test("a chain running where the symmetry has no direction is a lump", () => {
   }
 });
 
-test("a sixfold body has more directions to grow in than a twofold", () => {
-  assert.ok(lobes("622").length > lobes("222").length * 2);
+test("a sixfold CELL throws more lobes — and a sixfold BODY does not", () => {
+  // These are two different questions and this test asked only the first for
+  // two months, under a title that answered the second. A cell's lobes are the
+  // field it fires, which stands on nothing and keeps all six. A body's growth
+  // lands on a site, and a six-fold axis does not map a square net onto itself.
+  assert.ok(lobes("622").length > lobes("222").length * 2,
+    "the cell's own field throws six where a 222 throws two");
+  assert.equal(growable("622").length, growable("222").length,
+    "but on this lattice both bodies grow in two directions");
+  assert.ok(growable("422").length > growable("622").length,
+    "and the tetragonal cell, seated whole, beats it");
 });
 
 // ── legs ────────────────────────────────────────────────────────────────────

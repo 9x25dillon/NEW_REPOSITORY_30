@@ -15,13 +15,15 @@
 // structure does, which the bound field already depended on and which was
 // previously at the mercy of how steady your hand was.
 //
-// AND IT HAS A NAME. src/sohncke.ts has known the 65 space groups a chiral
-// world permits since before this game existed, and has never once been used by
-// it. A body's point group is the most symmetric cell in it, exactly as a
-// sovereign's is; on a primitive lattice that point group names a space group,
-// and that is what you have made. P622 is not decoration — it is the answer to
-// "what did I just build", in the vocabulary the rest of the repository already
-// speaks.
+// AND IT HAS A NAME — BUT NOT THE ONE IT WAS CLAIMING. src/sohncke.ts has known
+// the 65 space groups a chiral world permits since before this game existed. A
+// body's point group is the most symmetric cell in it, exactly as a sovereign's
+// is, and on a primitive lattice a point group names a space group. What was
+// missing is that a point group has to leave the LATTICE where it was, and a
+// six-fold axis does not map a square net onto itself. So a body of 622 cells
+// was being called P622 — a hexagonal space group, on a lattice that cannot
+// hold one, drawn on the surface as if it were an answer. `seatedGroup` is the
+// correction and P222 is the name; see it for what the square net keeps.
 //
 // The lattice pitch is the spacing this water's bound field needs, so building a
 // properly-made body and freeing the trapped field stop being two problems. They
@@ -30,12 +32,13 @@
 import { type Structure } from "./world.js";
 import { SKELETON } from "./bound.js";
 import { cellFor } from "./lattice.js";
-import { lobes } from "./shape.js";
+import { type Dir, lobes } from "./shape.js";
 import { type Wave, axisX } from "./wave.js";
 import { type Particle } from "../src/gorkov.js";
 import { maxSweepSpeed } from "../src/trajectory.js";
 import { viscosity } from "./thermal.js";
 import { pointGroup } from "../src/pointgroups.js";
+import { type Mat3, operations } from "../src/symmetry.js";
 import { type SpaceGroup, groupsOfPointGroup } from "../src/sohncke.js";
 
 /** Where the lattice of a world is pinned. Arbitrary, and the same all game. */
@@ -56,6 +59,110 @@ export function snap(x: number, y: number, pitch: number): { x: number; y: numbe
     x: ORIGIN.x + Math.round((x - ORIGIN.x) / pitch) * pitch,
     y: ORIGIN.y + Math.round((y - ORIGIN.y) / pitch) * pitch,
   };
+}
+
+// ── what the lattice will carry ─────────────────────────────────────────────
+
+/**
+ * Does this operation of a point group map the TRAP LATTICE onto itself?
+ *
+ * A crystal's point group is not whatever you would like it to be. It is the
+ * subgroup of the motif's symmetry that also leaves the lattice where it was —
+ * that is what makes a lattice-plus-motif a crystal rather than two claims
+ * side by side. So the question has an answer, and `src/symmetry.ts` has been
+ * holding the matrices to compute it since before the game existed.
+ *
+ * THE LATTICE IS SQUARE AND IT COULD NOT BE ANYTHING ELSE. `wave.ts` crosses
+ * two orthogonal SSAWs, which gives a separable potential U(x,y) = U_x(x) +
+ * U_y(y), and a square grid of pressure nodes falls out of that. It is the
+ * device, not a level layout: you cannot tilt it, and there is no third wave.
+ *
+ * So an operation survives on two counts. It must keep z to +-z and not trade a
+ * layer for an in-plane step — the layers are the channel's harmonics and their
+ * spacing is nothing like the in-plane pitch — and its in-plane block must send
+ * both basis vectors onto lattice vectors, which for a square net means the
+ * entries are whole numbers.
+ */
+function seats(m: Mat3): boolean {
+  const whole = (v: number) => Math.abs(v - Math.round(v)) < 1e-9;
+  if (Math.abs(Math.abs(m[2][2]) - 1) > 1e-9) return false;
+  if (Math.abs(m[0][2]) > 1e-9 || Math.abs(m[1][2]) > 1e-9) return false;
+  if (Math.abs(m[2][0]) > 1e-9 || Math.abs(m[2][1]) > 1e-9) return false;
+  return whole(m[0][0]) && whole(m[0][1]) && whole(m[1][0]) && whole(m[1][1]);
+}
+
+/** The highest proper rotation about the view axis in a set of operations. */
+function zOrder(ops: readonly Mat3[]): number {
+  let best = 1;
+  for (const m of ops) {
+    if (m[2][2] < 0) continue;                 // a 2-fold lying IN the plane
+    const ang = Math.abs(Math.atan2(m[1][0], m[0][0]));
+    const n = ang < 1e-9 ? 1 : Math.round((Math.PI * 2) / ang);
+    if (Number.isFinite(n) && n <= 6) best = Math.max(best, n);
+  }
+  return best;
+}
+
+const SEAT_CACHE = new Map<string, string>();
+
+/**
+ * The group a cell is SEATED as once it stands on the trap lattice.
+ *
+ * This is the crystallographic restriction theorem, which this repository
+ * already knows in its other form — a five-fold motif joins nothing, ever — and
+ * had never once applied to a BODY. A three- or six-fold axis does not map a
+ * square net onto itself, so a 622 standing on this lattice is not a 622: the
+ * operations that survive are the identity and three 2-folds, and the honest
+ * name for what you built is 222.
+ *
+ * Every seated group is a subgroup of the square net's own chiral symmetry, so
+ * the answer is always one of five — 1, 2, 222, 4, 422 — and each of those is a
+ * primitive Sohncke group the library can name. What you FED it is unchanged
+ * and still decides its mass; what the lattice lets it BE is this.
+ *
+ * The pay-off is a rule that is both true and the opposite of what a player
+ * will assume. A 622 is the most symmetric thing you can build and seats as a
+ * 222; a plain 4 keeps all four of its arms. Order is not the only axis of
+ * worth any more, and nobody chose that — the lattice did.
+ *
+ * Setting: `symmetry.ts` puts the unique axis on z throughout, so a group that
+ * seats onto a single in-plane 2-fold (a 32 does) is named "2" here, which is
+ * that group in a different setting. Its header says at length why comparing
+ * across settings is safe for counts and not for patterns; this is a count.
+ */
+export function seatedGroup(hm: string): string {
+  let hit = SEAT_CACHE.get(hm);
+  if (hit !== undefined) return hit;
+  const kept = operations(hm).filter(seats);
+  hit = kept.length >= 8 ? "422"
+    : kept.length === 4 ? (zOrder(kept) === 4 ? "4" : "222")
+    : kept.length >= 2 ? "2"
+    : "1";
+  SEAT_CACHE.set(hm, hit);
+  return hit;
+}
+
+/**
+ * The directions a body of this group can actually GROW along, and WALK along.
+ *
+ * `shape.lobes` answers for the cell's own symmetry, which is the right answer
+ * for the one thing that does not touch the lattice: a building FIRES a
+ * released field, and a released field is not standing on anything. Growth and
+ * walking both put a cell on a SITE — `placeCell` snaps, and `walkBodies` steps
+ * `Math.round(dir)` times the pitch, one lattice site at a time — so those two
+ * are the lattice's business and this is what it will allow.
+ *
+ * It had that say already, silently and for the wrong reason. A chain toward a
+ * 60-degree lobe has to zigzag, every corner of a zigzag is diagonally adjacent
+ * to the cell two back, `joined` counts that as a neighbour, and so the tip
+ * comes out with degree 2 and `computeLimbs` never sees it. Measured across all
+ * eleven groups, the arms a body could actually grow were exactly the lobes
+ * lying on the lattice's own directions — which is to say the seated group's —
+ * in ten cases out of eleven. This says it on purpose instead, and the eleventh
+ * (a 23, which was growing four arms where its seated 222 has two) now agrees.
+ */
+export function growable(hm: string): Dir[] {
+  return lobes(seatedGroup(hm));
 }
 
 export interface Body {
@@ -215,7 +322,7 @@ function computeLimbs(body: Body, pitch: number): Limb[] {
     degree.set(a, n);
   }
 
-  const dirs = lobes(body.hm);
+  const dirs = growable(body.hm);
   const out: Limb[] = [];
 
   for (const tip of cells) {
@@ -360,10 +467,23 @@ export function walkSpeed(
 /**
  * Which way a body may step.
  *
- * Along the directions its own symmetry has, and no others — the same rule that
- * decides where it may grow a limb and where a building may fire. A 222 walks
- * east and west. Nothing walks diagonally unless its group says diagonals
- * exist.
+ * Along the directions its own symmetry has, and no others. A 222 walks east
+ * and west. Nothing walks diagonally unless its group says diagonals exist.
+ *
+ * THE SEATED DIRECTIONS, because a step lands on a SITE. `walkBodies` takes
+ * `Math.round(dir)` and multiplies by the pitch — "one lattice site at a time"
+ * — so a direction the square net does not have was never actually walked, it
+ * was silently rounded onto one that it does. A 622 asked to follow along its
+ * 60-degree lobe stepped 45; asked along its 120 it stepped due north. Both are
+ * directions a 622 does not have, which is the exact thing this function exists
+ * to refuse.
+ *
+ * So growth and walking are under the same rule for the same reason — both put
+ * a cell on a site — and only FIRING is free of the lattice, because a released
+ * field is not standing on anything. That is rule 5 with the lattice's half of
+ * it filled in, and it gives the tetragonal cells the job they never had: a 4
+ * or a 422 follows you in four directions where a 622, for all its order, seats
+ * as a 222 and manages two.
  */
 export function gaitDirection(body: Body, tx: number, ty: number): [number, number] | null {
   const dx = tx - body.x;
@@ -373,7 +493,7 @@ export function gaitDirection(body: Body, tx: number, ty: number): [number, numb
 
   let best: [number, number] | null = null;
   let bestDot = -Infinity;
-  for (const [lx, ly] of lobes(body.hm)) {
+  for (const [lx, ly] of growable(body.hm)) {
     const dot = (lx * dx + ly * dy) / r;
     if (dot > bestDot) { bestDot = dot; best = [lx, ly]; }
   }
@@ -397,7 +517,13 @@ export function largest(bodies: readonly Body[]): Body | null {
  */
 export function symbolOf(body: Body): SpaceGroup | null {
   if (body.cells.length < 3) return null;
-  const all = groupsOfPointGroup(body.hm);
+  // THE GROUP THE LATTICE WILL CARRY, not the one you fed it. A body of 622
+  // cells on a square net was being called P622, which is a hexagonal space
+  // group and cannot exist on this lattice — the standing rule here is that
+  // everything drawn is already true, and that was drawn on the surface, in the
+  // body panel and in the player's own report. It is P222, and `seatedGroup`
+  // says why.
+  const all = groupsOfPointGroup(seatedGroup(body.hm));
   if (all.length === 0) return null;
   return all.find((g) => g.lattice === "P" && g.screws.length === 0) ?? all[0];
 }

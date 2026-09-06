@@ -46,7 +46,7 @@ it is which claim just leaked into which.**
 branch   main   (pushed to origin/main 2026-09-02, through eleven play reports,
                 an aeon-6 run and a killed 432; the repo is PRIVATE, which is what
                 config/subject.ts assumes — check before that ever changes)
-tests    302, all passing
+tests    305, all passing
 serve    python3 -m http.server on app/ WITH no-store headers — a plain
          http.server let a browser cache a build and cost a whole play session
          debugging code that had already been fixed
@@ -68,10 +68,10 @@ DOM so `src/` cannot reach for a browser; `tsconfig.build.json` covers `app/`.
 | `game/pilot.ts` | you: a 9 µm lipid particle. The stick is a trap *offset*, not a velocity. Grip is apodisation. The dash is the amplifier's peak rating |
 | `game/beasts.ts` | four bodies, told apart only by contrast factor |
 | `game/lattice.ts` | the 11 chiral cells, the recipes, `optionsFor()` |
-| `game/shape.ts` | what a point group looks like from above — used for firing arcs, king volleys, *and* which way a limb may grow |
+| `game/shape.ts` | what a point group looks like from above — firing arcs and king volleys, which stand on nothing and keep the full orbit |
 | `game/world.ts` | worlds, sovereigns, what is born from a body |
 | `game/bound.ts` | the other field: a mode trapped in a band gap. `workableSpacing()` inverts the objective into microns |
-| `game/body.ts` | the lattice, what is joined to what, its space group, limbs, legs, gait |
+| `game/body.ts` | the lattice, what is joined to what, its space group, limbs, legs, gait — and `seatedGroup`/`growable`, the part of a cell's symmetry a square net will carry, which is what decides growth and walking |
 | `game/depth.ts` | the channel's harmonics. Mode *n* puts *n* node planes in the fluid |
 | `game/streams.ts` | laminar co-flow: the channel carries three waters, not one |
 | `game/chip.ts` | what is etched into the glass — sharp edges, bubble cavities — and the streaming that comes off it. The only thing in the game older than the current world. A cavity collects, an edge pumps, and both have a job |
@@ -95,7 +95,11 @@ These are not preferences. Breaking one breaks something else two modules away.
 4. **Everything dies by being held** — including the sovereign, which is worked
    on rather than trapped because it is 38 µm across against a 44 µm lattice.
 5. **A body can only grow, fire, or walk along the directions its own point
-   group has.** `shape.lobes()` decides all three.
+   group has — AND THE LATTICE GETS A SAY IN TWO OF THE THREE.** Growth and
+   walking put a cell on a SITE, so they go through `body.growable()`, which is
+   the group the square trap lattice will actually seat. Firing does not stand
+   on anything, so it keeps the cell's full orbit and goes through
+   `shape.lobes()`. A 622 fires six arms and grows two.
 6. **The chip is not run state.** `CHIP` is a module constant in `run.ts`, not a
    field on `Run`. Everything on `Run` is born with a world and dies with it;
    the channel is the glass all of them happen inside. Put the chip on the run
@@ -187,7 +191,19 @@ These are not preferences. Breaking one breaks something else two modules away.
    For a long time they were not, and `underStructure` and `drift` both test
    `serves`: a building went on holding the plane it used to be on until the
    next place or lift, 19 to 26 times a run.
-22. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
+22. **A square net will not seat a three- or six-fold axis.** The trap lattice
+   is square because `wave.ts` crosses two orthogonal SSAWs and a separable
+   potential U(x,y) = U_x(x) + U_y(y) has a square grid of nodes. It is the
+   device: there is no third wave and no way to tilt it. So a crystal's point
+   group is the part of the cell's symmetry that also leaves the LATTICE where
+   it was — `seatedGroup` computes it from `src/symmetry.ts`'s matrices — and
+   the answer is always one of five: 1, 2, 222, 4, 422. This is the
+   crystallographic restriction theorem, which the game already spent on motifs
+   (a pentamer joins nothing, ever), applied one level up to a BODY. The rule it
+   buys is true and the opposite of what a player assumes: **a 622 seats as a
+   222 and grows two arms; a plain 4 keeps all four.** Order stops being the
+   only axis of worth, and the tetragonal cells finally have a job.
+23. **`mergePass` is a grid of exactly `BIND_RADIUS`.** That pitch is what makes
    the nine-square lookup complete — every possible partner is in it and nothing
    else can be. If you change `BIND_RADIUS`, the grid follows it automatically;
    if you change the grid's pitch independently, motes stop finding each other
@@ -334,6 +350,46 @@ measuring did. Every one of these was invisible until somebody played:
 
 ### What is still open
 
+- ~~**The king could not be killed.**~~ MEASURED AND ANSWERED 2026-09-05, from a
+  play report: 330 s, aeon 1, three discharges, **all three landed**
+  (`sovereign-hit 3`), king finished on 251 of 510, player dead. Their words:
+  "it wouldnt die".
+
+  It dies. A bot that cannot be killed kills it every seed in 97-129 s on 7-8
+  discharges, and a mortal bot that dodges the telegraph got it to 38, 40 and
+  126 of 510 before dying. What was wrong was the only number the game had ever
+  shown them. **`dischargesToKill` quoted the MUZZLE**, and defended it in a
+  comment as "the one you can achieve" — but the muzzle lies inside
+  `DEVOUR_REACH`, so collecting it means standing the building inside the radius
+  the king eats buildings from. It was quoting a price payable only by losing
+  the gun. It counts at the edge of safety now: **the player was told 3 for a
+  full bar that needed 5**, and told 2 at the end when the true answer was 3.
+
+  Two things worth keeping from the measurement:
+
+  - **Every death is a volley.** Nine bot runs, every configuration, 100 per
+    cent `hit:volley` — no beast, no contact. The report agrees (4 volley, 2
+    struck). The open item below is now answered: the volley IS the fight.
+  - **The obvious knobs are not the lever, and the sweep says so.** Capping
+    `chargeTime` under the cadence floor made it WORSE (king finished on
+    147/95/246 against a baseline of 38/40/126); raising the cadence floor
+    1.15 -> 1.9 s did nothing (47/108/243). The bot takes exactly six volleys
+    and dies whatever the rates are. Do not rebalance those two on a hunch —
+    they have been tried.
+
+  Still unspent, and the biggest thing the report shows: **the player never used
+  the hand.** `wearing` fired twice in 330 s, which is a third of a second, and
+  a bare hand takes `2 * freedom` hp/s off a king — for the 23 they crowned that
+  is 2 hp/s, so there was more health in the hand they never closed than in the
+  whole king. About a third of the bot's kill was wear. The diagnosis line says
+  so now.
+
+- **Feeding a 23 is worse than it looks, and nothing says so.** Its freedom is
+  1, so the hand does 2 hp/s against it — the second-worst handle in the game,
+  with only 432 (no handle at all) below it. It also throws four arms, and mass
+  48 puts the volley at the 1.15 s floor. The `anchored` lesson warns about 432.
+  Nothing warns about this.
+
 - **Volleys are still most of what lands.** Latest reports: `hit:struck` 1 to 4
   against `hit:volley` 6 to 16. With a pad the player dodges beasts almost
   perfectly and the king's arms are nearly the only thing reaching them. Whether
@@ -343,11 +399,62 @@ measuring did. Every one of these was invisible until somebody played:
   that feeding buys inheritance. `devour` scales with it — a 2730 hp king ate 26
   buildings and healed about 470 back. Where that stops being worth it is
   unknown.
-- **Limbs still depend on nothing.** Reports show 0, 1, 2, 3, 6 and 7 limbs with
-  no consequence. A limb needs a cell with exactly one neighbour, so building
-  solid grows none, and nothing rewards building otherwise. `Cell.ability`
-  (thrust / weave / anchor) is read in exactly one place; the chip gives
-  `anchor` an obvious job it has never had.
+- **Limbs now DEPEND on something, and still BUY nothing.** Half of this closed
+  2026-09-05 and the half that is left is the more interesting one.
+
+  What closed: which limbs a body can grow was never the player's choice and
+  never the group's either — it was an accident of the lattice. A chain toward a
+  60-degree lobe has to zigzag, every corner of a zigzag is diagonally adjacent
+  to the cell two back, `joined` counts that, so the tip came out degree-2 and
+  `computeLimbs` never saw it. Measured across all eleven groups, the arms a
+  body could actually grow were exactly the lobes lying on the square net's own
+  directions — which is the seated group's. It says so on purpose now
+  (`growable`), and building a 622 body versus a 422 body is a real decision:
+  the same fifteen cells make a two-limbed creature or a four-limbed one.
+
+  **The reward already exists, and it was never visible.** This was measured on
+  2026-09-05 at a bubble cavity, same 23 cells built two ways, 7 seeds, 180 s,
+  hands off, and it is the most useful number in this file:
+
+  | trunk standoff | slab | arm |
+  | --- | --- | --- |
+  | 200 um — the trunk itself reaches the core | **58.4** merges / 16.9 cells | 48.4 / 13.3 |
+  | 340 um — only the arm reaches | 49.9 / 14.0 | **55.1 / 15.1** |
+
+  That is a real rule and a good one: **stand on the landmark if you can, and
+  grow an arm to it when you cannot.** It has been in the game since the chip
+  session and nothing has ever told the player, which is why reports show limbs
+  with no consequence — the consequence was there and unlabelled. It is also
+  WEAK: 5 of 7 seeds each way, with overlapping spreads. Strengthening it is a
+  live option; a cavity that concentrates harder would do it.
+
+  **AN AURA WAS BUILT FOR THIS AND THE MEASUREMENT THREW IT OUT. Do not build it
+  again.** The idea was the obvious one — `aura()` has claimed since it was
+  written to measure "how far its hold reaches beyond its own cells" and is read
+  by nothing — so limb cells were given a longer pull, over the aura, in the
+  annulus beyond the ordinary grab. It lost every single configuration:
+
+  | | slab | arm, no aura | arm, with aura |
+  | --- | --- | --- | --- |
+  | 200 um | 58.4 | 48.4 | **39.9** |
+  | 340 um | 49.9 | 55.1 | **38.4** |
+
+  It cost the arm nearly two thirds of its cells at 340 um (15.1 -> 5.9). The
+  reason is worth keeping because it rules out a whole family of ideas: **a
+  merge needs two motifs within BIND_RADIUS OF EACH OTHER**, so what makes a
+  farm is CONCENTRATION, and a long-range pull toward many scattered arm
+  hold-points is the opposite of concentrating. More water at lower density
+  makes fewer cells. Any reward of the form "an arm gathers over a wider area"
+  is fighting the merge rule and will lose to a slab.
+
+  So an arm should not be paid in farming at all — farming rewards being
+  compact, for sound reasons already in the code. What is still unspent:
+  `Cell.ability` is dropped by `structureFrom` the moment a cell becomes a
+  building, so thrust / weave / anchor survive only into the throne;
+  `Cell.blurb` says "shown in the inventory" and is shown nowhere; and `aura()`
+  itself is still dead, with a comment that disagrees with its body (it returns
+  `extent + ...`, a radius from the CENTRE, which is not "beyond its own
+  cells").
 - **P432 has been crowned and killed** — order 24, no drivable piezoelectric
   component, `wearing` nearly useless against it, only buildings can reach it.
   It works. Whether it is *good* has not been thought about.

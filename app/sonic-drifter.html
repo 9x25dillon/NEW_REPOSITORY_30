@@ -1194,6 +1194,35 @@
       y: ORIGIN.y + Math.round((y - ORIGIN.y) / pitch) * pitch
     };
   }
+  function seats(m) {
+    const whole = (v) => Math.abs(v - Math.round(v)) < 1e-9;
+    if (Math.abs(Math.abs(m[2][2]) - 1) > 1e-9) return false;
+    if (Math.abs(m[0][2]) > 1e-9 || Math.abs(m[1][2]) > 1e-9) return false;
+    if (Math.abs(m[2][0]) > 1e-9 || Math.abs(m[2][1]) > 1e-9) return false;
+    return whole(m[0][0]) && whole(m[0][1]) && whole(m[1][0]) && whole(m[1][1]);
+  }
+  function zOrder(ops) {
+    let best = 1;
+    for (const m of ops) {
+      if (m[2][2] < 0) continue;
+      const ang = Math.abs(Math.atan2(m[1][0], m[0][0]));
+      const n = ang < 1e-9 ? 1 : Math.round(Math.PI * 2 / ang);
+      if (Number.isFinite(n) && n <= 6) best = Math.max(best, n);
+    }
+    return best;
+  }
+  var SEAT_CACHE = /* @__PURE__ */ new Map();
+  function seatedGroup(hm) {
+    let hit = SEAT_CACHE.get(hm);
+    if (hit !== void 0) return hit;
+    const kept = operations(hm).filter(seats);
+    hit = kept.length >= 8 ? "422" : kept.length === 4 ? zOrder(kept) === 4 ? "4" : "222" : kept.length >= 2 ? "2" : "1";
+    SEAT_CACHE.set(hm, hit);
+    return hit;
+  }
+  function growable(hm) {
+    return lobes(seatedGroup(hm));
+  }
   function joined(a, b, pitch) {
     const d = Math.hypot(b.x - a.x, b.y - a.y);
     const dz = Math.abs(b.layer - a.layer);
@@ -1267,7 +1296,7 @@
       }
       degree.set(a, n);
     }
-    const dirs = lobes(body.hm);
+    const dirs = growable(body.hm);
     const out = [];
     for (const tip of cells) {
       if ((degree.get(tip) ?? 0) !== 1) continue;
@@ -1346,7 +1375,7 @@
     if (r < 1e-9) return null;
     let best = null;
     let bestDot = -Infinity;
-    for (const [lx, ly] of lobes(body.hm)) {
+    for (const [lx, ly] of growable(body.hm)) {
       const dot = (lx * dx + ly * dy) / r;
       if (dot > bestDot) {
         bestDot = dot;
@@ -1357,7 +1386,7 @@
   }
   function symbolOf(body) {
     if (body.cells.length < 3) return null;
-    const all = groupsOfPointGroup(body.hm);
+    const all = groupsOfPointGroup(seatedGroup(body.hm));
     if (all.length === 0) return null;
     return all.find((g2) => g2.lattice === "P" && g2.screws.length === 0) ?? all[0];
   }
@@ -2479,14 +2508,21 @@
     return "fed";
   }
   function dischargesToKill(run) {
-    const best = Math.max(
-      0,
-      ...run.structures.map((s) => s.strength),
-      ...run.cells.map((c) => structureFrom(-1, c.group.hm, 0, 0).strength)
-    );
+    let best = 0;
+    const hms = [
+      ...run.structures.map((s) => s.hm),
+      ...run.cells.map((c) => c.group.hm)
+    ];
+    for (const hm of hms) {
+      const s = structureFrom(-1, hm, 0, 0);
+      const range = s.reach * LOBE_RANGE;
+      if (range <= DEVOUR_REACH) continue;
+      const fall = 1 - DEVOUR_REACH / range;
+      best = Math.max(best, s.strength * DISCHARGE_GAIN * fall);
+    }
     if (best <= 0) return Infinity;
     const left = run.throne.awake ? Math.max(0, run.throne.hp) : run.throne.maxHp;
-    return Math.ceil(left / (best * DISCHARGE_GAIN));
+    return Math.ceil(left / best);
   }
   function placeCell(run, index) {
     if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
@@ -3295,6 +3331,11 @@
       title: "FIVE-FOLD TILES NOTHING",
       body: "THE CRYSTALLOGRAPHIC RESTRICTION THEOREM. A FIVE-FOLD AXIS GENERATES NO LATTICE, SO A PENTAMER JOINS NOTHING, EVER. SOME OF WHAT IS DISSOLVED IN A WATER IS SIMPLY NOT GOING TO WORK."
     },
+    seated: {
+      id: "seated",
+      title: "THE SAME THEOREM, ONE LEVEL UP",
+      body: "YOUR HAND IS TWO CROSSED STANDING WAVES, SO ITS NODES ARE A SQUARE GRID - AND A THREE- OR SIX-FOLD AXIS DOES NOT MAP A SQUARE GRID ONTO ITSELF. THE CELL KEEPS EVERY ARM IT FIRES. THE BODY DOES NOT: A 622 IS SEATED AS A 222 AND GROWS AND WALKS IN TWO DIRECTIONS. A 4 OR A 422 IS SEATED WHOLE AND KEEPS FOUR. ORDER IS NOT THE ONLY THING A CELL IS WORTH."
+    },
     crown: {
       id: "crown",
       title: "IT IS WHAT YOU FED IT",
@@ -3850,6 +3891,9 @@
             this.ring(ev.x, ev.y, 6, 70, 0.6, JADE);
             this.sfx.capture(2);
             this.say(`${ev.group} STANDS`);
+            if (run.bodies.some((b) => seatedGroup(b.hm) !== b.hm && b.cells.length >= 3)) {
+              this.teach("seated");
+            }
             break;
           case "fed":
             this.ring(run.throne.x, run.throne.y, 10, 60, 0.6, "255,201,74");
@@ -4516,8 +4560,10 @@
           g2.fillStyle = FAINT2;
           const limbs = limbsOf(body, pitch);
           const legs = limbs.filter((l) => l.leg).length;
+          const seated = seatedGroup(body.hm);
+          const group = seated === body.hm ? body.hm : `${body.hm}\u2192${seated}`;
           g2.fillText(
-            `${sym.pointGroup}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? `  \xB7  ${walkSpeed(body, run2.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
+            `${group}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? `  \xB7  ${walkSpeed(body, run2.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
             px(body.x),
             px(body.y - body.extent) - 5
           );
@@ -5722,6 +5768,14 @@
       if (run.throne.awake && run.structures.length > 4 && n("discharge") === 0) {
         return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";
       }
+      if (run.throne.awake && run.throne.hp > 0 && n("discharge") > 0) {
+        const need = dischargesToKill(run);
+        const rate = wearRate(run.throne);
+        if (rate > 0 && n("wearing") < 6) {
+          return `${n("discharge")} DISCHARGES IS NOT ENOUGH - IT NEEDS ${Number.isFinite(need) ? need : "MORE THAN YOU HAD"} MORE FROM WHERE YOU CAN STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES ${rate}/S OFF IT`;
+        }
+        return `${n("discharge")} DISCHARGES LANDED AND IT LIVED. GET THE KING ONTO A BUILDING - AN ARM IS WORTH DOUBLE AT ITS MUZZLE AND NOTHING AT ITS EDGE`;
+      }
       if (run.throne.fed.length === 0 && run.built > 20) {
         return "YOU NEVER FED THE THRONE. GATHERING IS NOT THE GAME - IT IS HOW YOU PAY FOR THE ONE THING THAT ENDS THIS WATER";
       }
@@ -5767,7 +5821,7 @@
           const l = limbsOf(run.bodies[0], latticePitch(run));
           const legs = l.filter((x) => x.leg).length;
           return ` limbs ${l.length - legs} legs ${legs}`;
-        })() : ""}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
+        })() : ""}${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"} fed ${run.bodies[0].hm} seated ${seatedGroup(run.bodies[0].hm)} grows ${growable(run.bodies[0].hm).length}${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
         `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}  crystal ${run.crystal ? `a=${(run.crystal.a * 1e6).toFixed(0)}um fill=${run.crystal.fill.toFixed(2)}` : "none"}  gap ${run.gap ? `${(run.gap.lo / 1e6).toFixed(1)}-${(run.gap.hi / 1e6).toFixed(1)}` : "none"}`,
         `water: ${run.entities.filter((e) => e.faction === "motif").length} standing of ${suspension(run)}${run.phase === "birth" ? " (next world's, pool not rebuilt)" : ""}; delivered ${run.delivered}; arrivals ${arrivalRate(run).toFixed(2)}/s; hunters allowed ${run.phase === "reign" ? "reign" : settleCap(run)}`,
         `heat: ${run.wave.tC.toFixed(1)}C (ambient ${AMBIENT_C})  viscosity x${(viscosity(run.wave.tC) / viscosity(AMBIENT_C)).toFixed(2)}  everything moves x${(viscosity(AMBIENT_C) / viscosity(run.wave.tC)).toFixed(2)}  water c=${waterAt(run, run.you.y).c.toFixed(0)}`,

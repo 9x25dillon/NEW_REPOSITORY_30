@@ -1287,6 +1287,46 @@ test("there is a distance where a building can hurt the king and survive it", ()
   }
 });
 
+test("the count it shows you is a price you can actually pay", () => {
+  // THE THIRD PLAY REPORT, and the reason this test exists. 330 s, three
+  // discharges, ALL THREE LANDED (sovereign-hit 3), and the king finished on
+  // 251 of 510 — while this readout had been answering TWO. The player's own
+  // words were that it "wouldn't die".
+  //
+  // The number was quoted AT THE MUZZLE and defended in a comment as "the one
+  // you can achieve". It is not: the muzzle is inside DEVOUR_REACH, so to
+  // collect it you have to stand the building inside the radius the king eats
+  // buildings from. It was quoting a price payable only by losing the gun —
+  // which is the very pair the test above exists to hold apart, read the other
+  // way round.
+  const run = startRun(77);
+  grant(run, ["23", "23", "23", "23"]);
+  stand(run, run.throne.x, run.throne.y);
+  for (let i = 0; i < 4; i++) feedThrone(run, 0);
+  crown(run);
+  grant(run, ["23"]);                       // something to shoot it with
+
+  const gun = structureFrom(-1, "23", 0, 0, 0);
+  const muzzle = gun.strength * DISCHARGE_GAIN;
+  const safe = muzzle * dischargeFalloff(gun, DEVOUR_REACH, 0);
+  assert.ok(safe < muzzle,
+    "the edge of safety is worth less than the muzzle, or there is no falloff");
+
+  const need = dischargesToKill(run);
+  assert.equal(need, Math.ceil(run.throne.hp / safe),
+    "it must count at the range where the building survives");
+  assert.ok(need > Math.ceil(run.throne.hp / muzzle),
+    `and that is strictly more than the muzzle count would claim`
+    + ` (${need} against ${Math.ceil(run.throne.hp / muzzle)})`);
+
+  // It still answers the question it was fixed to answer once before: a king
+  // ground most of the way down is a fight you can see the end of.
+  run.throne.hp = Math.round(safe) + 1;
+  assert.equal(dischargesToKill(run), 2, "nearly dead reads as nearly dead");
+  run.throne.hp = Math.round(safe) - 1;
+  assert.equal(dischargesToKill(run), 1, "one good shot from the end");
+});
+
 test("a long-lived water does not silt up with what cannot be used", () => {
   // THE SLOW FAULT THIS EXISTS TO CATCH, and it was invisible for the whole of
   // a fifteen-minute run. From the third aeon a water carries pentamers, and the

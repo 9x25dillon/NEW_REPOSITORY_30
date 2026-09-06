@@ -5,7 +5,9 @@ import {
   ARENA_H, ARENA_W, CHANNEL_H, CHANNEL_W, START, boundsFor, latticePitch, retune,
   startRun, step, type Input, type Run,
 } from "../game/run.js";
-import { autonomous, gaitDirection, snap, walkSpeed } from "../game/body.js";
+import {
+  autonomous, gaitDirection, growable, seatedGroup, snap, walkSpeed,
+} from "../game/body.js";
 import { structureFrom } from "../game/world.js";
 import { lobes } from "../game/shape.js";
 
@@ -98,10 +100,48 @@ test("it steps along a direction its own group has, and no other", () => {
   assert.equal(gaitDirection(body, body.x, body.y - 400e-6), null,
     "it cannot walk where its symmetry has no direction");
 
-  // a sixfold one can
+  // A FOURFOLD ONE CAN, AND A SIXFOLD ONE CANNOT — which is the opposite of
+  // what this test asserted for two months.
+  //
+  // A step lands on a SITE: walkBodies takes Math.round(dir) times the pitch,
+  // one lattice site at a time. So a 622 asked to follow along its 60-degree
+  // lobe was rounded onto a 45-degree step and asked along its 120 was rounded
+  // onto due north — both directions a 622 does not have, which is precisely
+  // what gaitDirection exists to refuse. It walked north here by rounding, not
+  // by symmetry, and the assertion could not tell the difference.
+  //
+  // On a square net a 622 seats as a 222 and has east and west. The cells whose
+  // symmetry the lattice keeps whole are the tetragonal ones, and this is the
+  // job they never had.
   const six = startRun(14);
   organism(six, BLOCK, "622");
-  assert.ok(gaitDirection(six.bodies[0], six.bodies[0].x, six.bodies[0].y - 400e-6));
+  assert.equal(gaitDirection(six.bodies[0], six.bodies[0].x, six.bodies[0].y - 400e-6), null,
+    "a 622 seats as a 222: for all its order it walks east and west");
+  assert.ok(gaitDirection(six.bodies[0], six.bodies[0].x + 400e-6, six.bodies[0].y),
+    "and it does still walk along the directions it kept");
+
+  const four = startRun(14);
+  organism(four, BLOCK, "422");
+  assert.ok(gaitDirection(four.bodies[0], four.bodies[0].x, four.bodies[0].y - 400e-6),
+    "a 422 is seated whole by a square net, so it follows you north");
+  assert.ok(gaitDirection(four.bodies[0], four.bodies[0].x + 400e-6, four.bodies[0].y),
+    "and east");
+});
+
+test("a body never steps a direction its seated group does not have", () => {
+  // The pair: gaitDirection chooses and walkBodies rounds, and if those two
+  // disagree the rounding wins silently. Every direction gaitDirection can
+  // return must survive Math.round unchanged, or the body walks somewhere its
+  // symmetry never offered.
+  for (const hm of ["1", "2", "3", "4", "6", "222", "32", "422", "622", "23", "432"]) {
+    for (const [lx, ly] of growable(hm)) {
+      const rx = Math.round(lx), ry = Math.round(ly);
+      assert.ok(Math.abs(rx - lx) < 1e-9 && Math.abs(ry - ly) < 1e-9,
+        `${hm} seats as ${seatedGroup(hm)} and offers (${lx.toFixed(3)}, ${ly.toFixed(3)}),`
+        + ` which rounds to (${rx}, ${ry}) — a step it did not choose`);
+      assert.ok(rx !== 0 || ry !== 0, `${hm} offers a direction that rounds to standing still`);
+    }
+  }
 });
 
 // ── a step is all of it or none of it ───────────────────────────────────────

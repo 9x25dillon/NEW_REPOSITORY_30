@@ -1491,11 +1491,37 @@ export function feedThrone(run: Run, index: number): FeedResult {
  * matter. Infinity when there is nothing to do it with.
  */
 export function dischargesToKill(run: Run): number {
-  const best = Math.max(
-    0,
-    ...run.structures.map((s) => s.strength),
-    ...run.cells.map((c) => structureFrom(-1, c.group.hm, 0, 0).strength),
-  );
+  // AT THE EDGE OF SAFETY, WHICH IS THE NEAREST SHOT THAT KEEPS THE BUILDING.
+  //
+  // This said "at the muzzle" and defended it as "the one you can achieve". It
+  // is not achievable, and a play report is what said so: 330 s, three
+  // discharges, all three landed, and a king still on half its bar while this
+  // function was answering TWO. A player who fires the number they were given
+  // and watches nothing happen concludes the thing cannot be killed, which is
+  // exactly what came back.
+  //
+  // The muzzle is inside DEVOUR_REACH. To collect that figure you have to stand
+  // the building within 150 um of a king that eats buildings within 150 um, so
+  // the number was quoting a price you can only pay by losing the gun — the
+  // same pair `dischargeFalloff` was already written against, read the other
+  // way round. The honest reference is the closest range at which the building
+  // is still there afterwards, and that is DEVOUR_REACH by definition.
+  //
+  // Measured over the eleven cells it is 41 to 75 per cent of the muzzle — for
+  // the 23 in that report, 124 against 192 — so this was optimistic by half
+  // even before any aiming error.
+  let best = 0;
+  const hms = [
+    ...run.structures.map((s) => s.hm),
+    ...run.cells.map((c) => c.group.hm),
+  ];
+  for (const hm of hms) {
+    const s = structureFrom(-1, hm, 0, 0);
+    const range = s.reach * LOBE_RANGE;
+    if (range <= DEVOUR_REACH) continue;      // it cannot outrange the mouth
+    const fall = 1 - DEVOUR_REACH / range;
+    best = Math.max(best, s.strength * DISCHARGE_GAIN * fall);
+  }
   if (best <= 0) return Infinity;
   // HOW MANY MORE. While you are feeding the throne this is a forecast and the
   // full bar is the right question; once it is awake it is a fight, and the
@@ -1504,10 +1530,7 @@ export function dischargesToKill(run: Run): number {
   // killing it — was still being told THREE, which is the difference between a
   // fight you are winning and one you cannot see the end of.
   const left = run.throne.awake ? Math.max(0, run.throne.hp) : run.throne.maxHp;
-  // AT THE MUZZLE. Damage falls off across an arm, so this is the count if you
-  // land them on top of the king rather than at the far edge of a cone — which
-  // is the number worth showing, because it is the one you can achieve.
-  return Math.ceil(left / (best * DISCHARGE_GAIN));
+  return Math.ceil(left / best);
 }
 
 /** Put a cell on the ground. It never feeds — that is its own verb now. */

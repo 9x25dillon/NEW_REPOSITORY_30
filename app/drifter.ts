@@ -21,7 +21,7 @@ import {
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   arrivalRate, settleCap, suspension,
   DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
-  bearsOn, dischargeFalloff, wearing,
+  bearsOn, dischargeFalloff, wearRate, wearing,
   CHANNEL_H, beast, crown, currentAt, dischargesToKill, enterWorld, feedThrone,
   latticePitch,
   liftCell,
@@ -35,7 +35,9 @@ import {
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
 import { RELEASE_TIME, advice, catches, detune } from "../game/bound.js";
-import { autonomous, limbsOf, snap, symbolOf, walkSpeed } from "../game/body.js";
+import {
+  autonomous, growable, limbsOf, seatedGroup, snap, symbolOf, walkSpeed,
+} from "../game/body.js";
 import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
 import { STREAMS, mediumAt, streamBand, streamName } from "../game/streams.js";
 import {
@@ -196,6 +198,14 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
     body: "THE CRYSTALLOGRAPHIC RESTRICTION THEOREM. A FIVE-FOLD AXIS GENERATES NO LATTICE, "
       + "SO A PENTAMER JOINS NOTHING, EVER. SOME OF WHAT IS DISSOLVED IN A WATER IS SIMPLY "
       + "NOT GOING TO WORK.",
+  },
+  seated: {
+    id: "seated", title: "THE SAME THEOREM, ONE LEVEL UP",
+    body: "YOUR HAND IS TWO CROSSED STANDING WAVES, SO ITS NODES ARE A SQUARE GRID - AND A "
+      + "THREE- OR SIX-FOLD AXIS DOES NOT MAP A SQUARE GRID ONTO ITSELF. THE CELL KEEPS "
+      + "EVERY ARM IT FIRES. THE BODY DOES NOT: A 622 IS SEATED AS A 222 AND GROWS AND "
+      + "WALKS IN TWO DIRECTIONS. A 4 OR A 422 IS SEATED WHOLE AND KEEPS FOUR. ORDER IS NOT "
+      + "THE ONLY THING A CELL IS WORTH.",
   },
   crown: {
     id: "crown", title: "IT IS WHAT YOU FED IT",
@@ -756,6 +766,13 @@ export class Game {
         case "place":
           this.ring(ev.x, ev.y, 6, 70, 0.6, JADE);
           this.sfx.capture(2); this.say(`${ev.group} STANDS`);
+          // WHEN THE LATTICE TAKES SOMETHING OFF WHAT YOU BUILT. Told at the
+          // moment it first costs the player something — a body standing, whose
+          // group the square net will not seat whole — rather than in a menu
+          // they read before it could mean anything.
+          if (run.bodies.some((b) => seatedGroup(b.hm) !== b.hm && b.cells.length >= 3)) {
+            this.teach("seated");
+          }
           break;
         case "fed":
           this.ring(run.throne.x, run.throne.y, 10, 60, 0.6, "255,201,74");
@@ -1472,8 +1489,15 @@ export class Game {
         g.fillStyle = FAINT;
         const limbs = limbsOf(body, pitch);
         const legs = limbs.filter((l) => l.leg).length;
+        // WHAT YOU FED IT, AND WHAT THE LATTICE MADE OF IT. These differ for
+        // seven of the eleven cells and the difference is the whole decision:
+        // a 622 seats as a 222 and grows two arms where its own field throws
+        // six. Drawn only when it actually differs, so the common case stays
+        // quiet and the surprising one explains itself where it happens.
+        const seated = seatedGroup(body.hm);
+        const group = seated === body.hm ? body.hm : `${body.hm}→${seated}`;
         g.fillText(
-          `${sym.pointGroup}  ·  ${body.cells.length} CELLS`
+          `${group}  ·  ${body.cells.length} CELLS`
           + `${limbs.length ? `  ·  ${limbs.length - legs} LIMBS` : ""}`
           + `${legs ? `  ·  ${legs} LEGS` : ""}`
           + `${live ? `  ·  ${walkSpeed(body, run.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
@@ -2911,6 +2935,28 @@ export class Game {
       return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - "
         + "YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";
     }
+    // THE THIRD PLAY REPORT, and the one this whole chain was still missing.
+    // 330 s, three discharges, all three landed (sovereign-hit 3), and the king
+    // finished on 251 of 510. They were not doing it wrong. They were doing far
+    // too little of it, and the only number the game had ever shown them —
+    // `dischargesToKill` — was quoting the muzzle, which is inside the radius
+    // the king eats buildings from. Told TWO, needed four or five.
+    //
+    // So say the count, and say the other bar. A 23 king has one independent
+    // piezoelectric component and comes apart at 2 hp/s in your hand: over that
+    // run there was more health in the hand they never closed than in the whole
+    // king. `wearing` fired twice, which is a third of a second of it.
+    if (run.throne.awake && run.throne.hp > 0 && n("discharge") > 0) {
+      const need = dischargesToKill(run);
+      const rate = wearRate(run.throne);
+      if (rate > 0 && n("wearing") < 6) {
+        return `${n("discharge")} DISCHARGES IS NOT ENOUGH - IT NEEDS `
+          + `${Number.isFinite(need) ? need : "MORE THAN YOU HAD"} MORE FROM WHERE YOU CAN `
+          + `STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES ${rate}/S OFF IT`;
+      }
+      return `${n("discharge")} DISCHARGES LANDED AND IT LIVED. GET THE KING ONTO A `
+        + `BUILDING - AN ARM IS WORTH DOUBLE AT ITS MUZZLE AND NOTHING AT ITS EDGE`;
+    }
     if (run.throne.fed.length === 0 && run.built > 20) {
       return "YOU NEVER FED THE THRONE. GATHERING IS NOT THE GAME - "
         + "IT IS HOW YOU PAY FOR THE ONE THING THAT ENDS THIS WATER";
@@ -2971,6 +3017,11 @@ export class Game {
         })() : ""}`
         + `${run.bodies[0] ? ` largest ${run.bodies[0].cells.length} cells`
           + ` ${symbolOf(run.bodies[0])?.symbol ?? "unnamed"}`
+          // FED, AND SEATED. A body of 622 cells is a 222 on a square net and
+          // grows two arms, not six. Without both halves in the report, "limbs
+          // 2" out of a sixfold body reads as a bug rather than as the rule.
+          + ` fed ${run.bodies[0].hm} seated ${seatedGroup(run.bodies[0].hm)}`
+          + ` grows ${growable(run.bodies[0].hm).length}`
           + `${autonomous(run.bodies[0]) ? " AUTONOMOUS" : ""}` : ""}`
         + `  lattice ${(latticePitch(run) * 1e6).toFixed(0)}um`,
       `bound: ${(run.bound.omega / 2 / Math.PI / 1e6).toFixed(2)} MHz  ${run.bound.free ? "FREED" : "held"}`
