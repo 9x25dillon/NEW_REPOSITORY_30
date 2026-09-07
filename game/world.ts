@@ -502,6 +502,113 @@ export function inheritanceOf(s: Sovereign): number {
   return Math.min(0.6, 0.12 + s.mass * 0.016);
 }
 
+/**
+ * What one more helping would change about the world this king leaves.
+ *
+ * THE OTHER HALF OF THE ONLY REAL DECISION IN THE GAME, and it was never on
+ * screen. The throne has always shown the COST of a helping — more hit points,
+ * more discharges — and exactly one of its benefits, the inheritance
+ * percentage. Every other thing feeding buys is a clamp, and the clamps are
+ * close: measured against these same functions, a sixfold king has bought
+ * everything there is to buy by its FOURTH helping, and a 222 by its twelfth.
+ *
+ * `maxHp` has no clamp at all. So past that point feeding is a straight
+ * exchange of hit points for nothing, and it looks exactly like progress: the
+ * inheritance line reads 60% and keeps reading 60%, and nothing says it has
+ * stopped moving. A play report of 2026-09-06 fed a sixfold throne FIFTY
+ * helpings — mass 582, 5850 hit points — landed 98 discharges on the king it
+ * woke, and died to it. Forty-six of those helpings bought nothing.
+ *
+ * Computed by asking the world's own functions rather than by restating their
+ * ceilings, so it cannot go stale when one of them is retuned. Every quantity
+ * is compared at the precision the game PRINTS it at, because a change the
+ * player can never see is not one they can decide on.
+ *
+ * The medium's density is deliberately not in the list, and this is the one
+ * judgement here rather than a reading. It is the only quantity that keeps
+ * drifting past all the other ceilings — it is capped on FREEDOM, not mass, so
+ * a sixfold king reaches its floor at twenty-two helpings — and what it does on
+ * the way is make YOUR OWN contrast weaker, not stronger: measured over a
+ * sixfold king, phi(YOU) peaks at -0.207 on the fourth helping and is back to
+ * -0.158 by the twenty-second. Counting it as something a helping BUYS would
+ * be a lie in the player's favour. What it decides that the player can act on —
+ * which half of the bestiary can reach them — is `wildlife`, and that is here.
+ */
+export function nextHelpingBuys(s: Sovereign, c: Cell, aeon: number): string[] {
+  const after: Sovereign = { ...s, fed: [...s.fed] };
+  feed(after, c);
+  const a = worldFrom(s, aeon);
+  const b = worldFrom(after, aeon);
+
+  const out: string[] = [];
+  const moved = (label: string, x: unknown, y: unknown): void => {
+    if (String(x) !== String(y)) out.push(label);
+  };
+  moved("WHAT THE NEXT WORLD KEEPS",
+    (inheritanceOf(s) * 100).toFixed(0), (inheritanceOf(after) * 100).toFixed(0));
+  moved("ITS LATTICE", (a.pitch * 1e6).toFixed(0), (b.pitch * 1e6).toFixed(0));
+  moved("HOW FAST ITS WATER IS", a.medium.c.toFixed(0), b.medium.c.toFixed(0));
+  moved("HOW MUCH IS IN IT", a.density, b.density);
+  moved("HOW DEEP IT IS", a.mode, b.mode);
+  moved("WHAT IS DISSOLVED IN IT", a.pool.join(" "), b.pool.join(" "));
+  moved("WHAT LIVES THERE", a.wildlife.join(" "), b.wildlife.join(" "));
+  moved("ITS BEAT", cadence(s).toFixed(2), cadence(after).toFixed(2));
+  moved("ITS ARMS", volley(s).length, volley(after).length);
+  return out;
+}
+
+/**
+ * What one more helping would add to the bar.
+ *
+ * A DIFFERENCE OF TWO THRONES, so the health formula stays in `feed` and only
+ * in `feed`. The surface needs this to put the price next to what
+ * `nextHelpingBuys` says the price is for, and `hand.structure * 10` in the
+ * renderer would be that rule's second home.
+ */
+export function helpingCosts(s: Sovereign, c: Cell): number {
+  const after: Sovereign = { ...s, fed: [...s.fed] };
+  feed(after, c);
+  return after.maxHp - s.maxHp;
+}
+
+/** What the helpings a throne has already been given actually came to. */
+export interface ThroneLedger {
+  /** How many of them changed the world at all. */
+  bought: number;
+  /** How many bought nothing but the king's own health. */
+  wasted: number;
+  /** The hit points those wasted ones added, which is what they cost you. */
+  health: number;
+}
+
+/**
+ * The fed list, read back as what it bought.
+ *
+ * Replayed from an empty throne against `nextHelpingBuys`, so it answers in the
+ * same terms and by the same rule, and the health is a DIFFERENCE OF TWO
+ * THRONES rather than an arithmetic restatement of `feed` — put the formula in
+ * here as well and there are two homes for it.
+ *
+ * ORDER MATTERS AND IT IS THE PLAYER'S OWN. Feeding a 622 first and a 2 second
+ * is not the same throne as the other way round, so this replays what was
+ * actually given rather than sorting it into a best case.
+ *
+ * The 2026-09-06 report's throne, read through here: fed 50, bought 4, wasted
+ * 46, health 5340. That is the run in one line, and it happened at the throne.
+ */
+export function throneLedger(s: Sovereign, aeon: number): ThroneLedger {
+  const k = emptyThrone(s.x, s.y);
+  let bought = 0;
+  let sated = 0;
+  for (let i = 0; i < s.fed.length; i++) {
+    const c = cellFor(s.fed[i]);
+    if (nextHelpingBuys(k, c, aeon).length > 0) bought = i + 1;
+    feed(k, c);
+    if (i + 1 === bought) sated = k.maxHp;
+  }
+  return { bought, wasted: s.fed.length - bought, health: s.maxHp - sated };
+}
+
 export function epitaphFor(s: Sovereign, w: World): Epitaph {
   const g = pointGroup(s.hm === "" ? "1" : s.hm);
   const carry = contrastFactor(YOU, w.medium);

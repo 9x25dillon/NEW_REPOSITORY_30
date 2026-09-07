@@ -1088,12 +1088,14 @@ function mergePass(run: Run, dt: number): void {
   const grid = neighbourhood(ms);
   const ix = indexStructures(run.structures);
   const scratch: Structure[] = [];
+  const reach: Entity[] = [];
 
   for (let i = 0; i < ms.length; i++) {
     const a = ms[i];
     if (gone.has(a.id)) continue;
     let best: Entity | null = null;
     let bestR = BIND_RADIUS;
+    reach.length = 0;
     const cx = Math.floor(a.x / BIND_RADIUS);
     const cy = Math.floor(a.y / BIND_RADIUS);
     for (let ox = -1; ox <= 1; ox++) {
@@ -1106,6 +1108,8 @@ function mergePass(run: Run, dt: number): void {
           if (gone.has(b.id)) continue;
           if (!together(a.layer, b.layer)) continue; // not in the same trap at all
           const r = Math.hypot(a.x - b.x, a.y - b.y);
+          if (r >= BIND_RADIUS) continue;
+          reach.push(b);
           if (r < bestR) { bestR = r; best = b; }
         }
       }
@@ -1117,30 +1121,70 @@ function mergePass(run: Run, dt: number): void {
     const bound = gripping || underStructure(ix, scratch, a.x, a.y, a.layer);
     if (!bound) { a.dwell = 0; a.partner = -1; continue; }
 
-    const asm = assemble([...a.parts, ...best.parts]);
+    let mate = best;
+    let asm = assemble([...a.parts, ...mate.parts]);
+
+    // THE NEAREST ONE REFUSING IS NOT THE SAME AS NOTHING GOING. This took the
+    // nearest partner, tried it, and gave up for the frame if it would not
+    // join — so a pentamer standing one micron closer than a dimer stopped the
+    // dimer from binding too. The RULE is "a pentamer joins nothing, ever",
+    // which is the crystallographic restriction theorem and is correct. The
+    // CODE was saying something much stronger and nobody wrote it down.
+    //
+    // WHAT IT IS WORTH, AND THE HONEST ANSWER IS "NOT CELLS". The shadowing is
+    // real and was measured first: over three seeds at a settled pool of 848,
+    // the share of binding opportunities lost to a nearer refuser is 2.9 per
+    // cent in the first water and 8 per cent from the third on, once pentamers
+    // are dissolved in it, with a quarter of every refusal holding a partner in
+    // the same nine squares that was never asked.
+    //
+    // It does not come out the other end. A/B over four seeds and three waters,
+    // 240 s each of a gripping player: 1106 -> 1096 cells, 826 -> 829,
+    // 1178 -> 1183. That is noise, and it is in the file so that nobody spends
+    // a session expecting this to be the thing that makes a late water gather.
+    // A merge also needs BIND_DWELL of continuous partnership and a hand or a
+    // building over it, and most of those shadowed opportunities were never
+    // going to survive that.
+    //
+    // It is kept because the CODE was saying something the RULES do not, which
+    // is its own reason, and because it costs nothing: it runs only on a
+    // refusal, and `reach` is a reused array rather than a fresh one per motif
+    // — see rule 14. Frame time over the same A/B was 1.104 -> 1.078 ms at the
+    // sixfold water, which is to say unchanged.
+    if (!asm.group && !asm.partial && reach.length > 1) {
+      let joinR = Infinity;
+      for (const b of reach) {
+        if (b === best) continue;
+        const r = Math.hypot(a.x - b.x, a.y - b.y);
+        if (r >= joinR) continue;
+        const other = assemble([...a.parts, ...b.parts]);
+        if (other.group || other.partial) { joinR = r; mate = b; asm = other; }
+      }
+    }
+
     if (!asm.group && !asm.partial) {
       if (a.flash <= 0) {
-        a.flash = 0.45; best.flash = 0.45;
+        a.flash = 0.45; mate.flash = 0.45;
         run.events.push({
-          kind: "refuse", x: (a.x + best.x) / 2, y: (a.y + best.y) / 2,
+          kind: "refuse", x: (a.x + mate.x) / 2, y: (a.y + mate.y) / 2,
           text: asm.refusal ?? "unknown",
         });
       }
-      const dx = a.x - best.x, dy = a.y - best.y, r = Math.hypot(dx, dy) || 1e-9;
+      const dx = a.x - mate.x, dy = a.y - mate.y, r = Math.hypot(dx, dy) || 1e-9;
       a.x += (dx / r) * 7e-6; a.y += (dy / r) * 7e-6;
-      best.x -= (dx / r) * 7e-6; best.y -= (dy / r) * 7e-6;
+      mate.x -= (dx / r) * 7e-6; mate.y -= (dy / r) * 7e-6;
       a.dwell = 0; a.partner = -1;
       continue;
     }
 
-    if (a.partner === best.id) a.dwell += dt;
-    else { a.partner = best.id; a.dwell = dt; }
+    if (a.partner === mate.id) a.dwell += dt;
+    else { a.partner = mate.id; a.dwell = dt; }
 
     if (a.dwell >= BIND_DWELL) {
-      a.parts = [...a.parts, ...best.parts];
-      a.x = (a.x + best.x) / 2; a.y = (a.y + best.y) / 2;
+      a.parts = [...a.parts, ...mate.parts];
+      a.x = (a.x + mate.x) / 2; a.y = (a.y + mate.y) / 2;
       a.dwell = 0; a.partner = -1; a.flash = 0.4;
-      gone.add(best.id);
+      gone.add(mate.id);
       run.events.push({ kind: "merge", x: a.x, y: a.y });
     }
   }
@@ -1876,6 +1920,21 @@ export const DEVOUR_REACH = 150e-6;
 
 export const WEAR_PER_COMPONENT = 2;
 
+/**
+ * How often a `wearing` event is pushed while your hand is on the king, per
+ * second.
+ *
+ * Exported because the DIAGNOSIS reads that count as evidence of whether the
+ * player ever used their hand, and a count is only evidence if you know what it
+ * is a count of. It tested `wearing < 6`, which at six a second means "less
+ * than one second of contact" — so the two play reports of 2026-09-06 that came
+ * in at 10 and 8 ticks, a second and a third of grip across five and
+ * twenty-three minutes, were both scored as having learned the hand and routed
+ * past the advice about it. The count is a tick rate; divide by this to get
+ * seconds, multiply by `wearRate` to get the only figure that means anything.
+ */
+export const WEAR_TICKS_PER_SECOND = 6;
+
 /** Damage a second your hand does to this king, and it may well be none. */
 export function wearRate(k: Sovereign): number {
   if (k.hm === "") return 0;
@@ -1928,7 +1987,9 @@ function reign(run: Run, dt: number): void {
   // it a handle to be held by.
   if (wearing(run)) {
     k.hp = Math.max(0, k.hp - wearRate(k) * dt);
-    if (run.rand() < dt * 6) run.events.push({ kind: "wearing", x: k.x, y: k.y });
+    if (run.rand() < dt * WEAR_TICKS_PER_SECOND) {
+      run.events.push({ kind: "wearing", x: k.x, y: k.y });
+    }
     if (k.hp <= 0) { birth(run); return; }
   }
 

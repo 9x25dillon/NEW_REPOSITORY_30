@@ -230,24 +230,53 @@ test("it says out loud what the browser is reporting", () => {
   assert.match(line, /DOWN 7/);
 });
 
-test("a page without focus is named as the reason, because it always is", () => {
+test("a page without focus is named as the reason, unless the pad has answered", () => {
   // A browser stops updating gamepad state for an unfocused page: getGamepads
   // keeps handing back the snapshot it had, so a controller that enumerated
   // perfectly delivers nothing but zeroes forever, with no error anywhere. It
   // is indistinguishable from a broken mapping unless the page says which.
+  //
+  // BUT IT IS THE SECOND QUESTION, and it used to be the first. `describe()` is
+  // read in two places that are not alike: live on the title screen, where
+  // focus IS the answer, and inside `report()` — which is only ever reached by
+  // typing into the browser console, which is exactly when the page does not
+  // have focus. So every pasted report accused its author of not clicking the
+  // game. All three reports of 2026-09-06 carried that line, from a player who
+  // was using the pad the whole time.
+  const unfocused = (yes: boolean): void => {
+    Object.defineProperty(globalThis, "document", {
+      value: { hasFocus: () => !yes }, configurable: true,
+    });
+  };
+
+  // A pad that has never delivered anything: focus is the likeliest answer and
+  // the one worth printing.
+  const fresh = new Pad();
+  pads = [pad()];
+  unfocused(true);
+  assert.match(fresh.describe(), /CLICK THE GAME/);
+
+  // One that HAS delivered input has answered the focus question by
+  // demonstration. Say what it is, and mark the reading stale rather than
+  // blaming the player for a console they had to open to file the report.
   const p = new Pad();
   const gp = pad();
   press(gp, 0);
   pads = [gp];
+  unfocused(false);
   p.read();
-  assert.doesNotMatch(p.describe(), /CLICK THE GAME/, "focused, so no complaint");
+  const live = p.describe();
+  assert.doesNotMatch(live, /CLICK THE GAME/, "focused, so no complaint");
+  assert.match(live, /Xbox Wireless Controller/);
+  assert.doesNotMatch(live, /STALE/, "focused: the reading is current");
 
-  Object.defineProperty(globalThis, "document", {
-    value: { hasFocus: () => false }, configurable: true,
-  });
-  assert.match(p.describe(), /CLICK THE GAME/);
-  Object.defineProperty(globalThis, "document", {
-    value: { hasFocus: () => true }, configurable: true,
-  });
+  unfocused(true);
+  const off = p.describe();
+  assert.doesNotMatch(off, /CLICK THE GAME/,
+    "it has already proved it works — this is how every report is written");
+  assert.match(off, /Xbox Wireless Controller/, "say what the pad IS");
+  assert.match(off, /STALE/, "and that the axes in it are not live");
+
+  unfocused(false);
   assert.doesNotMatch(p.describe(), /CLICK THE GAME/);
 });

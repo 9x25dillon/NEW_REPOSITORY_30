@@ -21,7 +21,7 @@ import {
   ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
   arrivalRate, settleCap, suspension,
   DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
-  bearsOn, dischargeFalloff, wearRate, wearing,
+  bearsOn, dischargeFalloff, wearRate, wearing, WEAR_TICKS_PER_SECOND,
   CHANNEL_H, beast, crown, currentAt, dischargesToKill, enterWorld, feedThrone,
   latticePitch,
   liftCell,
@@ -30,7 +30,8 @@ import {
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
 import {
-  epitaphFor, inheritanceOf, sovereignParticle, volley,
+  epitaphFor, helpingCosts, inheritanceOf, nextHelpingBuys, sovereignParticle,
+  throneLedger, volley,
 } from "../game/world.js";
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
@@ -211,7 +212,17 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
     id: "crown", title: "IT IS WHAT YOU FED IT",
     body: "ITS GROUP IS THE MOST SYMMETRIC CELL YOU GAVE IT, AND ITS VOLLEY IS THAT GROUP'S "
       + "SYMMETRY SEEN FROM ABOVE. FEED IT MORE AND IT THROWS MORE ARMS - AND THE WORLD BORN "
-      + "OUT OF ITS BODY IS RICHER. THAT TRADE IS THE GAME.",
+      + "OUT OF ITS BODY IS RICHER. THAT TRADE IS THE GAME, AND IT HAS A BOTTOM: EVERY PART "
+      + "OF THAT RICHNESS RUNS INTO A CEILING WITHIN A FEW HELPINGS, AND ITS HEALTH DOES NOT.",
+  },
+  sated: {
+    id: "sated", title: "IT IS FULL, AND YOU CAN KEEP FEEDING IT",
+    body: "THE WATER A KING LEAVES IS BOUNDED BY THE PHYSICS IT IS MADE OF - THE MEDIUM ONLY "
+      + "GOES SO FAST AND SO THIN BEFORE THE SOLVER STOPS BEING HONEST, THE CHANNEL ONLY "
+      + "HOLDS FOUR NODE PLANES BEFORE THEY ARE CLOSER THAN THE BODIES STANDING ON THEM, AND "
+      + "A LATTICE HAS A SHORTEST USABLE PITCH. ALL OF IT IS AT ITS LIMIT NOW. ITS HEALTH IS "
+      + "NOT BOUNDED BY ANYTHING, SO EVERY HELPING FROM HERE IS HIT POINTS YOU WILL HAVE TO "
+      + "TAKE BACK OFF ONE SPENT BUILDING AT A TIME.",
   },
   anchored: {
     id: "anchored", title: "YOU GAVE IT NO HANDLE",
@@ -260,6 +271,17 @@ export class Game {
   private youTrail: number[] = [];
   /** Which cell in the rack a bare press will spend. */
   private selected = 0;
+  /**
+   * The diagnosis, held from the frame the run ended.
+   *
+   * `drawDead` runs sixty times a second and `diagnosis()` is not a lookup: it
+   * walks every building and every cell in the rack through `dischargesToKill`,
+   * and `throneLedger` replays the whole fed list against `worldFrom` — 385
+   * microseconds at the fifty helpings a real report carried. Rule 20 applies
+   * to the death screen as much as to the arena, and nothing behind this line
+   * can change once you are dead.
+   */
+  private verdict: string | null = null;
   private wasGrip = false;
   /**
    * What happened, counted.
@@ -350,6 +372,7 @@ export class Game {
     canvas.width = VIEW_W;
     canvas.height = VIEW_H;
     this.run = startRun(this.seed);
+    this.verdict = null;
 
     this.washCanvas = document.createElement("canvas");
     this.washCanvas.width = WASH_W;
@@ -558,17 +581,18 @@ export class Game {
   }
 
   private doFeed(): void {
-    const run = this.run;
-    const r = feedThrone(run, this.selected);
+    // ONLY THE REFUSALS. What a successful feed says belongs to the `fed`
+    // event and is said there — because `act` runs BEFORE `step` and `drain`,
+    // so anything set here is overwritten by the event handler in the same
+    // frame. There WAS a success line here, carrying the discharges-to-kill,
+    // and it has never been on screen for anybody: `drain`'s "THE THRONE TAKES
+    // X" clobbered it every time, exactly the way `teach()` clobbered the `aim`
+    // lesson for the whole life of that bug. A toast written before `drain` is
+    // a toast that was never shown.
+    const r = feedThrone(this.run, this.selected);
     if (r === "off-throne") this.say("STAND ON THE THRONE TO FEED IT");
     if (r === "none") this.say("NOTHING IN HAND");
     if (r === "wrong-phase") this.say("IT IS ALREADY AWAKE");
-    if (r === "fed") {
-      const need = dischargesToKill(run);
-      this.say(Number.isFinite(need)
-        ? `FED ${run.throne.fed.length}  ·  ${run.throne.hm}  ·  ${need} DISCHARGES TO KILL`
-        : `FED ${run.throne.fed.length}  ·  ${run.throne.hm}  ·  NOTHING CAN KILL IT YET`);
-    }
   }
 
   private fit(): void {
@@ -585,6 +609,7 @@ export class Game {
     this.tally = {};
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
     this.run = startRun(this.seed, this.ebb);
+    this.verdict = null;
     this.screen = "play";
     this.sparks = []; this.popups = []; this.rings = [];
     this.say("GATHER FOUR OF A KIND TO MAKE A CELL");
@@ -777,7 +802,23 @@ export class Game {
         case "fed":
           this.ring(run.throne.x, run.throne.y, 10, 60, 0.6, "255,201,74");
           this.sfx.capture(4);
-          this.say(`THE THRONE TAKES ${ev.group}  ·  C TO CROWN`);
+          // AND WHETHER IT BOUGHT ANYTHING. `throneLedger` counts the helpings
+          // that changed the world; `bought` is the index of the last one that
+          // did, so `bought < fed.length` is exactly "the one just given bought
+          // nothing". Every benefit of feeding is clamped and the health is
+          // not — see rule 25 — and this is the moment the player is making the
+          // decision, so it is the moment to say which side of the clamp they
+          // are on.
+          if (throneLedger(run.throne, run.world.aeon).bought < run.throne.fed.length) {
+            this.say(`THE THRONE TAKES ${ev.group}  ·  ${run.throne.maxHp} HP  ·  `
+              + "AND IT BOUGHT NOTHING ELSE");
+            this.teach("sated");
+          } else {
+            const need = dischargesToKill(run);
+            this.say(`THE THRONE TAKES ${ev.group}  ·  `
+              + `${Number.isFinite(need) ? `${need} DISCHARGES TO KILL` : "NOTHING CAN KILL IT YET"}`
+              + "  ·  C TO CROWN");
+          }
           break;
         case "crown":
           this.flash = 0.9; this.flashRed = false; this.shake = 10;
@@ -1993,11 +2034,44 @@ export class Game {
       // aeon with a four-cell body and none of the chip in reach, every world
       // poorer than the last, with no line anywhere connecting the two.
       const keep = inheritanceOf(run.throne);
+      let line = beyond ? 50 : 39;
       g.font = `700 9px ${MONO}`;
       g.fillStyle = keep < 0.2 ? "#ffa24a" : JADE;
       g.fillText(
         `NEXT WORLD KEEPS ${(keep * 100).toFixed(0)}% OF WHAT YOU BUILD`,
-        x, y - R - (beyond ? 50 : 39));
+        x, y - R - line);
+      line += 11;
+
+      // AND WHETHER IT IS STILL MOVING, which the line above cannot say. It
+      // reads 60% and goes on reading 60% forever — the inheritance is clamped
+      // there from mass 30 — so the one benefit the throne has ever shown looks
+      // identical whether the next helping buys it or not.
+      //
+      // `nextHelpingBuys` asks the world's own functions what would actually
+      // change. Every answer is clamped and the clamps are near: a sixfold
+      // throne has bought everything there is to buy by its FOURTH helping. The
+      // hit points are the one thing with no clamp on them. A play report of
+      // 2026-09-06 fed a sixfold throne fifty helpings, woke 5850 hit points,
+      // landed ninety-eight discharges and died to it — forty-six of those
+      // helpings bought nothing, and every number on this panel up to that
+      // moment was either a cost or a percentage that had stopped moving.
+      const hand = run.cells[this.selected] ?? run.cells[0];
+      if (hand) {
+        const buys = nextHelpingBuys(run.throne, hand, run.world.aeon);
+        const cost = helpingCosts(run.throne, hand);
+        g.font = `700 9px ${MONO}`;
+        if (buys.length === 0) {
+          g.fillStyle = RED;
+          g.fillText(`SATED  ·  ANOTHER ${hand.group.hm} IS +${cost} HP AND NOTHING ELSE`,
+            x, y - R - line);
+        } else {
+          g.fillStyle = JADE;
+          g.fillText(
+            `ONE MORE ${hand.group.hm}: +${cost} HP BUYS ${buys.slice(0, 2).join(" + ")}`
+            + `${buys.length > 2 ? `  +${buys.length - 2} MORE` : ""}`,
+            x, y - R - line);
+        }
+      }
     }
 
     // The hold that wakes it, drawn while it is being made.
@@ -2776,7 +2850,8 @@ export class Game {
     g.textAlign = "center";
     g.font = `700 11px ${MONO}`;
     g.fillStyle = `rgb(${NODE})`;
-    g.fillText(this.diagnosis(), VIEW_W / 2, 412);
+    this.verdict ??= this.diagnosis();
+    g.fillText(this.verdict, VIEW_W / 2, 412);
 
     g.fillStyle = DIM;
     g.font = `600 10px ${MONO}`;
@@ -2935,6 +3010,40 @@ export class Game {
       return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - "
         + "YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";
     }
+    // THE FOURTH PLAY REPORT, 2026-09-06, and it is answered before the fight
+    // starts. 1369 s, aeon 6, FIFTY helpings fed, 5850 hit points woken, ONE
+    // HUNDRED discharges of which 98 landed, and the king finished on 4113.
+    // Nothing they did in that fight was wrong — they dodged 407 volleys out of
+    // 421 — and this function's answer to it was a tip about where to stand.
+    //
+    // The run was decided at the throne, four helpings in. `throneLedger`
+    // replays what was fed and counts the helpings that changed the world at
+    // all: 4 of 50. The other 46 bought 5340 hit points and nothing else — a
+    // bar eleven times the one they would have woken by stopping when it was
+    // sated, to be emptied one spent building at a time while it eats them.
+    //
+    // It goes ABOVE the discharge advice because it outranks it. Told to aim
+    // better, a player who was already aiming well has nowhere to go; told what
+    // the bar is made of, they have the whole next run.
+    //
+    // And it says so ONLY where it is the answer. The same three reports carry
+    // a throne fed seven helpings of which six bought something — that player
+    // was not overfeeding and telling them they were would be a lie. The gate
+    // is what they have already put into the bar: enough landed damage to have
+    // killed the throne they would have woken by stopping when it was sated,
+    // and the thing in front of them still above four tenths.
+    if (run.throne.awake && run.throne.hp > 0 && n("sovereign-hit") > 0) {
+      const led = throneLedger(run.throne, run.world.aeon);
+      const sated = run.throne.maxHp - led.health;
+      const need = dischargesToKill(run);
+      const perShot = Number.isFinite(need) ? run.throne.hp / Math.max(1, need) : 0;
+      if (led.wasted >= 3 && perShot * n("sovereign-hit") > sated
+        && run.throne.hp > run.throne.maxHp * 0.4) {
+        return `YOU FED IT ${run.throne.fed.length} AND THE FIRST ${led.bought} BOUGHT ALL `
+          + `THERE WAS - THE OTHER ${led.wasted} WERE ${led.health} HIT POINTS OF NOTHING. `
+          + `YOU HAVE ALREADY LANDED ENOUGH TO KILL A ${sated} HP KING`;
+      }
+    }
     // THE THIRD PLAY REPORT, and the one this whole chain was still missing.
     // 330 s, three discharges, all three landed (sovereign-hit 3), and the king
     // finished on 251 of 510. They were not doing it wrong. They were doing far
@@ -2949,7 +3058,15 @@ export class Game {
     if (run.throne.awake && run.throne.hp > 0 && n("discharge") > 0) {
       const need = dischargesToKill(run);
       const rate = wearRate(run.throne);
-      if (rate > 0 && n("wearing") < 6) {
+      // WHAT THE HAND ACTUALLY TOOK OFF, not how many times it was mentioned.
+      // This tested `wearing < 6`, and `wearing` is a tick at
+      // WEAR_TICKS_PER_SECOND — so the threshold read "less than one second of
+      // contact", and two of the three reports of 2026-09-06 came in at 10 and
+      // 8 ticks. A second and a third of grip across twenty-three minutes was
+      // scored as knowing about the hand, and both runs were routed past the
+      // advice they needed into a tip about where to stand.
+      const took = (n("wearing") / WEAR_TICKS_PER_SECOND) * rate;
+      if (rate > 0 && took < run.throne.maxHp * 0.1) {
         return `${n("discharge")} DISCHARGES IS NOT ENOUGH - IT NEEDS `
           + `${Number.isFinite(need) ? need : "MORE THAN YOU HAD"} MORE FROM WHERE YOU CAN `
           + `STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES ${rate}/S OFF IT`;
@@ -3000,6 +3117,17 @@ export class Game {
       `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
       `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}`
         + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`
+        // WHAT THAT LIST COST, which a reader cannot get from the list. The
+        // aeon-6 report of 2026-09-06 printed fifty helpings and 5850 hit
+        // points and it took a probe to find out that four of the fifty bought
+        // anything. Every report carries the answer now.
+        + `${run.throne.fed.length ? (() => {
+          const led = throneLedger(run.throne, run.world.aeon);
+          return led.wasted > 0
+            ? `  (${led.bought} of ${run.throne.fed.length} bought anything; `
+              + `${led.health} hp of nothing)`
+            : `  (all ${led.bought} bought something)`;
+        })() : ""}`
         // WHERE it is, not just what is in it. The throne stands at a landmark
         // from the second aeon on, so "empty" and "never went there" look
         // identical in a report unless the distance is in it.

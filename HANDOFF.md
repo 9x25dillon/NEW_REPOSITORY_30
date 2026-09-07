@@ -46,7 +46,8 @@ it is which claim just leaked into which.**
 branch   main   (pushed to origin/main 2026-09-02, through eleven play reports,
                 an aeon-6 run and a killed 432; the repo is PRIVATE, which is what
                 config/subject.ts assumes — check before that ever changes)
-tests    305, all passing
+tests    311, all passing  (was written as 305 while it was 306; counted
+         from the runner on 2026-09-07)
 serve    python3 -m http.server on app/ WITH no-store headers — a plain
          http.server let a browser cache a build and cost a whole play session
          debugging code that had already been fixed
@@ -208,6 +209,40 @@ These are not preferences. Breaking one breaks something else two modules away.
    else can be. If you change `BIND_RADIUS`, the grid follows it automatically;
    if you change the grid's pitch independently, motes stop finding each other
    across square boundaries and nothing will look wrong.
+24. **A REFUSAL IS ABOUT THE PAIR, NOT THE NEIGHBOURHOOD.** `mergePass` takes
+   the nearest partner inside `BIND_RADIUS`, and when that one will not join it
+   looks at the rest of the same nine squares before calling it a refusal. It
+   used to give up for the frame — which quietly turned "a pentamer joins
+   nothing, ever", which is true and is the crystallographic restriction
+   theorem, into "a pentamer standing one micron nearer stops everything else
+   joining too", which is in no rule and which nobody wrote down. **The
+   shadowing is real: 2.9 per cent of binding opportunities in the first water
+   and 8 per cent from the third on, three seeds at a settled pool of 848, with
+   a quarter of every refusal holding a partner in reach that was never asked.**
+   **And it is worth no cells.** A/B over four seeds and three waters, 240 s
+   each: 1106 -> 1096, 826 -> 829, 1178 -> 1183. That is noise, and it is
+   written down so nobody spends a session expecting this to be the thing that
+   makes a late water gather — a merge also needs `BIND_DWELL` of continuous
+   partnership under a hand or a building, and most of what was shadowed was
+   never going to survive that. It is kept because the code was saying
+   something the rules do not, and because it costs nothing: it runs only on a
+   refusal and allocates nothing (rule 14), and frame time was 1.104 -> 1.078 ms
+   at the sixfold water.
+25. **EVERY BENEFIT OF FEEDING THE THRONE IS CLAMPED. THE HEALTH IS NOT.**
+   `worldFrom` pins the sound speed at mass 45, the lattice pitch at 42, the
+   suspension at 42 and the depth mode at 42; `cadence` pins at 43,
+   `inheritanceOf` at 30, `poolFor`'s axis at 26 and `wildlifeFor`'s at 10.
+   `maxHp` is `30 + mass * 10` and has no clamp at all. So **a sixfold throne
+   has bought everything there is to buy by its FOURTH helping**, and every
+   helping after that is a straight exchange of hit points for nothing — which
+   looks exactly like progress, because the one benefit the throne ever showed
+   was a percentage that had already stopped moving. `nextHelpingBuys` asks the
+   world's own functions what would actually change rather than restating those
+   ceilings, so it moves when one of them is retuned instead of going stale.
+   **Do not buy a new benefit by lifting a clamp without asking what the clamp
+   was for:** the two on the medium are the regime `src/` is honest inside, and
+   `MAX_MODE` is where the node planes get closer than the bodies standing on
+   them.
 
 ---
 
@@ -324,7 +359,7 @@ appendages, tools, armour, and an open world. Most of that now exists.
 
 ### What the play reports fixed, in order
 
-Six reports, and between them they found more real defects than a day of
+Nine reports, and between them they found more real defects than a day of
 measuring did. Every one of these was invisible until somebody played:
 
 - **3440 cells and an unfed throne at 909 s.** The suspension had no ceiling —
@@ -347,6 +382,30 @@ measuring did. Every one of these was invisible until somebody played:
   touched, because nobody had looked at `app/` with the same eye.
 - **The controller, over USB.** Closed at last, and not by any of the four
   commits of browser code written for it. See *Open, known, not fixed*.
+- **Fifty helpings, ninety-eight landed discharges, and a king on 70 per cent.**
+  Every benefit of feeding is clamped and the health is not, so the throne had
+  been sated forty-six helpings earlier and nothing had ever said so. Rule 25,
+  and the answered item below.
+- **A `wearing` count read as though it were a duration.** The diagnosis tested
+  `wearing < 6` for "they never used the hand"; `wearing` is a tick at
+  `WEAR_TICKS_PER_SECOND`, so the threshold meant "less than one second". Two
+  of the three reports came in at 10 and 8 ticks — a second and a third of
+  grip, out of five and twenty-three minutes — and both were scored as knowing
+  about the hand and routed past the advice.
+- **Every pasted report accused its author of not clicking the game.**
+  `pad.describe()` asked about focus FIRST, and `report()` is only ever reached
+  by typing into the browser console, which is exactly when the page has no
+  focus. All three reports carried the line, from a player using the pad. A pad
+  that has ever delivered input has answered the focus question by
+  demonstration; the line says what it IS now, and marks the axes stale.
+- **`doFeed`'s message had never been on screen either.** Found while fixing
+  the first one. `act()` runs before `step()` and `drain()`, so the toast
+  `doFeed` wrote — `FED n · 622 · 5 DISCHARGES TO KILL`, the one actionable
+  number at the moment of the decision — was overwritten by `drain`'s
+  `THE THRONE TAKES 622` in the same frame, every time. The same shape as the
+  `aim` lesson above, in a different mechanism. **A toast written before
+  `drain` is a toast that was never shown**, and everything the feed says lives
+  in the `fed` event handler now.
 
 ### What is still open
 
@@ -384,6 +443,17 @@ measuring did. Every one of these was invisible until somebody played:
   whole king. About a third of the bot's kill was wear. The diagnosis line says
   so now.
 
+  **AND IT STILL DID NOT REACH THEM, for a reason that was in the gate rather
+  than in the advice.** The three reports of 2026-09-06 read `wearing` 10, 9 and
+  8 — a second and a half of contact each, across 5, 11 and 23 minutes — and the
+  gate was `n("wearing") < 6`. `wearing` is a tick at `WEAR_TICKS_PER_SECOND`,
+  so that threshold was asking "did you hold it for less than one second", and
+  a player who brushed it twice passed. Both runs were routed into the
+  discharge advice instead. The gate is now what the hand actually took off the
+  bar — `ticks / WEAR_TICKS_PER_SECOND * wearRate` against a tenth of `maxHp` —
+  which is the figure that means something. **A threshold on an event count is
+  a threshold on a sample rate; say which in the name.**
+
 - **Feeding a 23 is worse than it looks, and nothing says so.** Its freedom is
   1, so the hand does 2 hp/s against it — the second-worst handle in the game,
   with only 432 (no handle at all) below it. It also throws four arms, and mass
@@ -394,11 +464,36 @@ measuring did. Every one of these was invisible until somebody played:
   against `hit:volley` 6 to 16. With a pad the player dodges beasts almost
   perfectly and the king's arms are nearly the only thing reaching them. Whether
   that is the right shape for the fight is unmeasured.
-- **Feeding is now a real decision and nobody has explored the top of it.** A
-  king has gone from 150 hp to 2730 across the session as the player learned
-  that feeding buys inheritance. `devour` scales with it — a 2730 hp king ate 26
-  buildings and healed about 470 back. Where that stops being worth it is
-  unknown.
+- ~~**Feeding is now a real decision and nobody has explored the top of it.**~~
+  MEASURED AND ANSWERED 2026-09-06, from a play report, and the answer is
+  short: **the top of it is the fourth helping.** See rule 25.
+
+  The report: 1369 s, aeon 6, a sixfold throne fed **fifty** helpings for mass
+  582 and 5850 hit points, **one hundred discharges of which 98 landed**, the
+  king finished on 4113, the player dead. Nothing they did in that fight was
+  wrong — they dodged 407 volleys out of 421. Read back through `throneLedger`:
+  **4 of those 50 helpings bought anything. The other 46 bought 5340 hit points
+  and nothing else.** A throne stopped where it was sated would have woken 510.
+
+  Three things worth keeping:
+
+  - **The trap is that overfeeding looks like progress.** The panel showed the
+    cost honestly — hit points, discharges to kill — and exactly one benefit,
+    `NEXT WORLD KEEPS 60%`, which is a clamped number that reads the same on
+    both sides of its clamp. Nothing on screen ever changed when feeding
+    stopped being worth anything.
+  - **It was not the fight.** `dischargesToKill` was right, the falloff was
+    right, and the diagnosis answered that run with a tip about where to stand.
+    The run was decided at the throne, four helpings in.
+  - **The same three reports carry the control.** The aeon-1 throne was fed
+    seven helpings of which SIX bought something. That player was not
+    overfeeding, and the new diagnosis line is gated so it does not accuse them
+    of it — see the gate, which is "you have already landed enough damage to
+    have killed the throne you would have woken by stopping".
+
+  Still unmeasured: feeding past the ceiling does buy SCORE, since birth pays
+  `40 + mass * 8`, so it is a gamble rather than a strict mistake. Nobody has
+  played it as one and nothing on screen frames it that way.
 - **Limbs now DEPEND on something, and still BUY nothing.** Half of this closed
   2026-09-05 and the half that is left is the more interesting one.
 
@@ -505,6 +600,14 @@ Things that worked, and are worth repeating:
   discharge falloff and `DEVOUR_REACH` were each defensible alone and together
   they made good damage and a surviving building mutually exclusive. Nothing
   catches that except an assertion that mentions the pair.
+- **The surface has two clocks and one of them wins.** `act()` runs on the
+  input, `drain()` runs on the events, and `act` is first — so anything `act`
+  writes into a slot the event handler also writes is dead on arrival. This has
+  now happened twice, to the `aim` lesson through `teach()` and to the feed
+  toast through `say()`, and both times the symptom was that a message nobody
+  had ever seen looked correct in the source. If you write to `this.say`,
+  `this.card` or any other single-slot channel from `act`, check whether the
+  event for the same action writes there too.
 - **When you make something bigger, ask what the change breaks that was fine
   before.** Raising the population 13× made an O(n²) merge pass matter and made
   an unculled renderer matter. Moving the throne two millimetres away made a

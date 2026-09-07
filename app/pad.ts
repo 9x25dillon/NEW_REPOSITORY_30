@@ -269,22 +269,34 @@ export class Pad {
     const id = String(gp.id ?? "UNNAMED PAD");
     const focused = typeof document === "undefined" ? true : (document.hasFocus?.() ?? true);
 
-    // THE QUESTION THAT DECIDES EVERYTHING. A pad that enumerated fine and
-    // delivers nothing but zeroes is, nine times in ten, a page that does not
-    // have focus — the browser simply stops updating gamepad state, silently
-    // and forever. Saying "no mapping" or "press a button" at that point sends
-    // somebody chasing the wrong thing.
-    if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
-    if (!this.everMoved) {
-      return `${id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
+    // THE QUESTION THAT DECIDES EVERYTHING, AND IT IS THE SECOND ONE. A pad
+    // that enumerated fine and delivers nothing but zeroes is, nine times in
+    // ten, a page that does not have focus — the browser stops updating gamepad
+    // state, silently and forever. Saying "no mapping" or "press a button"
+    // there sends somebody chasing the wrong thing.
+    //
+    // But it was asked FIRST, and this string is read in two places that are
+    // not alike. On the title screen it is live and focus is the answer. In
+    // `report()` it is read from the BROWSER CONSOLE — which is the only way a
+    // report is ever produced, and which is exactly when the page does not have
+    // focus. So the one line in a pasted report that describes the controller
+    // was guaranteed to accuse the player of not clicking the game. All three
+    // reports of 2026-09-06 carried it, from a player using the pad.
+    //
+    // A pad that has ever delivered input has answered the focus question by
+    // demonstration. Say what it IS, and note the focus as a footnote rather
+    // than as a verdict.
+    if (this.everMoved) {
+      const ax = [...(gp.axes ?? [])].slice(0, 4).map((v) => (v ?? 0).toFixed(2)).join(" ");
+      const pressed = [...(gp.buttons ?? [])]
+        .map((b, i) => (b && (b.pressed || b.value > TRIGGER) ? i : -1))
+        .filter((i) => i >= 0);
+      return `${id.slice(0, 30)} | ${gp.mapping || "(none)"} `
+        + `| AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`
+        + `${focused ? "" : " | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE"}`;
     }
-
-    const ax = [...(gp.axes ?? [])].slice(0, 4).map((v) => (v ?? 0).toFixed(2)).join(" ");
-    const pressed = [...(gp.buttons ?? [])]
-      .map((b, i) => (b && (b.pressed || b.value > TRIGGER) ? i : -1))
-      .filter((i) => i >= 0);
-    return `${id.slice(0, 30)} | ${gp.mapping || "(none)"} `
-      + `| AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
+    if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
+    return `${id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
   }
 
   /** True on the frame a key goes down, once per press. For settings, which

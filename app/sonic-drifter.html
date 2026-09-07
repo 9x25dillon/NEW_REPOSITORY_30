@@ -1761,6 +1761,47 @@
   function inheritanceOf(s) {
     return Math.min(0.6, 0.12 + s.mass * 0.016);
   }
+  function nextHelpingBuys(s, c, aeon) {
+    const after = { ...s, fed: [...s.fed] };
+    feed(after, c);
+    const a = worldFrom(s, aeon);
+    const b = worldFrom(after, aeon);
+    const out = [];
+    const moved = (label, x, y) => {
+      if (String(x) !== String(y)) out.push(label);
+    };
+    moved(
+      "WHAT THE NEXT WORLD KEEPS",
+      (inheritanceOf(s) * 100).toFixed(0),
+      (inheritanceOf(after) * 100).toFixed(0)
+    );
+    moved("ITS LATTICE", (a.pitch * 1e6).toFixed(0), (b.pitch * 1e6).toFixed(0));
+    moved("HOW FAST ITS WATER IS", a.medium.c.toFixed(0), b.medium.c.toFixed(0));
+    moved("HOW MUCH IS IN IT", a.density, b.density);
+    moved("HOW DEEP IT IS", a.mode, b.mode);
+    moved("WHAT IS DISSOLVED IN IT", a.pool.join(" "), b.pool.join(" "));
+    moved("WHAT LIVES THERE", a.wildlife.join(" "), b.wildlife.join(" "));
+    moved("ITS BEAT", cadence(s).toFixed(2), cadence(after).toFixed(2));
+    moved("ITS ARMS", volley(s).length, volley(after).length);
+    return out;
+  }
+  function helpingCosts(s, c) {
+    const after = { ...s, fed: [...s.fed] };
+    feed(after, c);
+    return after.maxHp - s.maxHp;
+  }
+  function throneLedger(s, aeon) {
+    const k = emptyThrone(s.x, s.y);
+    let bought = 0;
+    let sated = 0;
+    for (let i = 0; i < s.fed.length; i++) {
+      const c = cellFor(s.fed[i]);
+      if (nextHelpingBuys(k, c, aeon).length > 0) bought = i + 1;
+      feed(k, c);
+      if (i + 1 === bought) sated = k.maxHp;
+    }
+    return { bought, wasted: s.fed.length - bought, health: s.maxHp - sated };
+  }
   function epitaphFor(s, w) {
     const g2 = pointGroup(s.hm === "" ? "1" : s.hm);
     const carry2 = contrastFactor(YOU, w.medium);
@@ -2274,11 +2315,13 @@
     const grid = neighbourhood(ms);
     const ix = indexStructures(run.structures);
     const scratch = [];
+    const reach = [];
     for (let i = 0; i < ms.length; i++) {
       const a = ms[i];
       if (gone.has(a.id)) continue;
       let best = null;
       let bestR = BIND_RADIUS;
+      reach.length = 0;
       const cx = Math.floor(a.x / BIND_RADIUS);
       const cy = Math.floor(a.y / BIND_RADIUS);
       for (let ox = -1; ox <= 1; ox++) {
@@ -2291,6 +2334,8 @@
             if (gone.has(b.id)) continue;
             if (!together(a.layer, b.layer)) continue;
             const r = Math.hypot(a.x - b.x, a.y - b.y);
+            if (r >= BIND_RADIUS) continue;
+            reach.push(b);
             if (r < bestR) {
               bestR = r;
               best = b;
@@ -2309,40 +2354,55 @@
         a.partner = -1;
         continue;
       }
-      const asm = assemble([...a.parts, ...best.parts]);
+      let mate = best;
+      let asm = assemble([...a.parts, ...mate.parts]);
+      if (!asm.group && !asm.partial && reach.length > 1) {
+        let joinR = Infinity;
+        for (const b of reach) {
+          if (b === best) continue;
+          const r = Math.hypot(a.x - b.x, a.y - b.y);
+          if (r >= joinR) continue;
+          const other = assemble([...a.parts, ...b.parts]);
+          if (other.group || other.partial) {
+            joinR = r;
+            mate = b;
+            asm = other;
+          }
+        }
+      }
       if (!asm.group && !asm.partial) {
         if (a.flash <= 0) {
           a.flash = 0.45;
-          best.flash = 0.45;
+          mate.flash = 0.45;
           run.events.push({
             kind: "refuse",
-            x: (a.x + best.x) / 2,
-            y: (a.y + best.y) / 2,
+            x: (a.x + mate.x) / 2,
+            y: (a.y + mate.y) / 2,
             text: asm.refusal ?? "unknown"
           });
         }
-        const dx = a.x - best.x, dy = a.y - best.y, r = Math.hypot(dx, dy) || 1e-9;
+        const dx = a.x - mate.x, dy = a.y - mate.y, r = Math.hypot(dx, dy) || 1e-9;
         a.x += dx / r * 7e-6;
         a.y += dy / r * 7e-6;
-        best.x -= dx / r * 7e-6;
-        best.y -= dy / r * 7e-6;
+        mate.x -= dx / r * 7e-6;
+        mate.y -= dy / r * 7e-6;
         a.dwell = 0;
         a.partner = -1;
         continue;
       }
-      if (a.partner === best.id) a.dwell += dt;
+      if (a.partner === mate.id) a.dwell += dt;
       else {
-        a.partner = best.id;
+        a.partner = mate.id;
         a.dwell = dt;
       }
       if (a.dwell >= BIND_DWELL) {
-        a.parts = [...a.parts, ...best.parts];
-        a.x = (a.x + best.x) / 2;
-        a.y = (a.y + best.y) / 2;
+        a.parts = [...a.parts, ...mate.parts];
+        a.x = (a.x + mate.x) / 2;
+        a.y = (a.y + mate.y) / 2;
         a.dwell = 0;
         a.partner = -1;
         a.flash = 0.4;
-        gone.add(best.id);
+        gone.add(mate.id);
         run.events.push({ kind: "merge", x: a.x, y: a.y });
       }
     }
@@ -2665,6 +2725,7 @@
   var VOLLEY_WIND = 0.55;
   var DEVOUR_REACH = 15e-5;
   var WEAR_PER_COMPONENT = 2;
+  var WEAR_TICKS_PER_SECOND = 6;
   function wearRate(k) {
     if (k.hm === "") return 0;
     return WEAR_PER_COMPONENT * cellFor(k.hm).freedom;
@@ -2692,7 +2753,9 @@
     k.y = Math.max(kb.y + 3e-5, Math.min(kb.y + kb.h - 3e-5, k.y + dy * dt));
     if (wearing(run)) {
       k.hp = Math.max(0, k.hp - wearRate(k) * dt);
-      if (run.rand() < dt * 6) run.events.push({ kind: "wearing", x: k.x, y: k.y });
+      if (run.rand() < dt * WEAR_TICKS_PER_SECOND) {
+        run.events.push({ kind: "wearing", x: k.x, y: k.y });
+      }
       if (k.hp <= 0) {
         birth(run);
         return;
@@ -3071,13 +3134,13 @@
       const gp = found[0];
       const id = String(gp.id ?? "UNNAMED PAD");
       const focused = typeof document === "undefined" ? true : document.hasFocus?.() ?? true;
-      if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
-      if (!this.everMoved) {
-        return `${id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
+      if (this.everMoved) {
+        const ax = [...gp.axes ?? []].slice(0, 4).map((v) => (v ?? 0).toFixed(2)).join(" ");
+        const pressed = [...gp.buttons ?? []].map((b, i) => b && (b.pressed || b.value > TRIGGER) ? i : -1).filter((i) => i >= 0);
+        return `${id.slice(0, 30)} | ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}${focused ? "" : " | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE"}`;
       }
-      const ax = [...gp.axes ?? []].slice(0, 4).map((v) => (v ?? 0).toFixed(2)).join(" ");
-      const pressed = [...gp.buttons ?? []].map((b, i) => b && (b.pressed || b.value > TRIGGER) ? i : -1).filter((i) => i >= 0);
-      return `${id.slice(0, 30)} | ${gp.mapping || "(none)"} | AXES ${ax} | DOWN ${pressed.length ? pressed.join(",") : "-"}`;
+      if (!focused) return "CLICK THE GAME - A PAGE WITHOUT FOCUS GETS NO PAD INPUT";
+      return `${id.slice(0, 30)} SEEN, NOTHING RECEIVED YET - CLICK HERE, THEN PRESS A BUTTON`;
     }
     /** True on the frame a key goes down, once per press. For settings, which
      *  must not toggle sixty times a second while a finger is resting on them. */
@@ -3339,7 +3402,12 @@
     crown: {
       id: "crown",
       title: "IT IS WHAT YOU FED IT",
-      body: "ITS GROUP IS THE MOST SYMMETRIC CELL YOU GAVE IT, AND ITS VOLLEY IS THAT GROUP'S SYMMETRY SEEN FROM ABOVE. FEED IT MORE AND IT THROWS MORE ARMS - AND THE WORLD BORN OUT OF ITS BODY IS RICHER. THAT TRADE IS THE GAME."
+      body: "ITS GROUP IS THE MOST SYMMETRIC CELL YOU GAVE IT, AND ITS VOLLEY IS THAT GROUP'S SYMMETRY SEEN FROM ABOVE. FEED IT MORE AND IT THROWS MORE ARMS - AND THE WORLD BORN OUT OF ITS BODY IS RICHER. THAT TRADE IS THE GAME, AND IT HAS A BOTTOM: EVERY PART OF THAT RICHNESS RUNS INTO A CEILING WITHIN A FEW HELPINGS, AND ITS HEALTH DOES NOT."
+    },
+    sated: {
+      id: "sated",
+      title: "IT IS FULL, AND YOU CAN KEEP FEEDING IT",
+      body: "THE WATER A KING LEAVES IS BOUNDED BY THE PHYSICS IT IS MADE OF - THE MEDIUM ONLY GOES SO FAST AND SO THIN BEFORE THE SOLVER STOPS BEING HONEST, THE CHANNEL ONLY HOLDS FOUR NODE PLANES BEFORE THEY ARE CLOSER THAN THE BODIES STANDING ON THEM, AND A LATTICE HAS A SHORTEST USABLE PITCH. ALL OF IT IS AT ITS LIMIT NOW. ITS HEALTH IS NOT BOUNDED BY ANYTHING, SO EVERY HELPING FROM HERE IS HIT POINTS YOU WILL HAVE TO TAKE BACK OFF ONE SPENT BUILDING AT A TIME."
     },
     anchored: {
       id: "anchored",
@@ -3381,6 +3449,17 @@
       __publicField(this, "youTrail", []);
       /** Which cell in the rack a bare press will spend. */
       __publicField(this, "selected", 0);
+      /**
+       * The diagnosis, held from the frame the run ended.
+       *
+       * `drawDead` runs sixty times a second and `diagnosis()` is not a lookup: it
+       * walks every building and every cell in the rack through `dischargesToKill`,
+       * and `throneLedger` replays the whole fed list against `worldFrom` — 385
+       * microseconds at the fifty helpings a real report carried. Rule 20 applies
+       * to the death screen as much as to the arena, and nothing behind this line
+       * can change once you are dead.
+       */
+      __publicField(this, "verdict", null);
       __publicField(this, "wasGrip", false);
       /**
        * What happened, counted.
@@ -3540,6 +3619,7 @@
       canvas2.width = VIEW_W;
       canvas2.height = VIEW_H;
       this.run = startRun(this.seed);
+      this.verdict = null;
       this.washCanvas = document.createElement("canvas");
       this.washCanvas.width = WASH_W;
       this.washCanvas.height = WASH_H;
@@ -3727,15 +3807,10 @@
       }
     }
     doFeed() {
-      const run = this.run;
-      const r = feedThrone(run, this.selected);
+      const r = feedThrone(this.run, this.selected);
       if (r === "off-throne") this.say("STAND ON THE THRONE TO FEED IT");
       if (r === "none") this.say("NOTHING IN HAND");
       if (r === "wrong-phase") this.say("IT IS ALREADY AWAKE");
-      if (r === "fed") {
-        const need = dischargesToKill(run);
-        this.say(Number.isFinite(need) ? `FED ${run.throne.fed.length}  \xB7  ${run.throne.hm}  \xB7  ${need} DISCHARGES TO KILL` : `FED ${run.throne.fed.length}  \xB7  ${run.throne.hm}  \xB7  NOTHING CAN KILL IT YET`);
-      }
     }
     fit() {
       const s = Math.min(window.innerWidth / (VIEW_W + 40), window.innerHeight / (VIEW_H + 96));
@@ -3747,6 +3822,7 @@
       this.tally = {};
       this.seed = this.seed * 1664525 + 1013904223 >>> 0;
       this.run = startRun(this.seed, this.ebb);
+      this.verdict = null;
       this.screen = "play";
       this.sparks = [];
       this.popups = [];
@@ -3898,7 +3974,13 @@
           case "fed":
             this.ring(run.throne.x, run.throne.y, 10, 60, 0.6, "255,201,74");
             this.sfx.capture(4);
-            this.say(`THE THRONE TAKES ${ev.group}  \xB7  C TO CROWN`);
+            if (throneLedger(run.throne, run.world.aeon).bought < run.throne.fed.length) {
+              this.say(`THE THRONE TAKES ${ev.group}  \xB7  ${run.throne.maxHp} HP  \xB7  AND IT BOUGHT NOTHING ELSE`);
+              this.teach("sated");
+            } else {
+              const need = dischargesToKill(run);
+              this.say(`THE THRONE TAKES ${ev.group}  \xB7  ${Number.isFinite(need) ? `${need} DISCHARGES TO KILL` : "NOTHING CAN KILL IT YET"}  \xB7  C TO CROWN`);
+            }
             break;
           case "crown":
             this.flash = 0.9;
@@ -4913,13 +4995,36 @@
           g2.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
         }
         const keep = inheritanceOf(run.throne);
+        let line = beyond ? 50 : 39;
         g2.font = `700 9px ${MONO}`;
         g2.fillStyle = keep < 0.2 ? "#ffa24a" : JADE;
         g2.fillText(
           `NEXT WORLD KEEPS ${(keep * 100).toFixed(0)}% OF WHAT YOU BUILD`,
           x,
-          y - R - (beyond ? 50 : 39)
+          y - R - line
         );
+        line += 11;
+        const hand = run.cells[this.selected] ?? run.cells[0];
+        if (hand) {
+          const buys = nextHelpingBuys(run.throne, hand, run.world.aeon);
+          const cost = helpingCosts(run.throne, hand);
+          g2.font = `700 9px ${MONO}`;
+          if (buys.length === 0) {
+            g2.fillStyle = RED;
+            g2.fillText(
+              `SATED  \xB7  ANOTHER ${hand.group.hm} IS +${cost} HP AND NOTHING ELSE`,
+              x,
+              y - R - line
+            );
+          } else {
+            g2.fillStyle = JADE;
+            g2.fillText(
+              `ONE MORE ${hand.group.hm}: +${cost} HP BUYS ${buys.slice(0, 2).join(" + ")}${buys.length > 2 ? `  +${buys.length - 2} MORE` : ""}`,
+              x,
+              y - R - line
+            );
+          }
+        }
       }
       if (this.crownHeld > 0) {
         const f = Math.min(1, this.crownHeld / _Game.CROWN_HOLD);
@@ -5645,7 +5750,8 @@
       g2.textAlign = "center";
       g2.font = `700 11px ${MONO}`;
       g2.fillStyle = `rgb(${NODE})`;
-      g2.fillText(this.diagnosis(), VIEW_W / 2, 412);
+      this.verdict ?? (this.verdict = this.diagnosis());
+      g2.fillText(this.verdict, VIEW_W / 2, 412);
       g2.fillStyle = DIM;
       g2.font = `600 10px ${MONO}`;
       g2.fillText(`BEST ${this.best}   \xB7   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 436);
@@ -5768,10 +5874,20 @@
       if (run.throne.awake && run.structures.length > 4 && n("discharge") === 0) {
         return "YOU NEVER FIRED A BUILDING. GRIP ONE WHILE THE KING IS IN ITS ARMS - YOUR HAND ALONE LOSES TO WHAT IT HEALS BY EATING THEM";
       }
+      if (run.throne.awake && run.throne.hp > 0 && n("sovereign-hit") > 0) {
+        const led = throneLedger(run.throne, run.world.aeon);
+        const sated = run.throne.maxHp - led.health;
+        const need = dischargesToKill(run);
+        const perShot = Number.isFinite(need) ? run.throne.hp / Math.max(1, need) : 0;
+        if (led.wasted >= 3 && perShot * n("sovereign-hit") > sated && run.throne.hp > run.throne.maxHp * 0.4) {
+          return `YOU FED IT ${run.throne.fed.length} AND THE FIRST ${led.bought} BOUGHT ALL THERE WAS - THE OTHER ${led.wasted} WERE ${led.health} HIT POINTS OF NOTHING. YOU HAVE ALREADY LANDED ENOUGH TO KILL A ${sated} HP KING`;
+        }
+      }
       if (run.throne.awake && run.throne.hp > 0 && n("discharge") > 0) {
         const need = dischargesToKill(run);
         const rate = wearRate(run.throne);
-        if (rate > 0 && n("wearing") < 6) {
+        const took = n("wearing") / WEAR_TICKS_PER_SECOND * rate;
+        if (rate > 0 && took < run.throne.maxHp * 0.1) {
           return `${n("discharge")} DISCHARGES IS NOT ENOUGH - IT NEEDS ${Number.isFinite(need) ? need : "MORE THAN YOU HAD"} MORE FROM WHERE YOU CAN STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES ${rate}/S OFF IT`;
         }
         return `${n("discharge")} DISCHARGES LANDED AND IT LIVED. GET THE KING ONTO A BUILDING - AN ARM IS WORTH DOUBLE AT ITS MUZZLE AND NOTHING AT ITS EDGE`;
@@ -5812,7 +5928,10 @@
         `SONIC DRIFTER  ${run.t.toFixed(0)}s  aeon ${run.world.aeon} (${run.world.name})  phase ${run.phase}`,
         `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
         `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
-        `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}${(() => {
+        `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}${run.throne.fed.length ? (() => {
+          const led = throneLedger(run.throne, run.world.aeon);
+          return led.wasted > 0 ? `  (${led.bought} of ${run.throne.fed.length} bought anything; ${led.health} hp of nothing)` : `  (all ${led.bought} bought something)`;
+        })() : ""}${(() => {
           const at = nearestFeature(CHIP, run.throne.x, run.throne.y);
           const r = Math.hypot(run.throne.x - run.you.x, run.throne.y - run.you.y);
           return `  at ${at ? `${featureName(at.feature).toLowerCase()} #${at.feature.id}` : "mid-channel"}, ${(r * 1e6).toFixed(0)}um from you`;

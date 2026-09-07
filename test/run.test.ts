@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  ARENA_H, ARENA_W, BEASTS, CHANNEL_H, CHANNEL_W, MAX_INTEGRITY, START,
+  ARENA_H, ARENA_W, BEASTS, BIND_RADIUS, CHANNEL_H, CHANNEL_W, MAX_INTEGRITY, START,
   beast, clusterParticle, crown, discharge, enterWorld, labelOf, newBeast,
   DEVOUR_REACH, DISCHARGE_GAIN, LOBE_RANGE, VOLLEY_WIND, bearsOn, dischargeFalloff,
   dischargesToKill, feedThrone,
@@ -245,6 +245,72 @@ test("the king's arms stop turning while it is winding up", () => {
 });
 
 // ── what stays, and what it does while you are away ─────────────────────────
+
+test("a refuser standing nearer does not stop two motifs that would have joined", () => {
+  // `mergePass` took the NEAREST partner inside binding distance, tried it, and
+  // gave up for the frame if it would not go. The RULE is that a pentamer joins
+  // nothing, ever — the crystallographic restriction theorem, which this game
+  // spends on purpose and says so in `poolFor`. The CODE was saying something
+  // stronger and nobody had written it down: a pentamer six microns away also
+  // stopped a girdle eighteen microns away from binding.
+  //
+  // It is not a rounding error. Measured over three seeds at a settled pool of
+  // 848 motifs, the share of binding opportunities lost to a nearer refuser is
+  // 2.9 per cent in the first water and 8 per cent from the third on, which is
+  // where pentamers are dissolved. A quarter of every refusal had a partner in
+  // the same nine squares that was never asked.
+  const run = startRun(5);
+  run.entities = [];
+  stand(run, CENTRE.x, CENTRE.y);
+
+  const a = seedMotif(run, ["a2"], CENTRE.x, CENTRE.y);
+  const blocker = seedMotif(run, ["a5"], CENTRE.x + 6e-6, CENTRE.y);
+  const mate = seedMotif(run, ["g"], CENTRE.x + 18e-6, CENTRE.y);
+  assert.ok(18e-6 < BIND_RADIUS, "the girdle has to be a candidate at all");
+  assert.equal(assemble(["a2", "a5"]).group, null, "and the pentamer has to be a refusal");
+  assert.ok(assemble(["a2", "g"]).partial || assemble(["a2", "g"]).group,
+    "while the girdle is a 222 waiting to happen");
+
+  // Held in place: this is a test about which partner is CHOSEN, not about
+  // whether the field can carry them together.
+  const grip: Input = { move: { x: 0, y: 0 }, grip: true, dash: false };
+  for (let i = 0; i < 60 * 4 && a.parts.length < 2; i++) {
+    a.x = CENTRE.x; a.y = CENTRE.y;
+    blocker.x = CENTRE.x + 6e-6; blocker.y = CENTRE.y;
+    mate.x = CENTRE.x + 18e-6; mate.y = CENTRE.y;
+    step(run, grip, DT);
+    run.events.length = 0;
+  }
+
+  assert.deepEqual([...a.parts].sort(), ["a2", "g"],
+    "the dimer and the girdle must find each other past the pentamer");
+  assert.ok(run.entities.some((e) => e.id === blocker.id && e.parts.length === 1),
+    "and the pentamer is still standing there unjoined, because nothing joins it");
+});
+
+test("with nothing in reach that will join, it still refuses and says why", () => {
+  // The other side of the rule above, and the reason it is not simply "try
+  // harder". A hand closed on two things that genuinely cannot go together has
+  // to be told so — the refusal is the game explaining the crystallographic
+  // restriction theorem — and the count is what a play report carries.
+  const run = startRun(5);
+  run.entities = [];
+  stand(run, CENTRE.x, CENTRE.y);
+  seedMotif(run, ["a2"], CENTRE.x, CENTRE.y);
+  seedMotif(run, ["a5"], CENTRE.x + 6e-6, CENTRE.y);
+
+  const grip: Input = { move: { x: 0, y: 0 }, grip: true, dash: false };
+  let refused = 0;
+  for (let i = 0; i < 60 * 4; i++) {
+    const ms = run.entities.filter((e) => e.faction === "motif");
+    ms[0].x = CENTRE.x; ms[0].y = CENTRE.y;
+    if (ms[1]) { ms[1].x = CENTRE.x + 6e-6; ms[1].y = CENTRE.y; }
+    step(run, grip, DT);
+    refused += run.events.filter((e) => e.kind === "refuse").length;
+    run.events.length = 0;
+  }
+  assert.ok(refused > 0, "a pair with no way to join must still be told so");
+});
 
 test("a structure gathers and merges without you touching it", () => {
   // The whole reason to build. Two motifs left inside a structure's holding

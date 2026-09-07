@@ -2,8 +2,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  cadence, emptyThrone, epitaphFor, feed, firstWorld, holdPoints, poolFor,
-  reachOf, sovereignInertia, sovereignParticle, structureFrom, volley, worldFrom,
+  cadence, emptyThrone, epitaphFor, feed, firstWorld, holdPoints,
+  nextHelpingBuys, poolFor, reachOf, sovereignInertia, sovereignParticle,
+  structureFrom, throneLedger, volley, worldFrom,
 } from "../game/world.js";
 import { BUILDABLE, cellFor, motif, recipesFrom } from "../game/lattice.js";
 import { YOU } from "../game/pilot.js";
@@ -209,4 +210,78 @@ test("a diagonal is only dissolved where the axis can use it", () => {
     assert.equal(pool.includes("d"), usable,
       `[${pool}] carries a diagonal its ${axis} cannot build with`);
   }
+});
+
+// ── what feeding it actually buys ───────────────────────────────────────────
+
+test("a throne is sated long before it is full", () => {
+  // THE MEASUREMENT THIS EXISTS FOR, from the play report of 2026-09-06: a
+  // sixfold throne fed FIFTY helpings, 5850 hit points woken, 98 discharges
+  // landed on the king and the run lost to it anyway.
+  //
+  // Every benefit of feeding is clamped — inheritance at mass 30, the lattice
+  // pitch, the sound speed, the suspension, the depth mode and the volley
+  // cadence all between 42 and 46 — and `maxHp` is clamped by nothing. So past
+  // a point a helping is a straight exchange of health for nothing, it looks
+  // exactly like progress, and the one benefit the throne panel ever showed
+  // reads 60% before and 60% after.
+  const c = cellFor("622");
+  const k = emptyThrone(0, 0);
+  const bought: number[] = [];
+  for (let n = 1; n <= 12; n++) {
+    if (nextHelpingBuys(k, c, 6).length > 0) bought.push(n);
+    feed(k, c);
+  }
+
+  assert.ok(bought.length > 0, "the first helpings must buy something or feeding is pointless");
+  assert.equal(bought[0], 1, "the first one always does");
+  assert.deepEqual(bought, bought.map((_, i) => i + 1),
+    `what feeding buys must run out ONCE, not flicker (${bought.join(",")})`);
+  assert.ok(bought[bought.length - 1] <= 6,
+    `and it runs out early — this is the whole finding (${bought[bought.length - 1]})`);
+
+  // And the thing that goes on for ever is the one with no ceiling on it.
+  const before = k.maxHp;
+  feed(k, c);
+  assert.ok(k.maxHp > before, "the health keeps rising");
+  assert.equal(nextHelpingBuys(k, c, 6).length, 0, "and by now it is the only thing that does");
+});
+
+test("the throne reads back what its helpings bought", () => {
+  // The report's own throne, replayed. It is the run in one line, and it
+  // happened at the throne rather than in the fight.
+  const fifty = king(new Array(50).fill("622"));
+  const led = throneLedger(fifty, 6);
+  assert.equal(led.bought + led.wasted, 50, "every helping is one or the other");
+  assert.ok(led.wasted >= 40,
+    `most of fifty helpings bought nothing (${led.bought} bought, ${led.wasted} did not)`);
+  assert.ok(led.health > fifty.maxHp * 0.8,
+    `and most of the bar is health that bought nothing (${led.health} of ${fifty.maxHp})`);
+
+  // A throne inside its ceiling has nothing to answer for, and an empty one is
+  // not accused of anything either.
+  assert.equal(throneLedger(king(["622"]), 6).wasted, 0);
+  assert.equal(throneLedger(king(["622", "622"]), 6).wasted, 0);
+  const empty = throneLedger(emptyThrone(0, 0), 6);
+  assert.deepEqual([empty.bought, empty.wasted, empty.health], [0, 0, 0]);
+});
+
+test("what a helping buys is read off the world, not restated from its clamps", () => {
+  // The two halves that must not drift apart. `nextHelpingBuys` names a
+  // quantity only when `worldFrom` and its neighbours actually return something
+  // different — so if one of those ceilings is ever retuned, this moves with it
+  // instead of going quietly stale.
+  const c = cellFor("222");
+  const k = king(["222"]);
+  const before = worldFrom(k, 4);
+  const named = nextHelpingBuys(k, c, 4);
+  feed(k, c);
+  const after = worldFrom(k, 4);
+
+  const changed = before.pitch !== after.pitch || before.medium.c !== after.medium.c
+    || before.density !== after.density || before.mode !== after.mode
+    || before.pool.join() !== after.pool.join()
+    || before.wildlife.join() !== after.wildlife.join();
+  assert.equal(named.length > 0, changed,
+    "it must claim a purchase exactly when the world it would make is different");
 });
