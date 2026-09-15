@@ -19,6 +19,7 @@ import {
   CROSSOVER_RADIUS_ORDER, WATER, contrastFactor, type Medium, type Particle,
 } from "../src/gorkov.js";
 import { focusTime, maxSweepSpeed } from "../src/trajectory.js";
+import { rayleighSizeAssessment } from "../src/modelValidity.js";
 import {
   contrastFromTrack, propertiesFromContrasts, type ContrastMeasurement, type Track,
 } from "../src/inversion.js";
@@ -97,7 +98,8 @@ function field(label: string, id: string, value: number | string, step = "any"):
 
 const LEGEND = `<div class="legend">
   <span><b style="color:var(--measured)">${GLYPH.measured} measured</b> — on an instrument</span>
-  <span><b style="color:var(--derived)">${GLYPH.derived} derived</b> — computed exactly</span>
+  <span><b style="color:var(--derived)">${GLYPH.derived} derived</b> — computed from inputs</span>
+  <span><b style="color:var(--surrogate)">${GLYPH.surrogate} surrogate</b> — requires solver re-evaluation</span>
   <span><b style="color:var(--assumed)">${GLYPH.assumed} assumed</b> — literature stand-in</span>
 </div>`;
 
@@ -260,6 +262,17 @@ function deviceView(): string {
     "from the closed-form trajectory", [...inputs, phi, rTag]);
 
   // ── guards ──
+  // Use the host-fluid and particle wavelengths, including for leaky SSAW:
+  // the lateral IDT period alone does not determine the particle size regime.
+  const sizeAssessment = rayleighSizeAssessment(wave.frequency, particle, medium);
+  extra += `<p class="note">Fluid ka = <b>${fmt(sizeAssessment.externalKa, 3)}</b>;
+    particle ka = <b>${fmt(sizeAssessment.internalKa, 3)}</b>.
+    ${esc(sizeAssessment.message)}</p>`;
+  if (!sizeAssessment.smallParticle) {
+    guards.push(`<div class="guard"><b>Gor’kov approximation outside its size screen</b>
+      ${esc(sizeAssessment.message)} Values on this screen use Gor’kov;
+      the plane-wave Mie solver is available through the simulation pipeline.</div>`);
+  }
   if (radius < CROSSOVER_RADIUS_ORDER * 1.5) {
     guards.push(`<div class="guard"><b>Below the streaming crossover</b>
       Radiation force goes as a³ and streaming drag as a, so their ratio goes as

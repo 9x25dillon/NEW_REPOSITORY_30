@@ -15,6 +15,7 @@
   --accent:#0f7680; --accent-soft:#d6ecee;
   --measured:#146e50; --measured-bg:#dcefe7;
   --derived:#275f96;  --derived-bg:#dde9f5;
+  --surrogate:#7853a6; --surrogate-bg:#eee5fa;
   --assumed:#94590f;  --assumed-bg:#f6e9d5;
   --stop:#a3352b; --stop-bg:#f7dedb;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
@@ -27,6 +28,7 @@
   --accent:#45bfc9; --accent-soft:#123037;
   --measured:#45c79b; --measured-bg:#102e26;
   --derived:#6fb0e8;  --derived-bg:#12263a;
+  --surrogate:#c4a1f5; --surrogate-bg:#2a2039;
   --assumed:#e0a355;  --assumed-bg:#33240f;
   --stop:#f08a7e; --stop-bg:#3a1a16;
 }}
@@ -37,6 +39,7 @@
   --accent:#45bfc9; --accent-soft:#123037;
   --measured:#45c79b; --measured-bg:#102e26;
   --derived:#6fb0e8;  --derived-bg:#12263a;
+  --surrogate:#c4a1f5; --surrogate-bg:#2a2039;
   --assumed:#e0a355;  --assumed-bg:#33240f;
   --stop:#f08a7e; --stop-bg:#3a1a16;
 }
@@ -63,15 +66,18 @@ textarea{line-height:1.45;resize:vertical}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
 .tile{border:1px solid var(--rule-soft);border-left-width:3px;border-radius:5px;padding:9px 11px;background:var(--ground)}
 .tile.measured{border-left-color:var(--measured)}.tile.derived{border-left-color:var(--derived)}.tile.assumed{border-left-color:var(--assumed)}
+.tile.surrogate{border-left-color:var(--surrogate)}
 .tile .k{font-size:10.5px;color:var(--ink-3);display:block;margin-bottom:3px}
 .tile .n{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;display:block}
 .tile .n .u{font-size:11px;font-weight:400;color:var(--ink-3);margin-left:2px}
 .chip{font-family:var(--mono);font-size:9px;letter-spacing:.11em;text-transform:uppercase;padding:1.5px 5px;border-radius:2.5px;font-weight:600;display:inline-block;margin-top:5px}
 .chip.measured{background:var(--measured-bg);color:var(--measured)}
 .chip.derived{background:var(--derived-bg);color:var(--derived)}
+.chip.surrogate{background:var(--surrogate-bg);color:var(--surrogate)}
 .chip.assumed{background:var(--assumed-bg);color:var(--assumed)}
 .verdict{border:1px solid var(--rule-soft);border-left:3px solid var(--assumed);border-radius:5px;padding:11px 13px;background:var(--ground);margin-bottom:14px}
 .verdict.derived{border-left-color:var(--derived)}.verdict.measured{border-left-color:var(--measured)}
+.verdict.surrogate{border-left-color:var(--surrogate)}
 .verdict .lead{font-size:15px;font-weight:600;margin-bottom:3px}
 .verdict .why{font-size:12.5px;color:var(--ink-2)}
 .guard{border:1px solid color-mix(in srgb,var(--stop) 35%,transparent);border-left:3px solid var(--stop);background:var(--stop-bg);border-radius:5px;padding:9px 12px;margin-bottom:10px;font-size:12.5px}
@@ -96,6 +102,7 @@ tr.no td{color:var(--ink-3);opacity:.62}
 <body>
 <header class="top">
   <span class="brand">Acoustofluidic Bench</span>
+  <a href="./simulation.html" style="color:var(--accent)">Simulation workbench</a>
   <nav id="nav">
     <button data-view="substrates" aria-current="true">Substrates</button>
     <button data-view="device">Device</button>

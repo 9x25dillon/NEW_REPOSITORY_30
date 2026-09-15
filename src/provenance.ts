@@ -6,7 +6,7 @@
 // density and one computed from a literature default look identical on screen
 // and are not the same kind of statement at all.
 //
-// There are exactly three kinds:
+// There are four kinds, ordered by evidential strength:
 //
 //   MEASURED  someone put it on an instrument. Carries a date and a residual.
 //             The only tag that makes a downstream result a claim about the
@@ -14,6 +14,8 @@
 //   DERIVED   computed from other values by an exact relation — a resonance
 //             from a channel width, a Rayleigh angle from two sound speeds.
 //             Traceable, and only ever as good as its inputs.
+//   SURROGATE an interpolated/predicted solver output, with model identity and
+//             predictive variance. Never promoted by downstream arithmetic.
 //   ASSUMED   a literature default standing in for something unmeasured.
 //             Useful for a first pass and load-bearing: it is the thing that
 //             turns a result into a sketch.
@@ -29,10 +31,10 @@
 // is not pedantry: it is the difference between "we observed this cell focus in
 // 42 ms" and "we calculate that it should".
 
-export type Provenance = "measured" | "derived" | "assumed";
+export type Provenance = "measured" | "derived" | "surrogate" | "assumed";
 
 /** Weakest first. Comparisons and the inheritance rule both read this order. */
-const STRENGTH: Record<Provenance, number> = { assumed: 0, derived: 1, measured: 2 };
+const STRENGTH: Record<Provenance, number> = { assumed: 0, surrogate: 1, derived: 2, measured: 3 };
 
 export function weakest(...ps: readonly Provenance[]): Provenance {
   if (ps.length === 0) return "assumed";
@@ -52,6 +54,9 @@ export interface Tagged<T = number> {
   note: string;
   /** Present on derived values. */
   inputs?: ReadonlyArray<Tagged<unknown>>;
+  /** Present on a surrogate prediction even when assumed inputs weaken its tag.
+   * Variance is in value-units squared; it is not automatically calibrated. */
+  surrogate?: { modelId: string; predictiveVariance: number; inDomain: boolean };
 }
 
 /** A value somebody measured. */
@@ -62,6 +67,34 @@ export function measured<T>(label: string, value: T, note: string): Tagged<T> {
 /** A literature default, or anything else standing in for a measurement. */
 export function assumed<T>(label: string, value: T, note: string): Tagged<T> {
   return { label, value, provenance: "assumed", note };
+}
+
+/** Label a numerical prediction, not a surrogate implementation. Training,
+ * calibration and final solver re-evaluation remain the caller's obligations. */
+export function surrogate(
+  label: string, value: number, note: string,
+  metadata: NonNullable<Tagged["surrogate"]>, inputs: ReadonlyArray<Tagged<unknown>>,
+): Tagged<number> {
+  if (!Number.isFinite(value) || !Number.isFinite(metadata.predictiveVariance)
+    || metadata.predictiveVariance < 0 || typeof metadata.modelId !== "string"
+    || !metadata.modelId.trim() || typeof metadata.inDomain !== "boolean" || inputs.length === 0) {
+    throw new Error("surrogate requires finite value, nonnegative variance, model identity, domain flag and inputs");
+  }
+  return {
+    label, value, note, inputs, surrogate: { ...metadata },
+    provenance: weakest("surrogate", ...inputs.map(i => i.provenance)),
+  };
+}
+
+/** Surrogate dependence survives even if an assumed input weakens the headline. */
+export function hasSurrogate(t: Tagged<unknown>): boolean {
+  return t.provenance === "surrogate" || t.surrogate !== undefined || (t.inputs?.some(hasSurrogate) ?? false);
+}
+
+/** Gate for final reporting. It never relabels a prediction as a solver result.
+ * Passing this check establishes absence of surrogate lineage, not accuracy. */
+export function assertNoSurrogate(t: Tagged<unknown>): void {
+  if (hasSurrogate(t)) throw new Error("surrogate-dependent result: re-evaluate the candidate with the physics solver before final reporting");
 }
 
 /**
@@ -92,6 +125,10 @@ export function blame(t: Tagged<unknown>): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const walk = (n: Tagged<unknown>) => {
+    if (t.provenance === "surrogate" && n.surrogate) {
+      if (!seen.has(n.label)) { seen.add(n.label); out.push(n.label); }
+      return;
+    }
     if (!n.inputs || n.inputs.length === 0) {
       if (n.provenance === t.provenance && !seen.has(n.label)) {
         seen.add(n.label);
@@ -120,6 +157,7 @@ export function sources(t: Tagged<unknown>): Array<Tagged<unknown>> {
 export const GLYPH: Record<Provenance, string> = {
   measured: "◆", // filled diamond
   derived: "▲",  // triangle
+  surrogate: "≈", // approximation
   assumed: "○",  // hollow circle
 };
 
@@ -136,10 +174,15 @@ export function verdict(t: Tagged<unknown>): string {
   if (t.provenance === "derived") {
     return `${t.label} is computed from measured inputs.`;
   }
+  if (t.provenance === "surrogate") {
+    return `${t.label} depends on a surrogate estimate${cause.length ? ` (${cause.join(", ")})` : ""}. `
+      + "Re-evaluate the candidate with the physics solver before final reporting.";
+  }
   const list = cause.length
     ? cause.join(", ")
     : "an unmeasured input";
   const verb = cause.length === 1 ? "is" : "are";
   return `This result is assumed, not measured: ${list} ${verb} a stand-in. ` +
-    `Measure ${cause.length === 1 ? "it" : "them"} to make this a claim about your cells.`;
+    `Measure ${cause.length === 1 ? "it" : "them"} to make this a claim about your cells.`
+    + (hasSurrogate(t) ? " Surrogate estimates also require physics-solver re-evaluation before final reporting." : "");
 }

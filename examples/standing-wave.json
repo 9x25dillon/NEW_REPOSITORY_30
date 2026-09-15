@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "standing-wave-1.0.0",
+  "medium": {
+    "label": "fluid properties",
+    "value": { "rho": 997, "c": 1497 },
+    "provenance": "assumed",
+    "note": "Water at 25 C; literature defaults, not a measurement."
+  },
+  "particle": {
+    "label": "particle properties",
+    "value": { "radius": 0.0000075, "rho": 1100, "c": 1570 },
+    "provenance": "assumed",
+    "note": "Illustrative homogeneous fluid sphere, using generic cell properties."
+  },
+  "field": {
+    "label": "prescribed acoustic drive",
+    "value": { "frequency": 2000000, "pressure": 100000, "phase": 0, "phaseRate": 0 },
+    "provenance": "assumed",
+    "note": "Peak standing-wave pressure in Pa; frequency in Hz; envelope phase in radians."
+  },
+  "viscosity": {
+    "label": "dynamic viscosity",
+    "value": 0.00089,
+    "provenance": "assumed",
+    "note": "Water at 25 C, Pa s."
+  },
+  "radiation": { "kind": "mie" },
+  "streaming": {
+    "kind": "rayleigh-midplane",
+    "halfHeight": {
+      "label": "channel half-height",
+      "value": 0.00005,
+      "provenance": "assumed",
+      "note": "50 micrometre half-gap between infinite parallel plates."
+    }
+  },
+  "integration": {
+    "label": "initial condition and time window",
+    "value": { "initialPosition": 0.000025, "duration": 2, "steps": 200, "toleranceMetres": 1e-10 },
+    "provenance": "assumed",
+    "note": "Position in metres and duration in seconds; RK4 runs at steps and twice steps."
+  }
+}

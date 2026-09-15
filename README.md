@@ -5,6 +5,19 @@ microfluidic channels, SAW on open piezoelectric substrate.
 
 Private. Under development against a single subject.
 
+## Research simulation workbench
+
+The first platform extension is available at `app/simulation.html` after
+`npm run build`: a versioned JSON pipeline, finite-size radiation force for a
+lossless fluid sphere, parallel-plate outer Rayleigh streaming, independent
+fluid advection, and numerical diagnostics separate from provenance. Import or
+export a simulation description to reproduce its trajectory. The Device screen
+now warns when its Gor'kov size criterion is exceeded.
+
+See [the model scope, verification, and next milestones](docs/RESEARCH_PLATFORM.md)
+and [the runnable example](examples/standing-wave.json). The Mie model is a
+plane-standing-wave benchmark, not a general SAW or real-cell validation claim.
+
 ---
 
 ## Two halves, and the boundary between them
@@ -50,7 +63,8 @@ An instrument for answering two questions before anything is fabricated:
 2. **Where will the cells go?** — the Gor'kov radiation potential and the
    acoustic contrast factor (`src/gorkov.ts`).
 
-Both are exact. Neither needs a mesh, a solver, or a licence.
+The symmetry counts are exact. The Gor'kov model is analytic within its
+long-wavelength assumptions. Neither calculation needs a mesh or a licence.
 
 ## Where it came from, and what survived the move
 

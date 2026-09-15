@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   GLYPH, assumed, blame, derive, isWeakerThan, measured, sources, verdict,
-  weakest, type Provenance,
+  weakest, surrogate, hasSurrogate, assertNoSurrogate, type Provenance,
 } from "../src/provenance.js";
 
 test("weakest picks the weakest, and assumed beats everything to the bottom", () => {
@@ -83,5 +83,54 @@ test("an assumed verdict always names a cause and an action", () => {
       : p === "measured" ? width : derive("clean", 1, "", [width]);
     assert.ok(verdict(t).length > 10, p);
   }
-  assert.equal(new Set(Object.values(GLYPH)).size, 3, "three distinct glyphs");
+  assert.equal(new Set(Object.values(GLYPH)).size, 4, "four distinct glyphs");
+});
+
+test("surrogate uncertainty and identity survive; exact arithmetic cannot promote the estimate", () => {
+  const source = derive("training output", 10, "physics solver", [measured("drive", 1, "calibrated")]);
+  const estimate = surrogate("predicted force", 12, "test regression", {
+    modelId: "fixture-v1", predictiveVariance: 0.04, inDomain: true,
+  }, [source]);
+  const result = derive("predicted trajectory", 2, "arithmetic on prediction", [estimate]);
+  assert.equal(estimate.provenance, "surrogate");
+  assert.equal(result.provenance, "surrogate");
+  assert.ok(isWeakerThan("surrogate", "derived"));
+  assert.equal(weakest("surrogate", "measured"), "surrogate");
+  assert.equal(estimate.surrogate!.predictiveVariance, 0.04);
+  assert.deepEqual(blame(result), ["predicted force"]);
+  assert.match(verdict(result), /Re-evaluate/);
+  assert.throws(() => assertNoSurrogate(result), /physics solver/);
+});
+
+test("assumed inputs remain weakest without concealing surrogate lineage", () => {
+  const estimate = surrogate("surrogate force", 1, "fixture", {
+    modelId: "fixture-v1", predictiveVariance: 1, inDomain: false,
+  }, [assumed("particle properties", 2, "not measured")]);
+  const result = derive("trajectory", 3, "computed", [estimate]);
+  assert.equal(result.provenance, "assumed");
+  assert.ok(hasSurrogate(result));
+  assert.match(verdict(result), /Surrogate/);
+  assert.deepEqual(blame(result), ["particle properties"]);
+  assert.throws(() => assertNoSurrogate(result), /surrogate/);
+});
+
+test("final-result gate accepts new solver results and never relabels a prediction", () => {
+  const design = measured("candidate dimensions", 1, "fixture");
+  const estimated = surrogate("scout prediction", 3, "fixture", {
+    modelId: "fixture-v1", predictiveVariance: 0.1, inDomain: true,
+  }, [derive("training output", 2, "solver", [design])]);
+  const solverResult = derive("re-evaluated force", 2.8, "new physics solver evaluation", [design]);
+  assert.doesNotThrow(() => assertNoSurrogate(solverResult));
+  assert.throws(() => assertNoSurrogate(estimated), /re-evaluate/);
+  assert.equal(estimated.provenance, "surrogate");
+});
+
+test("surrogate constructor refuses missing uncertainty, identity, or source lineage", () => {
+  const metadata = { modelId: "fixture", predictiveVariance: 0, inDomain: true };
+  const source = [measured("input", 1, "fixture")];
+  assert.throws(() => surrogate("x", NaN, "", metadata, source));
+  assert.throws(() => surrogate("x", 1, "", { ...metadata, predictiveVariance: -1 }, source));
+  assert.throws(() => surrogate("x", 1, "", { ...metadata, predictiveVariance: Infinity }, source));
+  assert.throws(() => surrogate("x", 1, "", { ...metadata, modelId: "" }, source));
+  assert.throws(() => surrogate("x", 1, "", metadata, []));
 });

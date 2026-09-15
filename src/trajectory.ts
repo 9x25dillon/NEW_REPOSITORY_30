@@ -31,6 +31,7 @@
 
 import { type Medium, type Particle, compressibility, contrastFactor } from "./gorkov.js";
 import { type StandingWave1D, forceAt } from "./fields.js";
+import { finite, integer, nonnegative, positive } from "./validation.js";
 
 /** Dynamic viscosity of water at 25 C, Pa·s. */
 export const WATER_VISCOSITY = 8.9e-4;
@@ -43,7 +44,7 @@ export function velocityAt(
 }
 
 /**
- * The rate constant A in du/dt = A sin(2ku), s^-1.
+ * The velocity coefficient A in du/dt = A sin(2ku), m/s.
  *
  * Its sign is the contrast factor's sign, so it already carries the whole
  * node/antinode decision; its magnitude scales as a^2, which is the same a^2
@@ -165,9 +166,16 @@ export function integrate(
     /** Envelope phase as a function of time, for a swept SSAW. Defaults to the
      *  wave's own fixed phase. */
     phaseOfTime?: (t: number) => number;
+    /** Independent fluid advection, m/s. Radiation force is unchanged. */
+    streamingVelocity?: (t: number, u: number) => number;
+    /** Alternative radiation law, N, evaluated with the instantaneous field. */
+    radiationForce?: (field: StandingWave1D, u: number, particle: Particle) => number;
   },
 ): Step[] {
   const mu = opts.viscosity ?? WATER_VISCOSITY;
+  positive("viscosity", mu); positive("particle radius", p.radius);
+  nonnegative("duration", opts.duration); integer("steps", opts.steps, 1, 1_000_000);
+  finite("initial position", u0);
   const dt = opts.duration / opts.steps;
   const out: Step[] = [{ t: 0, u: u0 }];
   let u = u0;
@@ -176,7 +184,10 @@ export function integrate(
     const field = opts.phaseOfTime
       ? { ...w, phase: opts.phaseOfTime(t) }
       : w;
-    return velocityAt(field, x, p, mu);
+    const radiation = opts.radiationForce
+      ? opts.radiationForce(field, x, p) / (6 * Math.PI * mu * p.radius)
+      : velocityAt(field, x, p, mu);
+    return finite("trajectory velocity", radiation + (opts.streamingVelocity?.(t, x) ?? 0));
   };
 
   for (let i = 0; i < opts.steps; i++) {
@@ -186,6 +197,7 @@ export function integrate(
     const k3 = v(t + dt / 2, u + (dt / 2) * k2);
     const k4 = v(t + dt, u + dt * k3);
     u += (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+    finite("trajectory position", u);
     out.push({ t: t + dt, u });
   }
   return out;
