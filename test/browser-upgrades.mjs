@@ -45,6 +45,7 @@ if (process.argv.includes('--battle-scene')) {
   await evaluate(`(() => { const g = window.drifter; g.begin(); g.run.spawnIn = 1e6; g.run.world.calm = 1e6; })()`);
   await evaluate(`window.stageBattle('charge')`); await shoot('battle-charge');
   await evaluate(`window.stageBattle('shock')`); await shoot('battle-shock');
+  await evaluate(`window.stageBattle('falter')`); await shoot('battle-falter');
   console.log('Birth:', JSON.stringify(await evaluate(`window.stageBirth()`))); await shoot('battle-birth');
   await evaluate(`window.stagePaused()`); await shoot('battle-paused');
   await evaluate(`window.stageDead()`); await shoot('battle-dead');

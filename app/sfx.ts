@@ -145,6 +145,12 @@ export class Sfx {
   /** The front going out. */
   thump(): void { this.tone(55, 0.3, "sine", 0.07, 35); this.noise(0.12, 0.03); }
 
+  /** A king reaching its bond line and standing open. Falls, then holds. */
+  falter(): void {
+    this.tone(523, 0.22, "triangle", 0.045, 262);
+    this.tone(392, 0.5, "sine", 0.035, undefined, 0.18);
+  }
+
   /** A companion answering its call. */
   call(): void {
     this.tone(392, 0.09, "triangle", 0.035, undefined, 0);

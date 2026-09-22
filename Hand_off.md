@@ -22,6 +22,11 @@ of how the numbers were set.
 | Mitochondria mend integrity at full stamina, 3 s after a hit, 40 energy a point | `game/organelles.ts` | — |
 | Evolution: three trait cards at every birth; nine traits with rank caps | `game/evolution.ts`, birth screen | B / D-pad / stick, Start |
 | Rack window (13 slots, overflow counts, group tally), D-pad ←/→ steps the rack | `app/drifter.ts`, `app/pad.ts` | D-pad |
+| **Falter**: the first time a king reaches its bond line it stops for 2.5 s and cannot be taken below 1 hp | `hurtSovereign` in `game/combat.ts` | — |
+| **Prime helpings**: a helping landing on a prime count buys +2 points of inheritance past the old ceiling, a card, and score | `isPrime`/`inheritanceOf` in `game/world.ts` | — |
+| **Cards cost cells** after the first at each birth (5, 10, 20…), and **REFINE** is the deck's uncapped fallback | `game/evolution.ts` | X takes, Start enters |
+| **Lure**: a cell left singing; hunters and the king's drag follow it | `prey`/`dropLure` in `game/run.ts` | LB held |
+| **Tender** mends the king, **leech** eats buildings; neither strikes | `tend`/`graze` in `game/run.ts` | — |
 
 Keep these rules:
 
@@ -38,6 +43,22 @@ Keep these rules:
 - **Holding Y ceases fire.** Caught arms are absorbed and thrown arms do no
   harm.
 - **The first world has no gambits.**
+- **Every source of damage to the king goes through `hurtSovereign`.** The
+  falter's floor and the line-crossing must not be true of a discharge and
+  false of your hand or a thrown arm.
+- **Everything asking what the water is coming for goes through `prey`.** A
+  lure some callers believed in would pull a hunter off you and walk a king
+  onto you at the same time.
+- **`held` comes before the tend/graze dispatch in `hunt`.** A tender that went
+  on mending inside your closed hand is the one body outside the rule the whole
+  bestiary runs on. There is a test.
+- **The prime term is added PAST the mass ceiling, not into it.** Folded in it
+  buys nothing, because a sixfold throne is at that ceiling by its fourth
+  helping — which is the whole reason the boon exists.
+- **`throneLedger` counts, it does not index.** Primes fall wherever they fall,
+  so "the helpings that bought something" is no longer a prefix.
+- **A leech cannot fasten onto a building you are standing over.** That is the
+  idle lattice out-pulling its swim, not a rule anybody wrote; keep the test.
 
 `maxIntegrity(run)` replaces bare `MAX_INTEGRITY` wherever the cap is applied.
 `vulnerable(k, tameHealth(run))` and `tameTime(run)` carry EMPATHY.
@@ -50,8 +71,13 @@ are used inside functions. Top-level code in these modules must not read a
 
 Verification this session, all from the runner:
 
-- Baseline was 344/344. The final full run, after every change, was 367/367
-  (about 104 s). Both typechecks pass and `git diff --check` is clean.
+- Baseline was 344/344. After the battle pass, 367/367; after the falter,
+  371/371; after the prime/evolution/lure/creature work, **382/382** (about
+  137 s). Both typechecks pass. Chromium is at 35 simulated-pad checks.
+- The suite caught two real defects in this batch that review had not: a CILIA
+  hook asking `beast()` for a motif's species (which broke every bot run), and
+  a tender that went on mending while held. Run it before trusting a change
+  to `hunt` or `settle`.
 - `test/combat.test.ts`: 22 tests. The swept-catch test was mutation-checked:
   it fails against the old point test.
 - Chromium: `node test/browser-upgrades.mjs --interactions --battle` gives 29
@@ -60,6 +86,33 @@ Verification this session, all from the runner:
   was inspected. Use `SHOT_DIR` for the output folder.
 - Headless measurements, with the bot scripts kept outside the repo, are
   summarised in BATTLE.md. They bound behaviour; they are not feel.
+
+**Four play reports, 2026-09-22** (`drifter.report()/`), which is what the
+falter came from. Deepest aeon went 6 to 14 and score 18k to 78k. Ripostes were
+used and mattered: 57 catches for 1856 damage in the last run, against a king
+that lost 1926 net. Gambits hit 8 times in 79. Mitochondria mended 23. But
+**no king was tamed in fourteen aeons**, so companions, calls and PACK never
+ran once — one discharge crossed the whole bond window. Hence the falter, which
+measured 25 of 25 bonds afterwards.
+
+**A fifth report, 2026-09-22 (aeon 29, 1932 s).** The falter worked: 28 kings
+faltered, 13 were bonded, all three companions reached rank 3, and landed
+hunter strikes fell to one in 32 minutes. It also showed the three things this
+batch answers — every trait capped by the nineteenth of 28 births, 140 cells
+with nothing to spend them on, and 31 helpings fed deliberately because the
+throne was the only thing left to do. **The user said the overfeeding was on
+purpose**, so it is rewarded now rather than gated.
+
+Still open, in the order I would take them:
+
+1. **Volleys are 89% of what kills this player** (41 of 46 hits), and catches
+   dropped to 12 in that run from 57 in the one before. Ask whether the riposte
+   is awkward on the pad or just easy to forget before tuning it.
+2. **Runs are 32-50 minutes.** Worth asking whether that is the session length
+   wanted before tuning anything else.
+3. **Mitochondria mended once** in that run while holding 840 energy, because
+   mending wants 3 s without a hit and the player never goes home. A bearing on
+   the HUD to the nearest charged station when hurt is the cheap next step.
 
 Not verified: physical Elite 2 feel for R3 and head-on bursts; whether a person
 can read the charge lane and shock ring at speed; whether catching is fun or

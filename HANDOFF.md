@@ -4,10 +4,13 @@
 owns the riposte (burst into a volley arm to throw it back) and each king
 form's telegraphed gambit (charge, shock, echo) from the second world on.
 `game/allies.ts` makes the active companion a body that holds hunters, plus
-its R3 call. `game/evolution.ts` deals three trait cards at every birth.
-Mitochondria now mend integrity in a lull. The numbers were set from headless
-measurements against the aeon-6 report's king, recorded in that file. None of
-this touches `src/`.
+its R3 call. `game/evolution.ts` deals the trait cards at every birth.
+Mitochondria now mend integrity in a lull. A king that reaches its bond line
+FALTERS once, which is what made taming reachable at all. A helping on a prime
+count buys what mass no longer can, a held LB leaves a lure, and tenders and
+leeches want the king and your buildings rather than you. The numbers were set
+from headless measurements and from four play reports, recorded in that file.
+None of this touches `src/`.
 
 **2026-09-21 gameplay extension:** see [Living worlds](docs/LIVING_WORLDS.md)
 for the user's requested mitochondria, useful limb tips, visual variety and
@@ -87,7 +90,10 @@ DOM so `src/` cannot reach for a browser; `tsconfig.build.json` covers `app/`.
 | --- | --- |
 | `game/wave.ts` | the field: crossed standing waves, apodisation, stamina, and `advance()` — substepped integration sized by the **relaxation rate**, not by displacement |
 | `game/pilot.ts` | you: a 9 µm lipid particle. The stick is a trap *offset*, not a velocity. Grip is apodisation. The dash is the amplifier's peak rating |
-| `game/beasts.ts` | six creatures, with physical contrast and telegraphed hunting, circling and ambush behaviours |
+| `game/beasts.ts` | eight creatures, with physical contrast and telegraphed hunting, circling, ambush, tending and grazing behaviours |
+| `game/combat.ts` | the riposte, thrown arms, each king form's gambit, and the falter at the bond line |
+| `game/allies.ts` | a companion as a body in the water, what it holds, and its call |
+| `game/evolution.ts` | the cards dealt at every birth, what they cost, and what they do |
 | `game/lattice.ts` | the 11 chiral cells, the recipes, `optionsFor()` |
 | `game/shape.ts` | what a point group looks like from above — firing arcs and king volleys, which stand on nothing and keep the full orbit |
 | `game/world.ts` | worlds, sovereigns, what is born from a body |

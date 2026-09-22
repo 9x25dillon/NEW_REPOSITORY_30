@@ -18,7 +18,7 @@
 
 import {
   type Entity, type Run,
-  ARENA_H, ARENA_W, THRONE_RADIUS,
+  ARENA_H, ARENA_W, LURE_TIME, THRONE_RADIUS, dropLure,
   arrivalRate, settleCap, suspension,
   DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
   bearsOn, dischargeFalloff, wearRate, wearing, WEAR_TICKS_PER_SECOND,
@@ -30,8 +30,8 @@ import {
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
 import {
-  epitaphFor, helpingCosts, inheritanceOf, nextHelpingBuys, sovereignParticle,
-  throneLedger, volley,
+  PRIME_KEEP, epitaphFor, helpingCosts, inheritanceOf, isPrime, nextHelpingBuys,
+  primeHelpings, sovereignParticle, throneLedger, volley,
 } from "../game/world.js";
 import { lobes } from "../game/shape.js";
 import { SEED_MASS, assemble, motif, optionsFor } from "../game/lattice.js";
@@ -59,10 +59,13 @@ import {
   MITO_REACH, growMitochondrion, mending, mitoCapacity, organelleHost, repairCost,
 } from "../game/organelles.js";
 import {
-  catchReach, chargeLength, chargeReach, echoArms, riposteDamage, shockReach,
+  FALTER_TIME, catchReach, chargeLength, chargeReach, echoArms, faltering, riposteDamage,
+  shockReach,
 } from "../game/combat.js";
 import { CALLS, callAlly, callCooldown, callWait, rushing, shielded } from "../game/allies.js";
-import { type Trait, TRAITS, evolve, held, rankOf } from "../game/evolution.js";
+import {
+  type Trait, TRAITS, cardCost, evolve, held, primeCards, rankOf,
+} from "../game/evolution.js";
 import { DASH_COST } from "../game/pilot.js";
 
 // ── scale ───────────────────────────────────────────────────────────────────
@@ -284,6 +287,35 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
       + "BEAT LATER. BOTH SETS ARE DRAWN BEFORE EITHER FLIES: THE SAFE PLACE IS NOT THE GAP, "
       + "IT IS OUT OF REACH - OR A BURST INTO ONE OF THEM.",
   },
+  lure: {
+    id: "lure", title: "SOMETHING ELSE TO WALK TOWARD",
+    body: "A CELL LEFT STANDING SINGS WHERE YOU WERE, AND EVERYTHING THAT WAS COMING FOR YOU "
+      + "COMES FOR IT INSTEAD - HUNTERS, AND THE KING'S OWN DRAG. THAT IS HOW YOU PUT A KING IN "
+      + "FRONT OF AN ARM WITHOUT SHOVING IT THERE: LEAVE ONE BEHIND A BUILDING AND STAND CLEAR. "
+      + "IT COSTS THE CELL AND LASTS SIX SECONDS.",
+  },
+  tender: {
+    id: "tender", title: "IT IS NOT COMING FOR YOU",
+    body: "A TENDER SWIMS TO WHAT YOU CROWNED AND MENDS IT, AND A LEECH FASTENS ONTO WHAT YOU "
+      + "BUILT AND EATS IT. NEITHER CARRIES A STRIKE, SO NEITHER IS ANSWERED BY DODGING: HOLD "
+      + "THEM, OR LIFT THE BUILDING OUT FROM UNDER THE LEECH, OR WATCH THE BAR YOU ARE WORKING "
+      + "ON GO BACK UP.",
+  },
+  prime: {
+    id: "prime", title: "A PRIME WILL NOT SEAT",
+    body: "EVERYTHING ELSE A HELPING BUYS IS CLAMPED WITHIN A FEW MOUTHFULS, AND ITS HEALTH IS "
+      + "NOT - SO PAST THAT, FEEDING WAS BUYING HIT POINTS YOU WOULD HAVE TO TAKE BACK OFF. A "
+      + "COUNT THAT IS PRIME IS A LINE AND NOTHING ELSE, SO THE THRONE CANNOT SEAT IT EVENLY "
+      + "INTO ITS OWN BODY: IT COMES BACK TO YOU AS TWO POINTS MORE OF THE NEXT WORLD KEPT, PAST "
+      + "THE OLD CEILING, AND ANOTHER CARD AT ITS BIRTH. A GAME RULE, NOT A THEOREM.",
+  },
+  falter: {
+    id: "falter", title: "IT IS OPEN, AND ONLY FOR A MOMENT",
+    body: "THE FIRST TIME A KING REACHES ITS BOND LINE IT FALTERS: IT STOPS, THROWS NOTHING, AND "
+      + "CANNOT BE TAKEN BELOW ONE HIT POINT UNTIL THE MOMENT PASSES. THAT IS THE CHANCE TO GET "
+      + "INSIDE 120 MICRONS AND HOLD THE THRONE BUTTON. LET IT PASS AND IT FIGHTS ON, AND KILLING "
+      + "IT IS ONLY A MATTER OF WAITING THE MOMENT OUT.",
+  },
   ally: {
     id: "ally", title: "IT FIGHTS WITH YOU",
     body: "YOUR COMPANION IS A BODY IN THE WATER. IT HOLDS HUNTERS UNTIL THEY COME APART, THE "
@@ -377,6 +409,9 @@ export class Game {
   private crownHeld = 0;
   private buildHeld = 0;
   private organelleGrown = false;
+  /** How long the lift button has been held, and whether it already lured. */
+  private liftHeld = 0;
+  private lured = false;
   /** Which evolution card is highlighted on the birth screen. */
   private pick = 0;
   /** The stick has to come back to centre before it steps the cards again. */
@@ -503,7 +538,9 @@ export class Game {
       if (this.screen === "birth") {
         const { sx, sy } = world(e);
         const card = this.cardAt(sx, sy);
-        if (card >= 0) this.pick = card;
+        // Clicking a card takes it; clicking anywhere else goes in.
+        if (card >= 0) { this.pick = card; this.take(); return; }
+        if (this.run.evolution.taken === 0 && this.run.evolution.offer.length > 0) this.take();
         this.enter();
         return;
       }
@@ -568,6 +605,8 @@ export class Game {
   private wasMouseDash = false;
 
   private static readonly CROWN_HOLD = 0.9;
+  /** How long the lift button must be held before it leaves a lure instead. */
+  private static readonly LURE_HOLD = 0.5;
 
   private act(it: Intent, dt: number): void {
     const run = this.run;
@@ -602,7 +641,15 @@ export class Game {
         const key = this.pad.slotKey();
         if (key > 0 && key <= offer.length) this.pick = key - 1;
       }
-      if (it.confirm) this.enter();
+      // X TAKES, START ENTERS. The first card at a birth is free and the rest
+      // are bought with rack cells, so taking and leaving cannot be the same
+      // press — and entering still takes the free one for anybody who does not
+      // know that yet.
+      if (it.place && offer.length > 0) this.take();
+      if (it.confirm) {
+        if (run.evolution.taken === 0 && offer.length > 0) this.take();
+        this.enter();
+      }
       return;
     }
 
@@ -642,12 +689,25 @@ export class Game {
     // refusals are said here, for the reason `doFeed` gives.
     if (it.call) this.doCall();
 
-    // TAKE IT BACK UP. Your trap holds bodies and a placed cell is a body, so
-    // there was never a reason a mistake had to be permanent.
-    if (it.lift) {
-      const r = liftCell(run);
-      if (r === "nothing-there") this.say("NOTHING OF YOURS WITHIN REACH");
-      if (r === "wrong-phase") this.say("NOT NOW");
+    // TAKE IT BACK UP, or hold to leave a cell singing in your place. Tap and
+    // hold on one button, the same shape as building and growing an organelle,
+    // because the pad has no spare face buttons left.
+    if (it.liftDown) {
+      this.liftHeld += dt;
+      if (this.liftHeld >= Game.LURE_HOLD && !this.lured) {
+        this.lured = true;
+        const r = dropLure(run, this.selected);
+        if (r === "none") this.say("NOTHING IN HAND TO LEAVE");
+        if (r === "wrong-phase") this.say("NOT NOW");
+      }
+    } else {
+      if (this.liftHeld > 0 && !this.lured) {
+        const r = liftCell(run);
+        if (r === "nothing-there") this.say("NOTHING OF YOURS WITHIN REACH");
+        if (r === "wrong-phase") this.say("NOT NOW");
+      }
+      this.liftHeld = 0;
+      this.lured = false;
     }
 
     // TAP TO FEED, HOLD TO CROWN. Feeding used to be the building button,
@@ -720,7 +780,8 @@ export class Game {
   private begin(): void {
     this.paused = false;
     this.buildHeld = this.crownHeld = 0;
-    this.organelleGrown = this.crowned = false;
+    this.organelleGrown = this.crowned = this.lured = false;
+    this.liftHeld = 0;
     this.pick = 0;
     this.tally = {};
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
@@ -753,11 +814,25 @@ export class Game {
     if (r === "wrong-phase") this.say("NOT NOW");
   }
 
-  /** Take the highlighted card, if there is one, and step into the new world. */
-  private enter(): void {
+  /** Take the highlighted card. The first is free; the rest cost cells. */
+  private take(): void {
     const run = this.run;
     const t = run.evolution.offer[this.pick];
-    if (t) evolve(run, t);
+    if (!t) return;
+    const cost = cardCost(run);
+    if (run.cells.length < cost) {
+      this.say(`ANOTHER CARD IS ${cost} CELLS  ·  YOU HAVE ${run.cells.length}`);
+      return;
+    }
+    if (evolve(run, t)) {
+      this.drain();
+      this.pick = Math.min(this.pick, Math.max(0, run.evolution.offer.length - 1));
+    }
+  }
+
+  /** Step into the new world with whatever was taken. */
+  private enter(): void {
+    const run = this.run;
     this.drain();
     enterWorld(run);
     this.screen = "play";
@@ -812,7 +887,8 @@ export class Game {
       this.sfx.tick();
     }
     const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
-    const legend = `${G.move} move · ${G.grip} grip · ${G.dash} dash / catch · ${G.place} build / hold: mitochondrion · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause`;
+    const legend = `${G.move} move · ${G.grip} grip · ${G.dash} dash / catch · ${G.place} build / hold: mitochondrion`
+      + ` · ${G.lift} lift / hold: lure · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause`;
     if (legend !== this.controlLegend) {
       this.controlLegend = legend;
       const controls = document.getElementById("controls");
@@ -821,8 +897,8 @@ export class Game {
     }
     if (this.paused && this.screen === "play") {
       if (it.cycle) cycleCompanion(run);
-      this.buildHeld = this.crownHeld = 0;
-      this.organelleGrown = this.crowned = false;
+      this.buildHeld = this.crownHeld = this.liftHeld = 0;
+      this.organelleGrown = this.crowned = this.lured = false;
       return;
     }
 
@@ -959,14 +1035,13 @@ export class Game {
         case "fed":
           this.ring(run.throne.x, run.throne.y, 10, 60, 0.6, "255,201,74");
           this.sfx.capture(4);
-          // AND WHETHER IT BOUGHT ANYTHING. `throneLedger` counts the helpings
-          // that changed the world; `bought` is the index of the last one that
-          // did, so `bought < fed.length` is exactly "the one just given bought
-          // nothing". Every benefit of feeding is clamped and the health is
-          // not — see rule 25 — and this is the moment the player is making the
-          // decision, so it is the moment to say which side of the clamp they
-          // are on.
-          if (throneLedger(run.throne, run.world.aeon).bought < run.throne.fed.length) {
+          // AND WHETHER IT BOUGHT ANYTHING, asked of THIS helping rather than
+          // inferred from the ledger — prime helpings buy something wherever
+          // they fall, so "some helping was wasted" is no longer the same
+          // question as "the one just given was". Every other benefit of
+          // feeding is clamped and the health is not, and this is the moment
+          // the player is making the decision.
+          if (!ev.bought) {
             this.say(`THE THRONE TAKES ${ev.group}  ·  ${run.throne.maxHp} HP  ·  `
               + "AND IT BOUGHT NOTHING ELSE");
             this.teach("sated");
@@ -976,6 +1051,33 @@ export class Game {
               + `${Number.isFinite(need) ? `${need} DISCHARGES TO KILL` : "NOTHING CAN KILL IT YET"}`
               + "  ·  C TO CROWN");
           }
+          break;
+        case "lure":
+          this.teach("lure");
+          this.sfx.invert(true);
+          this.ring(ev.x, ev.y, 6, 80, 0.7, NODE);
+          this.say(`A ${ev.group} SINGS WHERE YOU STOOD  ·  ${LURE_TIME} S`);
+          break;
+        case "gnawed":
+          this.teach("tender");
+          this.sfx.dissolve();
+          this.burst(ev.x, ev.y, 12, "255,120,150");
+          this.say(`A LEECH FINISHED YOUR ${ev.group}`);
+          break;
+        case "tended":
+          this.teach("tender");
+          this.popups.push({
+            x: ev.x, y: ev.y, text: `+${ev.heal.toFixed(0)}`, life: 0.9,
+            colour: "#8ce9ff", big: false,
+          });
+          break;
+        case "prime":
+          this.teach("prime");
+          this.sfx.capture(5);
+          this.ring(run.throne.x, run.throne.y, 12, 90, 0.8, GOLD);
+          this.burst(run.throne.x, run.throne.y, 14, "255,201,74");
+          this.say(`${ev.n} IS PRIME  ·  +${(PRIME_KEEP * 100).toFixed(0)}% KEPT  ·  `
+            + `${primeCards(run) >= 3 ? "CARDS AT THEIR LIMIT" : "+1 CARD AT ITS BIRTH"}`);
           break;
         case "crown":
           this.flash = 0.9; this.flashRed = false; this.shake = 10;
@@ -1038,6 +1140,15 @@ export class Game {
           this.shake = Math.max(this.shake, 4);
           this.popups.push({ x: ev.x, y: ev.y, text: `-${ev.damage}`, life: 1, colour: GOLD, big: false });
           break;
+        case "falters":
+          this.sfx.falter();
+          this.teach("falter");
+          this.flash = 0.6; this.flashRed = false;
+          this.hitstop = Math.max(this.hitstop, 0.07);
+          this.ring(ev.x, ev.y, 10, 190, 0.9, JADE);
+          this.burst(ev.x, ev.y, 18, JADE);
+          this.say(`IT FALTERS  ·  HOLD ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT TO BOND`);
+          break;
         case "gambit": {
           this.sfx.gambit(ev.gambit);
           this.teach(ev.gambit);
@@ -1078,7 +1189,9 @@ export class Game {
           break;
         case "evolved":
           this.sfx.capture(4);
-          this.say(`EVOLVED  ·  ${TRAITS[ev.trait].name} ${ev.rank}/${TRAITS[ev.trait].max}`);
+          this.say(`EVOLVED  ·  ${TRAITS[ev.trait].name} ${ev.rank}`
+            + `${Number.isFinite(TRAITS[ev.trait].max) ? `/${TRAITS[ev.trait].max}` : ""}`
+            + `${ev.cost > 0 ? `  ·  ${ev.cost} CELLS` : ""}`);
           break;
         case "organelle":
           this.ring(ev.x, ev.y, 8, 60, 0.8, JADE);
@@ -1257,6 +1370,7 @@ export class Game {
     this.drawSparks();
     this.drawRings();
     this.drawCompanion();
+    this.drawLure();
     this.drawYou();
     this.drawPopups();
     g.restore();
@@ -2510,6 +2624,16 @@ export class Game {
       if (hand) {
         const buys = nextHelpingBuys(run.throne, hand, run.world.aeon);
         const cost = helpingCosts(run.throne, hand);
+        // WHICH NUMBER THE NEXT ONE MAKES. The prime boon is decidable before
+        // you commit or it is not a decision.
+        const next = run.throne.fed.length + 1;
+        if (isPrime(next)) {
+          g.font = `700 9px ${MONO}`;
+          g.fillStyle = GOLD;
+          g.fillText(`THE NEXT MAKES ${next}  ·  PRIME  ·  +${(PRIME_KEEP * 100).toFixed(0)}% KEPT`
+            + `${primeCards(run) < 3 ? "  ·  +1 CARD" : ""}`, x, y - R - line);
+          line += 11;
+        }
         g.font = `700 9px ${MONO}`;
         if (buys.length === 0) {
           g.fillStyle = RED;
@@ -2716,6 +2840,24 @@ export class Game {
     g.fillStyle = INK;
     g.textAlign = "center";
     g.fillText(ADAPTATIONS[form].name, x, y - r - 57);
+    if (faltering(this.run)) {
+      // IT IS OPEN. Said loudly, because it lasts two and a half seconds and it
+      // is the only moment in a fight when bonding is actually on offer.
+      const f = this.run.fray.falter / FALTER_TIME;
+      g.strokeStyle = `rgb(${JADE})`;
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(x, y, r + 16, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+      g.stroke();
+      g.strokeStyle = `rgba(${JADE},${(0.25 + 0.35 * Math.sin(this.t * 9)).toFixed(2)})`;
+      g.lineWidth = 2;
+      g.beginPath(); g.arc(x, y, r + 24, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = `rgb(${JADE})`;
+      g.font = `700 12px ${MONO}`;
+      g.textAlign = "center";
+      g.fillText("IT FALTERS", x, y - r - 68);
+      g.textAlign = "left";
+    }
     if (vulnerable(k, tameHealth(this.run))) {
       g.strokeStyle = `rgba(${JADE},0.25)`;
       g.setLineDash([4, 6]);
@@ -3140,6 +3282,40 @@ export class Game {
     }
   }
 
+  /**
+   * The cell you left standing, and how long it has left.
+   *
+   * Drawn as something that is singing rather than something that is there: a
+   * ring at the pitch of the drive, a count, and a line to whatever is walking
+   * toward it — because a decoy nothing answered would be a wasted cell and
+   * the player has to be able to see that it worked.
+   */
+  private drawLure(): void {
+    const run = this.run;
+    const l = run.lure;
+    if (!l) return;
+    const g = this.ctx;
+    const left = Math.max(0, l.until - run.t);
+    const f = left / LURE_TIME;
+    const x = px(l.x), y = px(l.y);
+    for (let i = 0; i < 3; i++) {
+      const raw = (this.t * 1.6 + i / 3) % 1;
+      const phase = raw < 0 ? raw + 1 : raw;
+      g.strokeStyle = `rgba(${NODE},${((1 - phase) * 0.5 * f).toFixed(3)})`;
+      g.lineWidth = 1.4;
+      g.beginPath(); g.arc(x, y, 5 + phase * 26, 0, Math.PI * 2); g.stroke();
+    }
+    g.fillStyle = `rgba(${NODE},${(0.5 + 0.4 * f).toFixed(2)})`;
+    g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = `rgb(${NODE})`;
+    g.lineWidth = 2;
+    g.beginPath(); g.arc(x, y, 9, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); g.stroke();
+    g.font = `700 8px ${MONO}`;
+    g.textAlign = "center";
+    g.fillText(`LURE ${left.toFixed(1)}S`, x, y + 20);
+    g.textAlign = "left";
+  }
+
   private drawPopups(): void {
     const g = this.ctx;
     g.textAlign = "center";
@@ -3299,7 +3475,9 @@ export class Game {
     const spent = run.delivered >= suspension(run)
       && run.entities.filter((e) => e.faction === "motif").length < suspension(run) * 0.4;
     const hint = run.phase === "reign"
-      ? vulnerable(run.throne, tameHealth(run))
+      ? faltering(run)
+        ? `IT FALTERS  ·  GET INSIDE ${(TAME_REACH * 1e6).toFixed(0)} UM AND HOLD ${G.crown}`
+      : vulnerable(run.throne, tameHealth(run))
         ? `HOLD ${G.crown} NEAR THE BOSS TO BOND   ·   LET GO TO KEEP FIGHTING`
         : `${G.grip} ON YOUR BUILDINGS TO FIRE   ·   ${G.dash} INTO AN ARM THROWS IT BACK   ·   `
           + `TAME BELOW ${Math.round(tameHealth(run) * 100)}%`
@@ -3489,7 +3667,9 @@ export class Game {
 
     const e = epitaphFor(run.throne, run.world);
     const offer = run.evolution.offer;
-    const top = offer.length ? 214 : 236, rowH = offer.length ? 19 : 30;
+    const two = offer.length > Game.CARD_COLS;
+    const top = offer.length ? (two ? 202 : 214) : 236;
+    const rowH = offer.length ? (two ? 17 : 19) : 30;
     e.lines.forEach(([k, v], i) => {
       const y = top + i * rowH;
       g.textAlign = "right";
@@ -3509,7 +3689,8 @@ export class Game {
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.font = `700 14px ${MONO}`;
     g.fillText(offer.length ? `${run.bond.tamed ? "EVOLVE AND ENTER TOGETHER" : "EVOLVE AND ENTER"}`
-      : run.bond.tamed ? "ENTER TOGETHER" : "ENTER IT", VIEW_W / 2, VIEW_H - 84);
+      : run.bond.tamed ? "ENTER TOGETHER" : "ENTER IT",
+      VIEW_W / 2, Math.max(VIEW_H - 84, this.offerBottom(offer.length) + 40));
     const ally = companion(run);
     if (run.bond.tamed && ally) {
       g.fillStyle = `rgb(${JADE})`;
@@ -3525,11 +3706,38 @@ export class Game {
     g.textAlign = "left";
   }
 
-  /** Where the i-th of n evolution cards sits on the birth screen. */
+  /**
+   * Where the i-th of n evolution cards sits.
+   *
+   * Three to a row: a throne's prime helpings can deal six, and six across is
+   * sixteen hundred pixels on a nine-hundred-pixel screen.
+   */
+  private static readonly CARD_COLS = 3;
   private cardRect(i: number, n: number): { x: number; y: number; w: number; h: number } {
-    const w = 262, h = 92, gap = 14;
-    const total = n * w + (n - 1) * gap;
-    return { x: VIEW_W / 2 - total / 2 + i * (w + gap), y: 420, w, h };
+    const rows = Math.ceil(n / Game.CARD_COLS);
+    const w = 262, gap = 12;
+    const h = rows > 1 ? 74 : 92;
+    const row = Math.floor(i / Game.CARD_COLS);
+    const inRow = Math.min(n - row * Game.CARD_COLS, Game.CARD_COLS);
+    const total = inRow * w + (inRow - 1) * gap;
+    const col = i % Game.CARD_COLS;
+    return {
+      x: VIEW_W / 2 - total / 2 + col * (w + gap),
+      y: this.offerTop(n) + row * (h + gap),
+      w, h,
+    };
+  }
+
+  /** The top of the card block, which moves up when there are two rows. */
+  private offerTop(n: number): number {
+    return n > Game.CARD_COLS ? 372 : 420;
+  }
+
+  /** And the bottom of it, which the prompts below have to clear. */
+  private offerBottom(n: number): number {
+    if (n === 0) return 420;
+    const last = this.cardRect(n - 1, n);
+    return last.y + last.h;
   }
 
   private cardAt(sx: number, sy: number): number {
@@ -3550,7 +3758,12 @@ export class Game {
     g.textAlign = "center";
     g.font = `700 10px ${MONO}`;
     g.fillStyle = `rgb(${JADE})`;
-    g.fillText("THE ORGANISM CHANGES  ·  CHOOSE ONE", VIEW_W / 2, 402);
+    const label = this.offerTop(offer.length) - 18;
+    const extra = offer.length - 3;
+    g.fillText(`THE ORGANISM CHANGES  ·  CHOOSE ONE`
+      + `${extra > 0 ? `  ·  ${extra} MORE FROM ${primeHelpings(run.throne.fed.length)} PRIME HELPINGS` : ""}`,
+      VIEW_W / 2, label);
+    const cost = cardCost(run);
     offer.forEach((t: Trait, i) => {
       const r = this.cardRect(i, offer.length);
       const on = i === this.pick;
@@ -3577,12 +3790,22 @@ export class Game {
       g.fillStyle = FAINT;
       g.font = `600 8px ${MONO}`;
       g.fillText(String(i + 1), r.x + 4, r.y + r.h - 12);
+      if (on) {
+        g.textAlign = "right";
+        g.font = `700 9px ${MONO}`;
+        g.fillStyle = cost === 0 ? `rgb(${JADE})` : run.cells.length >= cost ? GOLD : RED;
+        g.fillText(cost === 0 ? `${G.place}  ·  FREE` : `${G.place}  ·  ${cost} CELLS`,
+          r.x + r.w - 10, r.y + r.h - 14);
+        g.textAlign = "left";
+      }
     });
     g.textAlign = "center";
     g.fillStyle = FAINT;
     g.font = `600 9px ${MONO}`;
     g.fillText(`${this.pad.connected ? `${G.cycle} / D-PAD / STICK` : "Q / A-D / 1-3 / CLICK"} TO CHOOSE`
-      + `  ·  ${G.confirm} TO TAKE IT`, VIEW_W / 2, 522);
+      + `  ·  ${G.place} TO TAKE  ·  ${G.confirm} TO ENTER`
+      + `${run.evolution.taken > 0 ? `  ·  TAKEN ${run.evolution.taken}` : ""}`
+      + `  ·  RACK ${run.cells.length}`, VIEW_W / 2, this.offerBottom(offer.length) + 12);
     g.textAlign = "left";
   }
 
@@ -3713,7 +3936,7 @@ export class Game {
       `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
       `${pad(G.dash)}BURST - HOW YOU GATHER AND DODGE. AN ARM THAT REACHES YOU IN ONE GOES BACK.`,
       `${pad(G.place)}TAP: BUILD. HOLD: GROW MITOCHONDRION ON A STRUCTURE (2 CELLS).`,
-      `${pad(G.lift)}TAKE THE BUILDING YOU ARE STANDING ON BACK INTO YOUR HAND.`,
+      `${pad(G.lift)}TAP: LIFT THE BUILDING YOU STAND ON. HOLD: LEAVE A CELL AS A LURE.`,
       `${pad(G.cycle)}CHOOSE WHICH CELL.`,
       `${pad(G.crown)}FEED / CROWN. IN COMBAT: HOLD NEAR A WEAKENED BOSS TO BOND.`,
       `${pad(G.depth)}RETUNE THE CHANNEL. THE ONLY WAY ANYTHING MOVES IN DEPTH.`,
@@ -3726,8 +3949,11 @@ export class Game {
       "",
       `BOND: BELOW ${Math.round(tameHealth(run) * 100)}% HEALTH, HOLD ${G.crown} NEAR THE BOSS FOR ${tameTime(run)} SECONDS.`,
       "HITS INTERRUPT YOU. YOUR WEAPONS REST WHILE YOU OFFER A BOND.",
+      `THE FIRST TIME IT REACHES THAT LINE IT FALTERS FOR ${FALTER_TIME} S AND CANNOT BE KILLED. THAT IS THE CHANCE.`,
       `${G.cycle}: SWITCH COMPANION WHILE PAUSED. REPEATED BONDS GROW TO RANK 3.`,
       "FROM THE SECOND WORLD, EVERY SEVEN SECONDS OR SO THE KING PLAYS ITS GAMBIT. IT IS DRAWN FIRST.",
+      "A LURE PULLS HUNTERS AND THE KING'S OWN DRAG ONTO IT. A TENDER MENDS THE KING; A LEECH EATS BUILDINGS.",
+      "A HELPING THAT LANDS ON A PRIME COUNT BUYS WHAT MASS NO LONGER CAN, AND DEALS ANOTHER CARD.",
       "",
       "WHAT SHARES YOUR CONTRAST COMES TO YOUR FEET. THE REST IS HELD OFF.",
       "A HUNTER STOPS AND GATHERS BEFORE IT STRIKES, AND GOES WHERE IT POINTED.",
@@ -3929,9 +4155,10 @@ export class Game {
         + `; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
       // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather
       // than inferred from events, so damage is in it and not just a count.
-      `battle: arms caught ${run.fray.stats.caught}, thrown home ${run.fray.stats.landed} for ${run.fray.stats.damage}`
+      `battle: arms caught ${run.fray.stats.caught}, thrown home ${run.fray.stats.landed} for ${run.fray.stats.damage.toFixed(0)}`
         + ` (${run.throne.hm ? `${riposteDamage(run)} each now` : "no king"}); gambits ${run.fray.stats.gambits}`
-        + `; companion held ${run.fray.stats.held}; calls ${run.fray.stats.calls}; mended ${run.fray.stats.repairs}`,
+        + `; companion held ${run.fray.stats.held}; calls ${run.fray.stats.calls}; mended ${run.fray.stats.repairs}`
+        + `; falter ${run.fray.falter > 0 ? "open now" : run.fray.faltered ? "spent" : "not yet"}`,
       `evolution: ${held(run).map(([t, r]) => `${t}:${r}`).join(" ") || "none"}`
         + `${run.evolution.offer.length ? `; offered [${run.evolution.offer.join(" ")}]` : ""}`,
       `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
@@ -3941,6 +4168,7 @@ export class Game {
         // aeon-6 report of 2026-09-06 printed fifty helpings and 5850 hit
         // points and it took a probe to find out that four of the fifty bought
         // anything. Every report carries the answer now.
+        + `${run.throne.fed.length ? `  primes ${primeHelpings(run.throne.fed.length)}` : ""}`
         + `${run.throne.fed.length ? (() => {
           const led = throneLedger(run.throne, run.world.aeon);
           return led.wasted > 0

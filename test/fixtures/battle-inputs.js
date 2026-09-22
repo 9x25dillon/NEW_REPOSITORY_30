@@ -53,6 +53,17 @@
   check(r.fray.stats.calls === 1, 'and a second press while it cools does nothing');
   g.draw();
 
+  // THE LURE, on a held LB: a tap still lifts, a hold leaves a cell standing.
+  r.cells = [cell('2', 2), cell('2', 2)];
+  r.lure = null;
+  button(4, true);
+  for (let i = 0; i < 40; i++) g.update(1 / 60);
+  check(!!r.lure, 'holding LB leaves a lure');
+  check(r.cells.length === 1, 'and it costs one cell');
+  button(4, false); g.update(1 / 60);
+  check(r.structures.length === 0, 'releasing after a lure does not also lift');
+  g.draw();
+
   // EVOLVE on the birth screen: B steps the cards, Start takes one and enters.
   r.throne.hp = 1;
   r.bolts = [{ x: r.throne.x, y: r.throne.y, vx: 0, vy: 0, life: 1, born: r.t, thrown: true }];
@@ -63,9 +74,17 @@
   g.draw();
   tap(1);
   check(g.pick === 1, 'B moves to the second card');
+  const rack = 40;
+  r.cells = Array.from({ length: rack }, () => cell('622', 12));
+  tap(2);
+  check((r.evolution.ranks[offer[1]] ?? 0) === 1, `X takes the highlighted card (${offer[1]})`);
+  check(r.cells.length === rack, 'and the first one at a birth is free');
+  const second = r.evolution.offer[g.pick];
+  tap(2);
+  check((r.evolution.ranks[second] ?? 0) === 1, `a second card (${second}) can be bought`);
+  check(r.cells.length === rack - 5, 'which is paid for out of the rack');
   tap(9);
-  check(g.screen === 'play' && r.world.aeon === 2, 'Start takes it and enters');
-  check((r.evolution.ranks[offer[1]] ?? 0) === 1, `the chosen card (${offer[1]}) was taken`);
+  check(g.screen === 'play' && r.world.aeon === 2, 'Start enters with what was taken');
   g.draw();
   check(document.body.scrollHeight <= innerHeight + 2, 'game and controls still fit the viewport');
   return checks;

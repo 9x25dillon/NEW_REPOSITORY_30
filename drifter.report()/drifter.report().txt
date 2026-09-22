@@ -1,0 +1,96 @@
+"SONIC DRIFTER  1102s  aeon 6 (THE SIXFOLD WATER)  phase dead
+you: integrity 0/6 stamina 100 score 18444
+companions: none; bond 0.00s
+mitochondria: 22; stored energy 1298
+built 757 cells; 257 standing; rack [622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 622 622 6 622 622 6 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 6 622 622 6 622 6 622 622 622 622 622 622 6 622 622 6 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 6 6 622 622]
+throne: fed [622 6 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622] -> 622 awake 772/2310  (5 of 20 bought anything; 1740 hp of nothing)  at mid-channel, 71um from you
+bodies: 5 limbs 0 legs 0 largest 253 cells P222 fed 23 seated 222 grows 2 AUTONOMOUS  lattice 85um
+bound: 14.83 MHz  FREED  crystal a=83um fill=0.62  gap 80.6-104.8
+water: 450 standing of 848; delivered 848; arrivals 4.39/s; hunters allowed 5
+heat: 26.6C (ambient 25)  viscosity x0.96  everything moves x1.04  water c=1724
+chip: 12/12 in reach; flow on you 0um/s
+events: aiming=177 birth=5 coil=40 crown=6 crystal=757 dash=281 death=1 devour=8 discharge=53 fed=52 freed=6 hit=17 hit:volley=17 kill=8 merge=3330 organelle=46 place=511 refuse=17248 retune=9 sovereign-hit=53 spent=5 step=176 strike=29 tuned=13 volley=175 wearing=31
+pad: 045e-0b00-Microsoft X-Box One  | standard | AXES 0.00 0.16 -0.05 -0.01 | DOWN - | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE
+diagnosis: 53 DISCHARGES IS NOT ENOUGH - IT NEEDS 7 MORE FROM WHERE YOU CAN STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES 2/S OFF IT"
+
+1
+
+drifter.report()
+
+
+SONIC DRIFTER  283s  aeon 1 (THE FIRST WATER)  phase dead
+you: integrity 0/6 stamina 100 score 268
+companions: none; bond 0.00s
+mitochondria: 1; stored energy 60; mending possible; repair 40/40
+battle: arms caught 0, thrown home 0 for 0 (3 each now); gambits 0; companion held 0; calls 0; mended 0
+evolution: none
+built 18 cells; 6 standing; rack [2 23 222]
+throne: fed [2 23 23 23] -> 23 awake 397/410  (all 4 bought something)  at mid-channel, 82um from you
+bodies: 1 limbs 1 legs 0 largest 6 cells P222 fed 222 seated 222 grows 2 AUTONOMOUS  lattice 114um
+bound: 8.51 MHz  FREED  crystal a=130um fill=0.43  gap 46.5-49.2
+water: 92 standing of 115; delivered 115; arrivals 0.94/s; hunters allowed 2
+heat: 34.4C (ambient 25)  viscosity x0.82  everything moves x1.22  water c=1519
+chip: 0/12 in reach; flow on you 0um/s
+events: aiming=24 coil=43 crown=1 crystal=18 dash=56 death=1 devour=2 discharge=1 fed=4 freed=1 hit=7 hit:struck=4 hit:volley=3 kill=6 merge=89 organelle=1 place=9 refuse=37 retune=23 sovereign-hit=1 spent=3 step=22 strike=34 tuned=2 volley=24
+pad: 045e-0b00-Microsoft X-Box One  | standard | AXES 0.01 0.13 -0.03 -0.03 | DOWN - | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE
+diagnosis: 1 DISCHARGES IS NOT ENOUGH - IT NEEDS 4 MORE FROM WHERE YOU CAN STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES 2/S OFF IT
+
+
+SONIC DRIFTER  551s  aeon 2 (THE CLOSED WATER)  phase dead
+you: integrity 0/6 stamina 100 score 1289
+companions: none; bond 0.00s
+mitochondria: 2; stored energy 120; mending possible; repair 38/40
+battle: arms caught 0, thrown home 0 for 0 (3 each now); gambits 1; companion held 0; calls 0; mended 0
+evolution: empathy:1
+built 87 cells; 16 standing; rack [23 2 432 432 422 432 422 422 432 422 422 422 422 432 422 422 432 432 422 422 422 422 422 422 422 422 422 422 422 422 432 422 432 422 432 432 4 422 422 432 4 422 422 432 432 422]
+throne: fed [2 23 2 23] -> 23 awake 302/310  (all 4 bought something)  at mid-channel, 256um from you
+bodies: 2 limbs 1 legs 0 largest 12 cells P222 fed 23 seated 222 grows 2 AUTONOMOUS  lattice 110um
+bound: 9.00 MHz  FREED  crystal a=109um fill=0.62  gap 54.1-70.8
+water: 290 standing of 406; delivered 406; arrivals 2.05/s; hunters allowed 2
+heat: 35.5C (ambient 25)  viscosity x0.80  everything moves x1.25  water c=1539
+chip: 8/12 in reach; flow on you 0um/s
+events: aiming=15 birth=1 coil=51 crown=2 crystal=87 dash=145 death=1 devour=3 discharge=4 evolved=1 fed=7 freed=2 gambit=1 hit=10 hit:shock=1 hit:struck=2 hit:volley=7 kill=19 merge=462 organelle=3 place=28 refuse=188 retune=14 shock=1 sovereign-hit=4 spent=9 step=225 strike=41 tuned=7 volley=15 wearing=18
+pad: 045e-0b00-Microsoft X-Box One  | standard | AXES -0.06 0.08 -0.04 0.01 | DOWN - | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE
+diagnosis: 4 DISCHARGES IS NOT ENOUGH - IT NEEDS 2 MORE FROM WHERE YOU CAN STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES 2/S OFF IT
+
+
+
+SONIC DRIFTER  2177s  aeon 12 (THE SIXFOLD WATER)  phase settle
+you: integrity 7/9 stamina 100 score 48999
+companions: none; bond 0.00s
+mitochondria: 13; stored energy 780; mending possible; repair 0/40
+battle: arms caught 18, thrown home 17 for 48.89999999999998 (no king); gambits 41; companion held 0; calls 0; mended 15
+evolution: membrane:3 reflex:1 capacitor:1 empathy:2 chitin:2 surge:2
+built 1893 cells; 91 standing; rack [622 6 622 6 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 6 622 6 6 622 622 622 6 622 622 6 622 622 622 622 622 622 622 6 6 622 6 622 622 622 622 6 6 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 6 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 622 622 6 622 622 622 622 622 6 622]
+throne: empty  at a sharp edge #6, 523um from you
+bodies: 3 limbs 1 legs 0 largest 89 cells P222 fed 23 seated 222 grows 2 AUTONOMOUS  lattice 85um
+bound: 14.83 MHz  held  crystal a=109um fill=0.62  gap 61.8-80.3
+water: 843 standing of 848; delivered 848; arrivals 6.09/s; hunters allowed 5
+heat: 27.1C (ambient 25)  viscosity x0.95  everything moves x1.05  water c=1725
+chip: 12/12 in reach; flow on you 10um/s (in a sharp edge #6)
+events: aiming=263 birth=11 charge=11 coil=71 crown=11 crystal=1893 dash=738 devour=12 discharge=87 evolved=11 fed=48 freed=11 gambit=41 hit=36 hit:shock=6 hit:struck=9 hit:volley=21 kill=30 merge=7646 organelle=122 place=1424 refuse=43672 repair=15 retune=43 riposte=18 riposte-hit=17 shock=18 sovereign-hit=87 spent=17 step=417 strike=55 tuned=10 volley=269 wearing=103
+pad: 045e-0b00-Microsoft X-Box One  | standard | AXES 0.07 0.05 0.01 -0.04 | DOWN - | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE
+diagnosis: YOU NEVER FED THE THRONE. GATHERING IS NOT THE GAME - IT IS HOW YOU PAY FOR THE ONE THING THAT ENDS THIS WATER
+
+
+drifter.report()
+"SONIC DRIFTER  2962s  aeon 14 (THE SIXFOLD WATER)  phase dead
+you: integrity 0/9 stamina 100 score 77878
+companions: none; bond 0.00s
+mitochondria: 18; stored energy 1080; mending possible; repair 3/40
+battle: arms caught 57, thrown home 56 for 1855.9 (58 each now); gambits 79; companion held 0; calls 0; mended 23
+evolution: membrane:3 reflex:2 capacitor:1 empathy:2 chitin:2 phagocyte:1 surge:2
+built 2971 cells; 700 standing; rack [622 6 622 6 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 6 622 6 6 622 622 622 6 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 6 622 6 622 622 622 622 622 622 6 622 622 622 622 6 622 6 622 622 622 622 622 622 6 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 6 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 6 622 622 6 622 622 6 622 622 6 6 622 622 622 6 622 622 622 622 6 6 622 622 622 6 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 6 622 622 622 622 6 6 622 622 622 622 622 622 622 622 622 6 622 622 622 6 622 622 622 622 622 622 6 6 622 622 622 622 622 622 622 622 6 622 622 622 622]
+throne: fed [6 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622] -> 622 awake 3924/5850  (5 of 50 bought anything; 5280 hp of nothing)  at a sharp edge #1, 331um from you
+bodies: 1 limbs 3 legs 0 largest 700 cells P222 fed 23 seated 222 grows 2 AUTONOMOUS  lattice 85um
+bound: 14.83 MHz  FREED  crystal a=84um fill=0.62  gap 78.7-102.9
+water: 494 standing of 848; delivered 848; arrivals 6.65/s; hunters allowed 7
+heat: 48.4C (ambient 25)  viscosity x0.63  everything moves x1.59  water c=1764
+chip: 12/12 in reach; flow on you 8um/s (in a sharp edge #1)
+events: aiming=458 birth=13 charge=26 coil=116 crown=14 crystal=2971 dash=1028 death=1 devour=28 discharge=136 evolved=13 fed=128 freed=14 gambit=79 hit=58 hit:charge=1 hit:shock=7 hit:struck=12 hit:volley=38 kill=41 merge=11680 organelle=128 place=2284 refuse=100255 repair=23 retune=49 riposte=57 riposte-hit=56 shock=35 sovereign-hit=136 spent=17 step=466 strike=94 tuned=11 volley=466 wearing=165
+pad: 045e-0b00-Microsoft X-Box One  | standard | AXES -0.01 -0.26 -0.05 -0.04 | DOWN - | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE
+diagnosis: YOU FED IT 50 AND THE FIRST 5 BOUGHT ALL THERE WAS - THE OTHER 45 WERE 5280 HIT POINTS OF NOTHING. YOU HAVE ALREADY LANDED ENOUGH TO KILL A 570 HP KING"
+
+1
+
+drifter.report()

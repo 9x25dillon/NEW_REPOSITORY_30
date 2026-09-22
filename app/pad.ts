@@ -36,6 +36,8 @@ export interface Intent {
   placeDown: boolean;
   /** Take the building you are standing on back into your hand. One-shot. */
   lift: boolean;
+  /** Held: lift on release, or leave a lure standing if held long enough. */
+  liftDown: boolean;
   crown: boolean;
   /** The throne button, HELD rather than tapped. Tap it to feed, hold it to
    *  crown: an act you cannot undo should not be the same gesture as one you
@@ -55,7 +57,8 @@ export interface Intent {
 }
 
 const NOTHING: Intent = {
-  move: { x: 0, y: 0 }, grip: false, dash: false, place: false, placeDown: false, lift: false,
+  move: { x: 0, y: 0 }, grip: false, dash: false, place: false, placeDown: false,
+  lift: false, liftDown: false,
   crown: false, crownDown: false, cycle: 0, confirm: false, pause: false,
   depth: 0, call: false, mute: false,
 };
@@ -195,6 +198,7 @@ export class Pad {
       out.place = anyHit(m.place);
       out.placeDown = anyDown(m.place);
       out.lift = anyHit(m.lift);
+      out.liftDown = anyDown(m.lift);
       out.crown = anyHit(m.crown);
       out.crownDown = anyDown(m.crown);
       out.cycle = (anyHit(m.prev) ? -1 : 0) + (anyHit(m.next) ? 1 : 0);
@@ -236,6 +240,7 @@ export class Pad {
     if (tap("KeyE") || tap("Enter")) out.place = true;
     if (k("KeyE") || k("Enter")) out.placeDown = true;
     if (tap("KeyF")) out.lift = true;
+    if (k("KeyF")) out.liftDown = true;
     if (tap("KeyC")) out.crown = true;
     if (k("KeyC")) out.crownDown = true;
     if (tap("KeyQ")) out.cycle = -1;

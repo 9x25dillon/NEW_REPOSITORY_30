@@ -31,8 +31,8 @@ import {
 } from "./ecology.js";
 import { type Mitochondrion, metabolise } from "./organelles.js";
 import {
-  type Fray, type Gambit, beginWind, charging, frayStep, gambitContact, newFray, resetFray,
-  riposte, sovereignDrive, unleash,
+  type Fray, type Gambit, beginWind, charging, faltering, frayStep, gambitContact, hurtSovereign,
+  newFray, resetFray, riposte, sovereignDrive, unleash,
 } from "./combat.js";
 import { allies, rushing, shielded } from "./allies.js";
 import {
@@ -52,8 +52,8 @@ import {
   type Cell, BUILDABLE, assemble, cellFor, motif,
 } from "./lattice.js";
 import {
-  type Wave, advance, axisX, axisY, grip, localAmplitude, newWave, rng,
-  streamingSpeed,
+  type Wave, STAMINA_MAX, STAMINA_REGEN, advance, axisX, axisY, grip, localAmplitude, newWave,
+  rng, streamingSpeed,
 } from "./wave.js";
 import {
   type Pilot, CRUISE_AMPLITUDE, DASH_COST, aimFor, beginDash, carry, concentrate, handed,
@@ -61,7 +61,7 @@ import {
 } from "./pilot.js";
 import {
   type Sovereign, type Structure, type World,
-  cadence, emptyThrone, feed, firstWorld, reachOf, sovereignInertia,
+  cadence, emptyThrone, feed, firstWorld, isPrime, nextHelpingBuys, reachOf, sovereignInertia,
   sovereignParticle, sovereignSpeed, structureFrom, volley, worldFrom,
 } from "./world.js";
 import { type Medium, type Particle, WATER, contrastFactor } from "../src/gorkov.js";
@@ -237,7 +237,7 @@ export const MAX_SUSPENSION = 900;
  */
 export function arrivalRate(run: Run): number {
   const past = run.world.current + streamingSpeed(run.wave.amplitude);
-  return (suspension(run) * past) / run.bounds.w;
+  return (suspension(run) * past) / run.bounds.w * (1 + 0.25 * rankOf(run, "prospect"));
 }
 
 /** The motif population the current pool should hold. */
@@ -369,7 +369,13 @@ export type Ev =
   | { kind: "refuse"; x: number; y: number; text: string }
   | { kind: "crystal"; x: number; y: number; group: string }
   | { kind: "place"; x: number; y: number; group: string }
-  | { kind: "fed"; group: string }
+  | { kind: "fed"; group: string; bought: boolean }
+  /** The throne's helping count landed on a prime. */
+  | { kind: "prime"; n: number }
+  | { kind: "lure"; x: number; y: number; group: string }
+  /** A leech finished a building, or a tender put health back. */
+  | { kind: "gnawed"; x: number; y: number; group: string }
+  | { kind: "tended"; x: number; y: number; heal: number }
   | { kind: "crown"; group: string; mass: number }
   | { kind: "discharge"; x: number; y: number; group: string; damage: number }
   | { kind: "devour"; x: number; y: number; heal: number }
@@ -395,13 +401,15 @@ export type Ev =
   | { kind: "riposte-hit"; x: number; y: number; damage: number }
   /** A king began a signature move. The wind-up is the telegraph. */
   | { kind: "gambit"; x: number; y: number; gambit: Gambit }
+  /** It reached its bond line and stands open for a moment. */
+  | { kind: "falters"; x: number; y: number }
   | { kind: "charge"; x: number; y: number }
   | { kind: "shock"; x: number; y: number }
   | { kind: "ally"; x: number; y: number; species: string; form: Form }
   | { kind: "call"; form: Form; x: number; y: number }
   | { kind: "repair"; x: number; y: number }
   | { kind: "mended"; x: number; y: number }
-  | { kind: "evolved"; trait: Trait; rank: number }
+  | { kind: "evolved"; trait: Trait; rank: number; cost: number }
   | { kind: "death" };
 
 export interface Run {
@@ -514,6 +522,16 @@ export interface Run {
   events: Ev[];
   /** Which plane you are standing on. */
   layer: number;
+  /**
+   * A cell left in the water singing like you, and when it stops.
+   *
+   * WHAT IT IS FOR. Hunters and the king both come for YOU, and the one lever
+   * the fight has ever had is where the king is standing — "you aim the king".
+   * A lure is that lever made explicit and paid for in cells: while it stands,
+   * everything that was walking toward you walks toward IT, which is how you
+   * put a king in front of an arm without shoving it there yourself.
+   */
+  lure: { x: number; y: number; until: number } | null;
   /** Where the lattice is currently pointed — a quarter pitch off your body,
    *  in the direction you are driving. Derived, never set from outside. */
   aim: { x: number; y: number };
@@ -557,6 +575,7 @@ export function startRun(seed = 1, ebb = false): Run {
     t: 0,
     spawnIn: 3,
     layer: 0,
+    lure: null,
     events: [],
     aim: { x: START.x + ARENA_W * 0.3, y: START.y + ARENA_H * 0.3 },
     rand: rng(seed),
@@ -716,6 +735,11 @@ export function step(run: Run, input: Input, dt: number): void {
 
   const wasSpent = w.spent;
   grip(w, input.grip && alive, dt);
+  // GILLS, if this run evolved it: the reservoir fills faster, and only while
+  // it is filling — a hand that is closed is still spending.
+  if (!input.grip && !w.spent && rankOf(run, "gills") > 0) {
+    w.stamina = Math.min(STAMINA_MAX, w.stamina + STAMINA_REGEN * 0.25 * rankOf(run, "gills") * dt);
+  }
   if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
 
   if (alive && input.dash && beginDash(you, w, input.move.x, input.move.y)) {
@@ -776,6 +800,7 @@ export function step(run: Run, input: Input, dt: number): void {
     }
   }
 
+  if (run.lure && run.t >= run.lure.until) run.lure = null;
   release(run, dt);
   walkBodies(run, dt);
   drift(run, dt);
@@ -905,6 +930,36 @@ function drift(run: Run, dt: number): void {
   }
 }
 
+/**
+ * What the water is coming for: you, or the lure you left standing.
+ *
+ * ONE HOME, because it is asked by hunting, by ambushing, by the king's own
+ * drag and by a charge's lane, and a lure that some of those believed in and
+ * others did not would be a decoy that pulls a hunter off you and walks a king
+ * onto you at the same time.
+ */
+export function prey(run: Run): { x: number; y: number } {
+  const l = run.lure;
+  return l && run.t < l.until ? l : run.you;
+}
+
+/** Seconds a lure stands for, and what it costs. */
+export const LURE_TIME = 6;
+export const LURE_COST = 1;
+
+export type LureResult = "placed" | "none" | "wrong-phase";
+
+/** Leave a cell behind to sing in your place. */
+export function dropLure(run: Run, index: number): LureResult {
+  if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
+  const c = run.cells[index] ?? run.cells[0];
+  if (!c) return "none";
+  run.cells.splice(run.cells.indexOf(c), LURE_COST);
+  run.lure = { x: run.you.x, y: run.you.y, until: run.t + LURE_TIME };
+  run.events.push({ kind: "lure", x: run.you.x, y: run.you.y, group: c.group.hm });
+  return "placed";
+}
+
 /** How near you have to be before a hunter gathers itself. */
 export const STRIKE_RANGE = 120e-6;
 /** And how long it must wait before doing it again. */
@@ -926,18 +981,29 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
   const b = beast(e.species);
   if (b.behaviour === "drift") return { x: 0, y: 0 };
 
+  // HELD IS HELD, AND IT COMES FIRST. A tender that went on mending while your
+  // hand was closed on it would be the one body in the water outside the rule
+  // the whole bestiary runs on.
   if (e.held > 0 || (e.seized ?? 0) > 0) {
     e.wind = 0;
     e.strike = 0;
+    e.dwell = 0;
     return { x: 0, y: 0 };
   }
+
+  // THE TWO THAT DO NOT WANT YOU. A tender wants the thing you crowned and a
+  // leech wants what you built, so neither of them is lured and neither of
+  // them is dodged — both are answered by being held, like everything else.
+  if (b.behaviour === "tend") return tend(run, e, dt);
+  if (b.behaviour === "graze") return graze(run, e, dt);
 
   if (e.strike > 0) {
     e.strike = Math.max(0, e.strike - dt);
     return { x: e.sx * b.speed * b.surge, y: e.sy * b.speed * b.surge };
   }
 
-  const hx = run.you.x - e.x, hy = run.you.y - e.y;
+  const at = prey(run);
+  const hx = at.x - e.x, hy = at.y - e.y;
   const r = Math.hypot(hx, hy) || 1e-12;
 
   if (e.wind > 0) {
@@ -967,6 +1033,82 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
   }
   if (b.behaviour === "ambush" && r > STRIKE_RANGE * 1.6) return { x: 0, y: 0 };
   return { x: (hx / r) * b.speed, y: (hy / r) * b.speed };
+}
+
+/** How near a tender has to be to mend the king, and how fast it mends. */
+export const TEND_REACH = 40e-6;
+export const TEND_RATE = 9;
+/** How long a leech takes to finish a building, and how near it has to fasten. */
+export const GNAW_TIME = 6;
+export const GNAW_REACH = 22e-6;
+
+/**
+ * A tender, mending what you crowned.
+ *
+ * It only mends a king that is awake and still alive, and it cannot take one
+ * past the bar it woke with. While your hand or a companion has hold of it, it
+ * does nothing at all — `hunt` has already returned by then.
+ */
+function tend(run: Run, e: Entity, dt: number): { x: number; y: number } {
+  const b = beast(e.species);
+  const k = run.throne;
+  const dx = k.x - e.x, dy = k.y - e.y;
+  const r = Math.hypot(dx, dy) || 1e-12;
+  if (r > TEND_REACH) return { x: (dx / r) * b.speed, y: (dy / r) * b.speed };
+  if (k.awake && k.hp > 0 && k.hp < k.maxHp) {
+    const heal = Math.min(TEND_RATE * dt, k.maxHp - k.hp);
+    k.hp += heal;
+    if (run.rand() < dt * 2) run.events.push({ kind: "tended", x: k.x, y: k.y, heal });
+  }
+  return { x: 0, y: 0 };
+}
+
+/**
+ * A leech, gnawing at what you built.
+ *
+ * It fastens on the nearest arm tip it can reach on its own plane and eats the
+ * building in GNAW_TIME seconds. Lifting the building out from under it works
+ * as well as killing it, which is the cheaper answer and the one nobody thinks
+ * of.
+ *
+ * AND STANDING THERE WORKS TOO, which nobody wrote: your idle lattice pins a
+ * body of its contrast to the nearest node, and near you that out-pulls its
+ * own swimming, so it cannot close on a tip you are standing over. A standing
+ * wave is a fence — the same sentence pilot.ts is built on — and here it
+ * happens to be a fence around your crystal.
+ */
+function graze(run: Run, e: Entity, dt: number): { x: number; y: number } {
+  const b = beast(e.species);
+  // AT AN ARM TIP, NOT AT THE MIDDLE. A building holds what it catches out at
+  // its lobe tips — forty microns from its centre — and its own pull parks the
+  // leech there, so a reach measured from the centre could never be closed and
+  // the thing gnawed at nothing for ever.
+  let target: Structure | null = null;
+  let best = Infinity;
+  let bx = 0, by = 0;
+  for (const s of run.structures) {
+    if (!s.serves.includes(e.layer)) continue;
+    for (const [lx, ly] of s.lobes) {
+      const tx = s.x + lx * s.reach, ty = s.y + ly * s.reach;
+      const d = Math.hypot(tx - e.x, ty - e.y);
+      if (d < best) { best = d; target = s; bx = tx; by = ty; }
+    }
+  }
+  if (!target) { e.dwell = 0; return { x: 0, y: 0 }; }
+  if (best > GNAW_REACH) {
+    e.dwell = 0;
+    const dx = bx - e.x, dy = by - e.y;
+    const r = Math.hypot(dx, dy) || 1e-12;
+    return { x: (dx / r) * b.speed, y: (dy / r) * b.speed };
+  }
+  e.dwell += dt;
+  if (e.dwell >= GNAW_TIME) {
+    e.dwell = 0;
+    run.structures = run.structures.filter((s) => s !== target);
+    run.events.push({ kind: "gnawed", x: target.x, y: target.y, group: target.hm });
+    retune(run);
+  }
+  return { x: 0, y: 0 };
 }
 
 // ── being held ──────────────────────────────────────────────────────────────
@@ -1000,7 +1142,9 @@ function settle(run: Run, dt: number): void {
       continue;
     }
     e.held += dt;
-    if (e.faction === "beast" && e.held >= beast(e.species).hold) dead.push(e);
+    if (e.faction !== "beast") continue;          // a motif has no species to ask
+    const holds = beast(e.species).hold * (1 - 0.2 * rankOf(run, "cilia"));
+    if (e.held >= holds) dead.push(e);
   }
   for (const e of dead) kill(run, e);
 }
@@ -1614,9 +1758,18 @@ export function feedThrone(run: Run, index: number): FeedResult {
   if (!c) return "none";
   if (!onThrone(run, run.you.x, run.you.y)) return "off-throne";
 
+  // Asked BEFORE the helping goes in, because afterwards the throne it would
+  // have been compared against is gone. The surface needs this to say whether
+  // the one just given bought anything.
+  const bought = nextHelpingBuys(run.throne, c, run.world.aeon).length > 0;
   feed(run.throne, c);
   run.cells.splice(index, 1);
-  run.events.push({ kind: "fed", group: c.group.hm });
+  run.events.push({ kind: "fed", group: c.group.hm, bought });
+  // A count that will not seat as a block comes back to you. See `isPrime`.
+  if (isPrime(run.throne.fed.length)) {
+    run.score += 20 * run.throne.fed.length;
+    run.events.push({ kind: "prime", n: run.throne.fed.length });
+  }
   return "fed";
 }
 
@@ -1648,6 +1801,9 @@ export function dischargesToKill(run: Run): number {
   // the 23 in that report, 124 against 192 — so this was optimistic by half
   // even before any aiming error.
   let best = 0;
+  // WHAT THIS RUN'S ARMS ARE WORTH, not what a fresh one's would be. ARSENAL
+  // and REFINE both move the number the player is shown, so they move it here.
+  const evolved = (1 + 0.15 * rankOf(run, "arsenal")) * (1 + 0.03 * rankOf(run, "refine"));
   const organelleIds = new Set(run.organelles.map((o) => o.hostId));
   const hms = [
     ...run.structures.filter((s) => !organelleIds.has(s.id)).map((s) => s.hm),
@@ -1658,7 +1814,7 @@ export function dischargesToKill(run: Run): number {
     const range = s.reach * LOBE_RANGE;
     if (range <= DEVOUR_REACH) continue;      // it cannot outrange the mouth
     const fall = 1 - DEVOUR_REACH / range;
-    best = Math.max(best, s.strength * DISCHARGE_GAIN * fall);
+    best = Math.max(best, s.strength * DISCHARGE_GAIN * fall * evolved);
   }
   if (best <= 0) return Infinity;
   // HOW MANY MORE. While you are feeding the throne this is a forecast and the
@@ -1931,7 +2087,9 @@ export function discharge(run: Run, s: Structure): number {
         const a = Math.atan2(dy, dx);
         let d = Math.abs(a - toKing);
         while (d > Math.PI) d = Math.abs(d - Math.PI * 2);
-        if (d < LOBE_ARC) damage += Math.round(s.strength * DISCHARGE_GAIN * fall);
+        if (d < LOBE_ARC) {
+          damage += Math.round(s.strength * DISCHARGE_GAIN * fall * (1 + 0.15 * rankOf(run, "arsenal")));
+        }
       }
     }
   }
@@ -1950,10 +2108,10 @@ export function discharge(run: Run, s: Structure): number {
     }
   }
 
-  if (damage > 0) {
-    k.hp = Math.max(0, k.hp - damage);
-    run.events.push({ kind: "sovereign-hit", x: k.x, y: k.y });
-  }
+  // WHAT LANDED, not what was aimed: a king at its bond line cannot be taken
+  // below one, and the readout must say the number the bar moved by.
+  damage = hurtSovereign(run, damage);
+  if (damage > 0) run.events.push({ kind: "sovereign-hit", x: k.x, y: k.y });
   run.events.push({ kind: "discharge", x: s.x, y: s.y, group: s.hm, damage });
   if (k.awake && k.hp <= 0) birth(run);
   return damage;
@@ -2056,8 +2214,9 @@ function reign(run: Run, dt: number, taming = false): void {
   // it is winding up. A telegraph that is still rotating is not a telegraph, it
   // is a rumour: the arms you were shown have to be the arms it throws.
   const winding = k.beat <= VOLLEY_WIND;
-  // A snared king is held whole: no drag, no spin, no volley clock.
-  const snared = run.fray.snare > 0;
+  // A snared king is held whole, and a faltering one has stopped of its own
+  // accord: no drag, no spin, no volley clock, and nothing eaten.
+  const snared = run.fray.snare > 0 || faltering(run);
   if (!winding && !snared) k.spin += dt * 0.55;
 
   // it drags itself toward you, and plants itself to throw — unless a charge,
@@ -2068,7 +2227,8 @@ function reign(run: Run, dt: number, taming = false): void {
     dx = override.x;
     dy = override.y;
   } else {
-    const hx = run.you.x - k.x, hy = run.you.y - k.y;
+    const at = prey(run);
+    const hx = at.x - k.x, hy = at.y - k.y;
     const r = Math.hypot(hx, hy) || 1e-12;
     const sp = sovereignSpeed(k) * adaptation.speed * (winding ? 0.2 : 1);
     dx = (hx / r) * sp;
@@ -2101,7 +2261,7 @@ function reign(run: Run, dt: number, taming = false): void {
   // anything else in the water, it comes apart — slowly, and only if you gave
   // it a handle to be held by.
   if (!taming && wearing(run)) {
-    k.hp = Math.max(0, k.hp - wearRate(k) * dt);
+    hurtSovereign(run, wearRate(k) * dt);
     if (run.rand() < dt * WEAR_TICKS_PER_SECOND) {
       run.events.push({ kind: "wearing", x: k.x, y: k.y });
     }
@@ -2109,7 +2269,8 @@ function reign(run: Run, dt: number, taming = false): void {
   }
 
   // it eats what you built
-  if (!snared && run.structures.length > 0 && run.rand() < dt * 0.075) {
+  if (!snared && run.structures.length > 0
+    && run.rand() < dt * 0.075 * (1 - 0.3 * rankOf(run, "anneal"))) {
     let victim = run.structures[0];
     let vr = Infinity;
     for (const s of run.structures) {
@@ -2291,6 +2452,7 @@ export function birth(run: Run): void {
   run.world = next;
   // Every king you end, by killing it or by bonding with it, is a chance for
   // the organism to change. The cards are dealt here and taken in `evolve`.
+  run.evolution.taken = 0;
   run.evolution.offer = offerFor(run);
 }
 
@@ -2326,6 +2488,7 @@ export function enterWorld(run: Run): void {
   const site = throneSite(run, fell.x, fell.y);
   run.throne = emptyThrone(site.x, site.y);
   run.bolts = [];
+  run.lure = null;
   // NEW WORLD, NEW WATER. This is the only place the count resets, and that is
   // the whole of the pressure to crown: gather this world out and the only way
   // to more is through the throne.
@@ -2341,6 +2504,7 @@ export function enterWorld(run: Run): void {
   run.bond.ally = null;
   run.bond.rushUntil = run.bond.aegisUntil = 0;
   run.evolution.offer = [];
+  run.evolution.taken = 0;
   resetFray(run);
   run.phase = "settle";
 }

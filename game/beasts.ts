@@ -1,4 +1,4 @@
-// game/beasts.ts — the six ways a body can be in the water with you.
+// game/beasts.ts — the eight ways a body can be in the water with you.
 //
 // A beast is not a stat block with a colour. It is a Particle, and the only
 // thing that decides how it behaves toward you is the sign of its contrast
@@ -18,7 +18,7 @@
 
 import { type Particle } from "../src/gorkov.js";
 
-export type Behaviour = "hunt" | "drift" | "split" | "orbit" | "ambush";
+export type Behaviour = "hunt" | "drift" | "split" | "orbit" | "ambush" | "tend" | "graze";
 
 export interface Beast {
   id: string;
@@ -62,6 +62,35 @@ const FAINT = { rho: 1050, c: 1520 };
  * walk through your idle field and they do not walk through your grip.
  */
 export const BEASTS: Readonly<Record<string, Beast>> = {
+  /**
+   * It does not come for you at all.
+   *
+   * A TENDER swims to whatever you crowned and mends it, and it is the first
+   * body in this water that makes you choose a target other than the thing in
+   * front of you. It carries no strike, so it cannot be answered by dodging:
+   * it is answered by holding it, like everything else here, or by ignoring it
+   * and watching the bar you are working on go back up.
+   */
+  tender: {
+    // Lipid, so it shares YOUR sign: your own drive reels it into your lap,
+    // and the body that mends a king is the one you can snatch by standing
+    // still. The leech is flesh and has to be gone to.
+    id: "tender", label: "TENDER", particle: { radius: 7e-6, ...LIPID },
+    hold: 1.3, speed: 7e-5, behaviour: "tend", damage: 0, drain: 0, score: 7,
+    wind: 0, strike: 0, surge: 0,
+  },
+  /**
+   * It comes for what you BUILT.
+   *
+   * A LEECH fastens onto the nearest building and gnaws, and a building is
+   * both your arsenal and the crystal the pool opens with — so ignoring one is
+   * a discharge and a stretch of water. It does nothing to you directly.
+   */
+  leech: {
+    id: "leech", label: "LEECH", particle: { radius: 8e-6, ...FLESH },
+    hold: 1.5, speed: 8e-5, behaviour: "graze", damage: 0, drain: 0, score: 6,
+    wind: 0, strike: 0, surge: 0,
+  },
   ribbon: {
     id: "ribbon", label: "RIBBON", particle: { radius: 4.5e-6, ...LIPID },
     hold: 1.1, speed: 6e-5, behaviour: "orbit", damage: 1, drain: 0, score: 5,

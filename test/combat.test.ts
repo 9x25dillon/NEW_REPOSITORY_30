@@ -1,23 +1,37 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
-  type Input, type Run, DRIVE_RADIUS, IFRAME, MAX_INTEGRITY, VOLLEY_WIND, birth, chargeTime, crown,
-  kill, latticePitch, maxIntegrity, newBeast, reshape, startRun, step,
+  type Input, type Run, DISCHARGE_GAIN, DRIVE_RADIUS, IFRAME, MAX_INTEGRITY, VOLLEY_WIND, birth,
+  GNAW_TIME, LURE_TIME, arrivalRate, beast, chargeTime, crown, discharge, dischargeFalloff,
+  dischargesToKill, dropLure, enterWorld, feedThrone, kill, latticePitch, liftCell, maxIntegrity,
+  newBeast, reshape, startRun, step,
 } from "../game/run.js";
 import {
-  CHARGE_CORE, CHARGE_TIME, ECHO_DELAY, GAMBIT_GAP, RIPOSTE_REFUND, catchReach, chargeLength,
-  chargeReach,
+  CHARGE_CORE, CHARGE_TIME, ECHO_DELAY, FALTER_TIME, GAMBIT_GAP, RIPOSTE_REFUND, catchReach,
+  chargeLength, chargeReach, hurtSovereign,
   echoArms, riposte, riposteDamage, shockReach,
 } from "../game/combat.js";
 import { AEGIS_REACH, allies, callAlly } from "../game/allies.js";
-import { activeLimbs, recruit, support, tameHealth, tameTime } from "../game/ecology.js";
+import {
+  TAME_REACH, activeLimbs, recruit, support, tameHealth, tameTime, vulnerable,
+} from "../game/ecology.js";
 import { REPAIR_COST, growMitochondrion, metabolise, mitoCapacity } from "../game/organelles.js";
 import {
-  TRAITS, TRAIT_ORDER, eligible, evolve, offerFor, rankOf,
+  BUY_BASE, TRAITS, TRAIT_ORDER, type Trait, cardCost, eligible, evolve, offerFor, primeCards,
+  rankOf,
 } from "../game/evolution.js";
 import { DASH_COST } from "../game/pilot.js";
 import { cellFor } from "../game/lattice.js";
-import { feed, structureFrom, volley } from "../game/world.js";
+
+/** Cells straight into the rack, without gathering them. */
+function grant(run: Run, groups: string[]): void {
+  for (const hm of groups) run.cells.push(cellFor(hm));
+}
+import {
+  type Structure, feed, inheritanceOf, isPrime, nextHelpingBuys, structureFrom, volley,
+  wildlifeFor,
+} from "../game/world.js";
+import { WATER } from "../src/gorkov.js";
 
 const DT = 1 / 60;
 const IDLE: Input = { move: { x: 0, y: 0 }, grip: false, dash: false };
@@ -536,4 +550,335 @@ test("one burst catches one arm, so standing on the king is not a farm", () => {
   run.bolts = run.bolts.filter((b) => !b.thrown);
   step(run, { move: { x: 0, y: -1 }, grip: false, dash: true }, DT);
   assert.equal(run.fray.stats.caught, 2, "a new burst may");
+});
+
+// ── the falter ──────────────────────────────────────────────────────────────
+
+/** A gun that can kill this king outright, standing where it bears on it. */
+function gunOn(run: Run): Structure {
+  const s = structureFrom(700, "622", run.throne.x - 120e-6, run.throne.y);
+  run.structures = [s];
+  return s;
+}
+
+test("a blow that would kill a king from above its bond line leaves it faltering at one", () => {
+  // Measured from four play reports: a 622 building takes 124 off at the edge
+  // of safety and the kings in those runs woke with about 410, so one shot
+  // crossed the whole window and no king was ever tamed in fourteen aeons.
+  const run = fight();
+  run.throne.hp = run.throne.maxHp;
+  const gun = gunOn(run);
+  assert.ok(run.throne.hp <= dischargeFalloff(gun, run.throne.x, run.throne.y)
+    * gun.strength * DISCHARGE_GAIN, "the fixture must be a one-shot kill");
+  discharge(run, gun);
+  assert.equal(run.throne.hp, 1, "it cannot be taken below one across that line");
+  assert.equal(run.phase, "reign", "so it is not a kill");
+  assert.ok(run.fray.falter > 0 && run.fray.faltered);
+  assert.ok(run.events.some((e) => e.kind === "falters"));
+  assert.ok(vulnerable(run.throne, tameHealth(run)), "and it is open to a bond");
+});
+
+test("a faltering king stops, and nothing takes it lower while it is open", () => {
+  const run = fight(6);
+  run.throne.hp = run.throne.maxHp;
+  discharge(run, gunOn(run));
+  const at = { x: run.throne.x, y: run.throne.y, beat: run.throne.beat, spin: run.throne.spin };
+  run.structures = [];
+  for (let i = 0; i < 60 * (FALTER_TIME - 0.2); i++) {
+    step(run, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+    assert.equal(run.throne.hp, 1, "your hand cannot finish it either");
+  }
+  assert.equal(run.throne.x, at.x);
+  assert.equal(run.throne.y, at.y);
+  assert.equal(run.throne.beat, at.beat, "no volley clock");
+  assert.equal(run.throne.spin, at.spin);
+  assert.equal(run.bolts.length, 0, "and it threw nothing");
+  assert.equal(run.phase, "reign");
+});
+
+test("once the moment passes it dies as it always did, and it comes only once a king", () => {
+  const run = fight();
+  run.throne.hp = run.throne.maxHp;
+  discharge(run, gunOn(run));
+  for (let i = 0; i < 60 * (FALTER_TIME + 0.2); i++) step(run, IDLE, DT);
+  assert.equal(run.fray.falter, 0, "the moment is over");
+  assert.equal(run.phase, "reign");
+  discharge(run, gunOn(run));
+  assert.equal(run.throne.hp, 0, "and now it dies");
+  assert.equal(run.phase, "birth");
+
+  // The next king gets its own moment, and healing back over the line does not
+  // buy a second one from the same king.
+  const again = fight();
+  again.throne.hp = again.throne.maxHp;
+  discharge(again, gunOn(again));
+  assert.ok(again.fray.faltered);
+  again.fray.falter = 0;
+  again.throne.hp = again.throne.maxHp;
+  again.events.length = 0;
+  discharge(again, gunOn(again));
+  assert.equal(again.fray.falter, 0, "no second falter from one king");
+  assert.ok(!again.events.some((e) => e.kind === "falters"));
+  enterWorld(again);
+  assert.equal(again.fray.faltered, false, "a new reign is a new king");
+});
+
+test("the falter offers the bond, it does not give it", () => {
+  const run = fight();
+  run.throne.hp = run.throne.maxHp;
+  run.you.x = run.throne.x + TAME_REACH * 2;
+  discharge(run, gunOn(run));
+  for (let i = 0; i < 60 * FALTER_TIME; i++) {
+    step(run, { move: { x: 0, y: 0 }, grip: false, dash: false, tame: true }, DT);
+  }
+  assert.equal(run.phase, "reign", "too far away to bond, however open it stands");
+  assert.equal(run.bond.companions.length, 0);
+  assert.ok(run.fray.falter < 1e-6, "and the moment ran out while you crossed");
+  // Close enough, and held: the bond is still the thing that tames it.
+  run.you.x = run.throne.x + TAME_REACH * 0.5;
+  for (let i = 0; i < 60 * (tameTime(run) + 0.2); i++) {
+    step(run, { move: { x: 0, y: 0 }, grip: false, dash: false, tame: true }, DT);
+  }
+  assert.equal(run.phase, "birth");
+  assert.equal(run.bond.companions.length, 1);
+});
+
+// ── the throne, and what a prime helping is worth ───────────────────────────
+
+test("a helping that lands on a prime says so, pays, and deals another card", () => {
+  const run = quiet();
+  run.you.x = run.throne.x; run.you.y = run.throne.y;
+  grant(run, ["622", "622", "622", "622", "622"]);
+  const before = run.score;
+  assert.equal(feedThrone(run, 0), "fed");
+  assert.ok(!run.events.some((e) => e.kind === "prime"), "one is not prime");
+  run.events.length = 0;
+  assert.equal(feedThrone(run, 0), "fed");
+  const prime = run.events.find((e) => e.kind === "prime");
+  assert.ok(prime && prime.n === 2, "two is");
+  assert.ok(run.score > before);
+  // Two helpings, two primes short of nothing: the birth deals four cards.
+  run.phase = "reign";
+  run.throne.awake = true;
+  run.throne.hp = 0;
+  birth(run);
+  assert.equal(primeCards(run), 1);
+  assert.equal(run.evolution.offer.length, 4);
+});
+
+test("a prime helping buys what mass no longer can, and the panel can say so first", () => {
+  const run = quiet();
+  run.you.x = run.throne.x; run.you.y = run.throne.y;
+  grant(run, new Array(20).fill("622"));
+  for (let i = 0; i < 16; i++) assert.equal(feedThrone(run, 0), "fed");
+  assert.equal(run.throne.fed.length, 16);
+  assert.ok(isPrime(17), "the next helping makes seventeen");
+  assert.deepEqual(nextHelpingBuys(run.throne, cellFor("622"), run.world.aeon),
+    ["WHAT THE NEXT WORLD KEEPS"], "which buys the one thing mass had stopped buying");
+  const keep = inheritanceOf(run.throne);
+  assert.equal(feedThrone(run, 0), "fed");
+  assert.ok(inheritanceOf(run.throne) > keep);
+});
+
+// ── evolution: a deck that does not run out, and cells that go somewhere ────
+
+test("the deck never deals an empty table, and REFINE is what it falls back on", () => {
+  const run = fight();
+  for (const t of TRAIT_ORDER) {
+    if (t !== "refine") run.evolution.ranks[t] = TRAITS[t].max;
+  }
+  assert.deepEqual(eligible(run), [], "every finite trait is at its cap");
+  const offer = offerFor(run);
+  assert.equal(offer.length, 3);
+  assert.ok(offer.every((t) => t === "refine"));
+  run.evolution.offer = offer;
+  assert.ok(evolve(run, "refine"));
+  assert.equal(rankOf(run, "refine"), 1);
+  run.evolution.offer = offerFor(run);
+  run.evolution.taken = 0;                      // as the next birth does
+  assert.ok(evolve(run, "refine"), "and it can be taken again, for ever");
+  assert.equal(rankOf(run, "refine"), 2);
+});
+
+test("the first card at a birth is free and the rest are bought from the rack", () => {
+  const run = fight();
+  run.evolution.offer = ["membrane", "chitin", "surge", "gills"];
+  run.cells = [];
+  assert.equal(cardCost(run), 0);
+  assert.ok(evolve(run, "membrane"), "the first is free with an empty rack");
+  assert.equal(cardCost(run), BUY_BASE);
+  assert.equal(evolve(run, "chitin"), false, "and the second is not");
+  grant(run, new Array(BUY_BASE + 10).fill("2"));
+  const had = run.cells.length;
+  assert.ok(evolve(run, "chitin"));
+  assert.equal(run.cells.length, had - BUY_BASE, "paid from the rack");
+  assert.equal(cardCost(run), BUY_BASE * 2, "and the next one doubles");
+  assert.deepEqual(run.evolution.offer, ["surge", "gills"], "what was taken leaves the table");
+  assert.equal(run.evolution.taken, 2);
+});
+
+test("every new trait does what its card says", () => {
+  const take = (run: Run, t: Trait) => {
+    run.evolution.offer = [t];
+    run.evolution.taken = 0;
+    assert.ok(evolve(run, t));
+  };
+
+  const arsenal = fight(1, 200e-6);
+  arsenal.throne.hp = arsenal.throne.maxHp;
+  const plain = dischargesToKill(arsenal);
+  take(arsenal, "arsenal");
+  assert.ok(dischargesToKill(arsenal) <= plain, "harder discharges need no more of them");
+
+  // A bar big enough that a hundred is nowhere near its bond line, so what is
+  // measured here is the trait and not the falter's floor.
+  const refine = fight();
+  refine.throne.maxHp = 4000;
+  refine.throne.hp = 4000;
+  take(refine, "refine");
+  hurtSovereign(refine, 100);
+  assert.equal(4000 - refine.throne.hp, 103, "three per cent, through the one door");
+
+  const cilia = quiet();
+  take(cilia, "cilia");
+  const e = newBeast(cilia, "vesicle", { x: cilia.you.x, y: cilia.you.y });
+  e.layer = cilia.layer;
+  cilia.entities = [e];
+  cilia.wave.amplitude = cilia.wave.maxAmplitude;
+  cilia.you.grip = 1;
+  let held = 0;
+  for (let i = 0; i < 120 && cilia.entities.length; i++) {
+    step(cilia, { move: { x: 0, y: 0 }, grip: true, dash: false }, DT);
+    if (cilia.entities.length) held = e.held;
+  }
+  assert.ok(held < beast("vesicle").hold, `it came apart early (${held.toFixed(2)} s)`);
+
+  const prospect = quiet();
+  const rate = arrivalRate(prospect);
+  take(prospect, "prospect");
+  assert.ok(Math.abs(arrivalRate(prospect) - rate * 1.25) < 1e-12);
+
+  const gills = quiet();
+  gills.wave.stamina = 50;
+  step(gills, IDLE, DT);
+  const plainGain = gills.wave.stamina - 50;
+  const fast = quiet();
+  take(fast, "gills");
+  fast.wave.stamina = 50;
+  step(fast, IDLE, DT);
+  assert.ok(fast.wave.stamina - 50 > plainGain * 1.2, "the reservoir fills faster");
+
+  const anneal = fight(1, 60e-6);
+  take(anneal, "anneal");
+  anneal.rand = () => 0.0009;          // just inside the plain appetite, not the annealed one
+  anneal.structures = [structureFrom(5, "2", anneal.throne.x + 40e-6, anneal.throne.y)];
+  anneal.throne.hp = anneal.throne.maxHp;
+  step(anneal, IDLE, DT);
+  assert.equal(anneal.structures.length, 1, "it went hungry this frame");
+});
+
+// ── the lure, and the two that do not want you ──────────────────────────────
+
+test("a lure takes a cell, sings for its time, and everything walks toward it instead", () => {
+  const run = fight(1, 260e-6);
+  grant(run, ["2"]);
+  run.throne.hp = run.throne.maxHp;
+  const e = newBeast(run, "vesicle", { x: run.you.x + 120e-6, y: run.you.y - 200e-6 });
+  e.layer = run.layer;
+  run.entities = [e];
+
+  assert.equal(dropLure(run, 0), "placed");
+  assert.equal(run.cells.length, 0, "it costs the cell");
+  const at = { x: run.lure!.x, y: run.lure!.y };
+  assert.ok(Math.hypot(at.x - run.you.x, at.y - run.you.y) < 1e-9, "left where you stood");
+
+  // Walk away from it, and watch what follows the lure rather than you.
+  run.you.y -= 320e-6;
+  const kingWas = Math.hypot(run.throne.x - at.x, run.throne.y - at.y);
+  const beastWas = Math.hypot(e.x - at.x, e.y - at.y);
+  for (let i = 0; i < 90; i++) {
+    run.integrity = MAX_INTEGRITY;
+    step(run, IDLE, DT);
+    run.events.length = 0;
+  }
+  assert.ok(Math.hypot(run.throne.x - at.x, run.throne.y - at.y) < kingWas,
+    "the king drags itself toward the lure");
+  assert.ok(Math.hypot(e.x - at.x, e.y - at.y) < beastWas, "and so does the hunter");
+
+  for (let i = 0; i < 60 * LURE_TIME; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  assert.equal(run.lure, null, "and then it stops singing");
+});
+
+test("a tender mends what you crowned, and being held stops it", () => {
+  const run = fight(5, 300e-6);
+  run.throne.hp = run.throne.maxHp * 0.5;
+  const t = newBeast(run, "tender", { x: run.throne.x + 60e-6, y: run.throne.y });
+  t.layer = run.layer;
+  run.entities = [t];
+  const hurt = run.throne.hp;
+  for (let i = 0; i < 120; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  assert.ok(run.throne.hp > hurt, "it puts health back");
+  assert.ok(run.throne.hp <= run.throne.maxHp, "and never past the bar it woke with");
+
+  const stopped = run.throne.hp;
+  t.seized = 1;                                  // a companion has hold of it
+  for (let i = 0; i < 60; i++) { step(run, IDLE, DT); run.events.length = 0; }
+  assert.equal(run.throne.hp, stopped, "held, it mends nothing");
+});
+
+test("a leech eats a building, and lifting it out from under one answers it", () => {
+  const run = quiet();
+  const s = structureFrom(11, "2", run.you.x + 200e-6, run.you.y);
+  run.structures = [s];
+  reshape(run);
+  const e = newBeast(run, "leech", { x: s.x + 40e-6, y: s.y });
+  e.layer = run.layer;
+  run.entities = [e];
+  for (let i = 0; i < 60 * (GNAW_TIME + 2) && run.structures.length; i++) {
+    step(run, IDLE, DT);
+    run.events.length = 0;
+  }
+  assert.equal(run.structures.length, 0, "it finishes the building");
+
+  const lifted = quiet();
+  const s2 = structureFrom(12, "2", lifted.you.x + 220e-6, lifted.you.y);
+  lifted.structures = [s2];
+  reshape(lifted);
+  const e2 = newBeast(lifted, "leech", { x: s2.x + 30e-6, y: s2.y });
+  e2.layer = lifted.layer;
+  lifted.entities = [e2];
+  for (let i = 0; i < 60 * 2; i++) { step(lifted, IDLE, DT); lifted.events.length = 0; }
+  assert.ok(e2.dwell > 0, "it has fastened on");
+  lifted.you.x = s2.x; lifted.you.y = s2.y;      // walk over to it
+  assert.equal(liftCell(lifted), "lifted");
+  step(lifted, IDLE, DT);
+  assert.equal(e2.dwell, 0, "and there is nothing left to gnaw");
+  assert.equal(lifted.cells.length, 1, "the cell is back in your hand");
+});
+
+test("a building you are standing over cannot be fastened onto", () => {
+  // Not a rule anybody wrote: your idle lattice pins a body of the leech's
+  // contrast to the nearest node, and near you that out-pulls its swimming.
+  const run = quiet();
+  const s = structureFrom(13, "2", run.you.x, run.you.y);
+  run.structures = [s];
+  reshape(run);
+  const e = newBeast(run, "leech", { x: s.x + 10e-6, y: s.y });
+  e.layer = run.layer;
+  run.entities = [e];
+  let worst = 0;
+  for (let i = 0; i < 60 * 4; i++) {
+    step(run, IDLE, DT);
+    run.events.length = 0;
+    worst = Math.max(worst, e.dwell);
+  }
+  assert.equal(run.structures.length, 1, "it never finishes one at your feet");
+  assert.ok(worst < GNAW_TIME * 0.5, `and never gets far into it (${worst.toFixed(2)} s)`);
+});
+
+test("later waters carry them, and the early ones do not", () => {
+  assert.ok(!wildlifeFor(WATER, 3, 50).includes("leech"));
+  assert.ok(wildlifeFor(WATER, 4, 50).includes("leech"));
+  assert.ok(!wildlifeFor(WATER, 4, 50).includes("tender"));
+  assert.ok(wildlifeFor(WATER, 5, 50).includes("tender"));
 });

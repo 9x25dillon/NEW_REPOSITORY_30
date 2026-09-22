@@ -411,7 +411,11 @@ volley arm to catch it and throw it back. From the second world, kings play a
 telegraphed signature move (a charge lane, a shock ring, or an echo volley) every
 seven seconds or so. Companions fight hunters in the water, and **R3** calls
 their special (rush, aegis, snare). Mitochondria mend integrity in a lull, and
-every king you end deals three evolution cards to choose from.
+every king you end deals evolution cards to choose from — the first free, the
+rest bought with spare cells. **Hold LB** to leave a cell singing as a lure and
+everything walks toward it instead of you. A helping that lands on a **prime
+count** buys what mass no longer can. Tenders mend the king; leeches eat your
+buildings.
 
 `app/sonic-drifter.html` — one self-contained file, no build step to open it, no
 network. **You are a body in the water, and only the field moves you.**
@@ -987,7 +991,7 @@ app/listen.html      the chord: a separate page, sharing no code with the bench
 game/wave.ts         the field: crossed standing waves, apodisation, stamina
 game/pilot.ts        you, as a body the field moves: steering, grip, the burst
 game/lattice.ts      the eleven cells a chiral world permits, and why not a twelfth
-game/beasts.ts       six creatures with physical contrast and telegraphed behaviours
+game/beasts.ts       eight creatures with physical contrast and telegraphed behaviours
 game/combat.ts       the riposte, thrown arms, and each king form's telegraphed gambit
 game/allies.ts       companions as bodies in the water, and their calls
 game/evolution.ts    the trait cards dealt at every birth

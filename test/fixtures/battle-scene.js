@@ -42,7 +42,14 @@ window.stageBattle = (kind) => {
     structure: i % 7 ? 12 : 6, freedom: 1, variants: 1, ability: 'weave', blurb: '' }));
   g.selected = 40;
   r.fray.rings = []; r.fray.echo = null; r.fray.snare = 0; r.fray.daze = 0; r.fray.charge = 0;
-  if (kind === 'charge') {
+  r.fray.falter = 0; r.fray.faltered = false;
+  r.lure = kind === 'charge' ? { x: x - 70e-6, y: y + 70e-6, until: r.t + 4.2 } : null;
+  if (kind === 'falter') {
+    // the one moment a king is open: at its line, stopped, and not killable
+    r.throne.hp = 1; r.throne.beat = 2; r.fray.falter = 1.8; r.fray.faltered = true;
+    r.throne.x = x + 150e-6; r.throne.y = y;
+    r.bolts = [];
+  } else if (kind === 'charge') {
     r.fray.next = 'charge';
     r.fray.lane = { dx: -0.93, dy: 0.37 };
   } else {
@@ -60,9 +67,15 @@ window.stageBattle = (kind) => {
 window.stageBirth = () => {
   const g = window.drifter, r = g.run;
   delete g.update;   // the real update again: a thrown arm ends the reign
+  // A previous scene may have left a falter standing, and a faltering king
+  // cannot be taken below one -- which is the rule working, not a fixture.
+  r.fray.falter = 0; r.fray.faltered = false;
   r.phase = 'reign'; g.screen = 'play'; r.world.aeon = 1;
-  r.throne = { hm: '222', fed: ['222', '2'], mass: 6, freedom: 4, anchored: true, hp: 1, maxHp: 90,
-    x: r.you.x + 60e-6, y: r.you.y, awake: true, beat: 3, spin: 0 };
+  // Five helpings: three of those counts were prime, so the birth deals six.
+  r.throne = { hm: '222', fed: ['222', '2', '222', '2', '222'], mass: 14, freedom: 4,
+    anchored: true, hp: 1, maxHp: 170, x: r.you.x + 60e-6, y: r.you.y, awake: true, beat: 3, spin: 0 };
+  r.cells = Array.from({ length: 40 }, () => ({ group: { hm: '622', order: 12 }, structure: 12,
+    freedom: 1, variants: 1, ability: 'weave', blurb: '' }));
   r.bond.companions = [{ form: 'strider', hm: '222', rank: 1 }];
   r.evolution.ranks = { reflex: 1 };
   r.bolts = [{ x: r.throne.x, y: r.throne.y, vx: 0, vy: 0, life: 1, born: r.t, thrown: true }];

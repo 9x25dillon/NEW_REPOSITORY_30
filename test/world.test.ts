@@ -2,9 +2,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  cadence, emptyThrone, epitaphFor, feed, firstWorld, holdPoints,
-  nextHelpingBuys, poolFor, reachOf, sovereignInertia, sovereignParticle,
-  structureFrom, throneLedger, volley, worldFrom,
+  INHERITANCE_CAP, PRIME_KEEP, cadence, emptyThrone, epitaphFor, feed, firstWorld, holdPoints,
+  inheritanceOf, isPrime, nextHelpingBuys, poolFor, primeHelpings, reachOf, sovereignInertia,
+  sovereignParticle, structureFrom, throneLedger, volley, worldFrom,
 } from "../game/world.js";
 import { BUILDABLE, cellFor, motif, recipesFrom } from "../game/lattice.js";
 import { YOU } from "../game/pilot.js";
@@ -235,16 +235,54 @@ test("a throne is sated long before it is full", () => {
 
   assert.ok(bought.length > 0, "the first helpings must buy something or feeding is pointless");
   assert.equal(bought[0], 1, "the first one always does");
-  assert.deepEqual(bought, bought.map((_, i) => i + 1),
-    `what feeding buys must run out ONCE, not flicker (${bought.join(",")})`);
-  assert.ok(bought[bought.length - 1] <= 6,
-    `and it runs out early — this is the whole finding (${bought[bought.length - 1]})`);
+  // WHAT MASS BUYS still runs out once and early — that is the finding this
+  // test was written for. The counts that keep buying past it are the PRIME
+  // ones, and they are a deliberate exception: see `isPrime` in world.ts.
+  const plain = [];
+  for (let n = 1; n <= 12; n++) if (!isPrime(n)) plain.push(n);
+  const fromMass = bought.filter((n) => !isPrime(n));
+  assert.deepEqual(fromMass, plain.slice(0, fromMass.length),
+    `what mass buys must run out ONCE, not flicker (${fromMass.join(",")})`);
+  assert.ok(fromMass[fromMass.length - 1] <= 6,
+    `and it runs out early — this is the whole finding (${fromMass[fromMass.length - 1]})`);
 
-  // And the thing that goes on for ever is the one with no ceiling on it.
+  // Past that, only a prime count buys anything, and the health rises whatever
+  // the count is: that exchange is the decision the panel has to show.
   const before = k.maxHp;
-  feed(k, c);
+  feed(k, c);                                    // 13 fed, so the next makes 14
   assert.ok(k.maxHp > before, "the health keeps rising");
-  assert.equal(nextHelpingBuys(k, c, 6).length, 0, "and by now it is the only thing that does");
+  assert.ok(!isPrime(14));
+  assert.equal(nextHelpingBuys(k, c, 6).length, 0, "and a plain count now buys nothing");
+  feed(k, c);                                    // 14 fed, so the next makes 15
+  feed(k, c);                                    // 15 fed, so the next makes 16
+  feed(k, c);                                    // 16 fed, so the next makes 17, which is prime
+  assert.ok(isPrime(17));
+  assert.deepEqual(nextHelpingBuys(k, c, 6), ["WHAT THE NEXT WORLD KEEPS"],
+    "a prime helping buys the one thing that was clamped");
+});
+
+test("a prime helping is worth what it says, and only up to the ceiling", () => {
+  const c = cellFor("622");
+  const k = emptyThrone(0, 0);
+  const at = (n: number): number => {
+    const t = emptyThrone(0, 0);
+    for (let i = 0; i < n; i++) feed(t, c);
+    return inheritanceOf(t);
+  };
+  assert.equal(primeHelpings(1), 0);
+  assert.equal(primeHelpings(3), 2, "two and three");
+  assert.equal(primeHelpings(31), 11);
+  assert.ok(at(3) > at(1), "two primes and two helpings of mass");
+  // Mass alone stops at 0.6 — a sixfold throne is there by its fourth helping —
+  // and the prime term is added PAST that, up to its own cap.
+  const four = emptyThrone(0, 0);
+  for (let i = 0; i < 4; i++) feed(four, c);
+  assert.ok(Math.min(0.6, 0.12 + four.mass * 0.016) === 0.6, "mass is at its ceiling by four");
+  assert.ok(Math.abs(inheritanceOf(four) - (0.6 + PRIME_KEEP * primeHelpings(4))) < 1e-9,
+    "so what it keeps past that is exactly what its primes bought");
+  for (let i = 0; i < 60; i++) feed(k, c);
+  assert.equal(inheritanceOf(k), INHERITANCE_CAP);
+  assert.ok(INHERITANCE_CAP > 0.6, "which is further than mass alone could reach");
 });
 
 test("the throne reads back what its helpings bought", () => {
@@ -253,9 +291,21 @@ test("the throne reads back what its helpings bought", () => {
   const fifty = king(new Array(50).fill("622"));
   const led = throneLedger(fifty, 6);
   assert.equal(led.bought + led.wasted, 50, "every helping is one or the other");
-  assert.ok(led.wasted >= 40,
+  // Fifty helpings of one cell: the first few buy what mass buys, the fifteen
+  // prime counts buy what a prime buys, and the other thirty-odd buy health.
+  assert.ok(led.wasted >= 30,
     `most of fifty helpings bought nothing (${led.bought} bought, ${led.wasted} did not)`);
-  assert.ok(led.health > fifty.maxHp * 0.8,
+  // What bought something is the early ones and then the primes, until the
+  // prime term reaches its own ceiling. Counted, not indexed: primes fall
+  // wherever they fall, so the ones that bought are no longer a prefix.
+  assert.ok(led.bought >= 8 && led.bought <= 20,
+    `the early helpings and the primes under the ceiling (${led.bought})`);
+  const at17 = king(new Array(16).fill("622"));
+  assert.deepEqual(nextHelpingBuys(at17, cellFor("622"), 6), ["WHAT THE NEXT WORLD KEEPS"],
+    "the seventeenth helping still buys, because seventeen is prime");
+  // Three quarters rather than four fifths: the prime helpings' own health is
+  // no longer counted as wasted, because they bought something.
+  assert.ok(led.health > fifty.maxHp * 0.75,
     `and most of the bar is health that bought nothing (${led.health} of ${fifty.maxHp})`);
 
   // A throne inside its ceiling has nothing to answer for, and an empty one is

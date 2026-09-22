@@ -89,7 +89,16 @@ test("each beast differs by its contrast factor, not by a stat block", () => {
   assert.ok(phi("splitter") < 0);
   assert.ok(phi("husk") > 0, "denser than water: your node REELS IT IN");
   assert.ok(beast("mote").particle.radius < CROSSOVER_RADIUS_ORDER, "under the crossover");
-  assert.equal(Object.keys(BEASTS).length, 6);
+  assert.equal(Object.keys(BEASTS).length, 8);
+  // The two that do not come for you at all still answer to the same one
+  // question: a tender is lighter than the water it mends a king in, a leech
+  // is denser than the water it takes your buildings out of.
+  assert.ok(phi("tender") < 0);
+  assert.ok(phi("leech") > 0);
+  for (const id of ["tender", "leech"]) {
+    assert.equal(beast(id).damage, 0, `${id} carries no strike`);
+    assert.equal(beast(id).drain, 0);
+  }
 });
 
 test("only a strike hurts you, and a body in your hand cannot strike", () => {

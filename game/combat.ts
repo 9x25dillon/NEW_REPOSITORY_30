@@ -29,11 +29,11 @@
 // game it has always been.
 
 import {
-  type Bolt, type Run, BOLT_LIFE, BOLT_SPEED, birth, kill,
+  type Bolt, type Run, BOLT_LIFE, BOLT_SPEED, birth, kill, prey,
 } from "./run.js";
 import { beast } from "./beasts.js";
 import { together } from "./depth.js";
-import { formFor } from "./ecology.js";
+import { formFor, tameHealth } from "./ecology.js";
 import { rankOf } from "./evolution.js";
 import { type Dir } from "./shape.js";
 import { type Sovereign, sovereignParticle, volley } from "./world.js";
@@ -84,6 +84,9 @@ export interface Fray {
   echo: { at: number; arms: Dir[]; speed: number } | null;
   /** Seconds a Weaver's snare still holds the king. */
   snare: number;
+  /** Seconds this king is faltering at its bond line, and whether it already has. */
+  falter: number;
+  faltered: boolean;
   /** Energy put toward the next point of integrity, by mitochondria. */
   repair: number;
   /** When you were last hit, in run seconds. Repair waits for calm. */
@@ -98,7 +101,8 @@ export interface Fray {
 export function newFray(): Fray {
   return {
     beats: 0, lastGambit: 0, next: null, lane: null, charge: 0, daze: 0, rings: [], echo: null,
-    snare: 0, repair: 0, lastHit: -Infinity, burstCaught: false, turned: -Infinity,
+    snare: 0, falter: 0, faltered: false, repair: 0, lastHit: -Infinity,
+    burstCaught: false, turned: -Infinity,
     stats: { caught: 0, landed: 0, damage: 0, gambits: 0, held: 0, calls: 0, repairs: 0 },
   };
 }
@@ -107,8 +111,59 @@ export function newFray(): Fray {
 export function resetFray(run: Run): void {
   const f = run.fray;
   f.beats = 0; f.lastGambit = run.t; f.next = null; f.lane = null; f.charge = 0; f.daze = 0;
-  f.rings = []; f.echo = null; f.snare = 0;
+  f.rings = []; f.echo = null; f.snare = 0; f.falter = 0; f.faltered = false;
 }
+
+/**
+ * How long a king stands open at its bond line, seconds.
+ *
+ * THE TAMING WINDOW WAS ONE DISCHARGE WIDE, and four play reports across
+ * fourteen aeons never once used it. A 622 building takes 124 off a king at the
+ * edge of safety and 192 at its muzzle, and the kings in those runs woke with
+ * about 410 — so a single shot crossed the whole window between the bond line
+ * and zero. Bonding, companions, their calls and PACK were all unreachable in
+ * practice, not because the player did not want them but because there was no
+ * moment at which they were offered.
+ *
+ * So the first time a king drops to its line it FALTERS: it stops where it is,
+ * throws nothing, eats nothing, and cannot be taken below one hit point until
+ * the moment passes. It is shorter than a bond takes, so it is an invitation
+ * rather than a free companion — you still have to cross to it and hold. Once
+ * it is over the fight is exactly as it was, and killing it is only a matter of
+ * waiting the moment out.
+ */
+export const FALTER_TIME = 2.5;
+
+/**
+ * Take health off the king, with the falter's floor, and answer with how much
+ * actually landed.
+ *
+ * ONE DOOR. Every source of damage — a discharge, your bare hand, an arm thrown
+ * home — goes through here, so the floor and the crossing cannot be true of one
+ * of them and false of another.
+ */
+export function hurtSovereign(run: Run, raw: number): number {
+  const k = run.throne;
+  const f = run.fray;
+  // REFINE rides here because this is the one door: it is worth the same 3% a
+  // rank whether the wound came from a building, your hand or a thrown arm.
+  const damage = raw * (1 + 0.03 * rankOf(run, "refine"));
+  if (!(damage > 0) || k.hp <= 0) return 0;
+  const line = k.maxHp * tameHealth(run);
+  const crossing = !f.faltered && k.hp > line && k.hp - damage <= line;
+  const floor = f.falter > 0 || crossing ? 1 : 0;
+  const applied = Math.min(damage, Math.max(0, k.hp - floor));
+  k.hp -= applied;
+  if (crossing) {
+    f.faltered = true;
+    f.falter = FALTER_TIME;
+    run.events.push({ kind: "falters", x: k.x, y: k.y });
+  }
+  return applied;
+}
+
+/** Is the king standing open at its bond line right now? */
+export function faltering(run: Run): boolean { return run.fray.falter > 0; }
 
 // ── the riposte ─────────────────────────────────────────────────────────────
 
@@ -238,8 +293,8 @@ export function riposte(
     if (!live || Math.hypot(b.x - k.x, b.y - k.y) > hitR) continue;
     b.life = 0;
     if (taming) continue;
-    const damage = Math.min(k.hp, riposteDamage(run));
-    k.hp = Math.max(0, k.hp - damage);
+    const damage = hurtSovereign(run, riposteDamage(run));
+    if (damage <= 0) continue;
     f.stats.landed++;
     f.stats.damage += damage;
     run.events.push({ kind: "riposte-hit", x: k.x, y: k.y, damage });
@@ -323,7 +378,8 @@ export function beginWind(run: Run): Gambit | null {
   if (f.next) f.lastGambit = run.t;
   f.lane = null;
   if (f.next === "charge") {
-    const dx = run.you.x - k.x, dy = run.you.y - k.y;
+    const at = prey(run);
+    const dx = at.x - k.x, dy = at.y - k.y;
     const r = Math.hypot(dx, dy) || 1e-12;
     f.lane = { dx: dx / r, dy: dy / r };
   }
@@ -377,7 +433,7 @@ export function charging(run: Run): boolean { return run.fray.charge > 0; }
  */
 export function sovereignDrive(run: Run): { x: number; y: number } | null {
   const f = run.fray;
-  if (f.snare > 0) return { x: 0, y: 0 };
+  if (f.snare > 0 || f.falter > 0) return { x: 0, y: 0 };
   if (f.charge > 0 && f.lane) return { x: f.lane.dx * CHARGE_SPEED, y: f.lane.dy * CHARGE_SPEED };
   if (f.daze > 0) return { x: 0, y: 0 };
   return null;
@@ -388,6 +444,7 @@ export function frayStep(run: Run, dt: number): void {
   const f = run.fray;
   const k = run.throne;
   if (f.snare > 0) f.snare = Math.max(0, f.snare - dt);
+  if (f.falter > 0) f.falter = Math.max(0, f.falter - dt);
   if (f.charge > 0) {
     f.charge = Math.max(0, f.charge - dt);
     if (f.charge === 0) { f.daze = CHARGE_DAZE; f.lane = null; }

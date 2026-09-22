@@ -324,6 +324,9 @@ export function wildlifeFor(medium: Medium, aeon: number, mass: number): string[
 
   if (aeon >= 3) out.push("ribbon");
   if (aeon >= 4) out.push("sentinel");
+  // What comes for your crystal, and what comes for the thing you crowned.
+  if (aeon >= 4) out.push("leech");
+  if (aeon >= 5) out.push("tender");
   return [...new Set(out)];
 }
 
@@ -501,8 +504,48 @@ export interface Epitaph {
  * than the one before it, and nothing had ever said why.
  */
 export function inheritanceOf(s: Sovereign): number {
-  return Math.min(0.6, 0.12 + s.mass * 0.016);
+  // MASS FIRST, AND IT STOPS WHERE IT ALWAYS DID. The prime term is added past
+  // that ceiling rather than into it — folded in, it bought nothing at all,
+  // because a sixfold throne reaches the mass ceiling on its fourth helping
+  // and the whole point of a prime is to be worth something after that.
+  const mass = Math.min(0.6, 0.12 + s.mass * 0.016);
+  return Math.min(INHERITANCE_CAP, mass + PRIME_KEEP * primeHelpings(s.fed.length));
 }
+
+/**
+ * A helping that lands on a prime count, and what it is worth.
+ *
+ * A GAME RULE, and the one place this repository rewards a number for being
+ * itself. Everything else a helping buys is clamped within a few mouthfuls —
+ * see `nextHelpingBuys` — so a throne stops being worth feeding almost at once,
+ * and a player who has built everything else has nothing left to do with a rack
+ * of a hundred and forty cells. A play report of 2026-09-22 fed thirty-one
+ * helpings and said so plainly: it was on purpose, for want of anything else.
+ *
+ * So the counts that cannot be laid out as a block — a prime is a line and
+ * nothing else — are the ones the throne cannot seat evenly into itself, and
+ * what will not seat comes back to you: two points more of the next world kept,
+ * past the old ceiling, and another card at its birth. It is checkable before
+ * you commit, because the panel says which number the next helping makes.
+ */
+export function isPrime(n: number): boolean {
+  if (!Number.isInteger(n) || n < 2) return false;
+  if (n % 2 === 0) return n === 2;
+  for (let d = 3; d * d <= n; d += 2) if (n % d === 0) return false;
+  return true;
+}
+
+/** How many of the counts 1..n were prime, which is how many boons were taken. */
+export function primeHelpings(n: number): number {
+  let count = 0;
+  for (let i = 2; i <= n; i++) if (isPrime(i)) count++;
+  return count;
+}
+
+/** What one prime helping adds to what the next world keeps. */
+export const PRIME_KEEP = 0.02;
+/** And where even primes stop. The old ceiling was 0.6 with no way past it. */
+export const INHERITANCE_CAP = 0.75;
 
 /**
  * What one more helping would change about the world this king leaves.
@@ -575,7 +618,9 @@ export function helpingCosts(s: Sovereign, c: Cell): number {
 
 /** What the helpings a throne has already been given actually came to. */
 export interface ThroneLedger {
-  /** How many of them changed the world at all. */
+  /** How many of them changed the world at all. COUNTED, not the index of the
+   *  last one: prime helpings buy something wherever they fall, so the ones
+   *  that bought are no longer a prefix of the list. */
   bought: number;
   /** How many bought nothing but the king's own health. */
   wasted: number;
@@ -601,14 +646,16 @@ export interface ThroneLedger {
 export function throneLedger(s: Sovereign, aeon: number): ThroneLedger {
   const k = emptyThrone(s.x, s.y);
   let bought = 0;
-  let sated = 0;
-  for (let i = 0; i < s.fed.length; i++) {
-    const c = cellFor(s.fed[i]);
-    if (nextHelpingBuys(k, c, aeon).length > 0) bought = i + 1;
+  let health = 0;
+  for (const hm of s.fed) {
+    const c = cellFor(hm);
+    const buys = nextHelpingBuys(k, c, aeon).length > 0;
+    const before = k.maxHp;
     feed(k, c);
-    if (i + 1 === bought) sated = k.maxHp;
+    if (buys) bought++;
+    else health += k.maxHp - before;
   }
-  return { bought, wasted: s.fed.length - bought, health: s.maxHp - sated };
+  return { bought, wasted: s.fed.length - bought, health };
 }
 
 export function epitaphFor(s: Sovereign, w: World): Epitaph {
