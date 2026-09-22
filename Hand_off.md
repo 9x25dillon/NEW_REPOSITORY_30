@@ -69,9 +69,11 @@ evolution cards change how later worlds feel. A real play report is the next
 input. The new `battle:` and `evolution:` report lines exist to answer these.
 
 Git: at the user's request, this session's work and the uncommitted 2026-09-21
-work were committed together as one commit on the branch `battle-pass`. They
-are interleaved in the same files and were not split. `main` was not moved and
-nothing was pushed. Check with `git log --oneline main..battle-pass`.
+work were committed together as one commit, `591e943`. They are interleaved in
+the same files and were not split. It was made on a `battle-pass` branch, then
+fast-forwarded onto `main` and pushed to `origin/main`, which is private. The
+branch was deleted afterwards. Check with `git log --oneline -3` and
+`git ls-remote origin refs/heads/main`.
 
 ---
 
