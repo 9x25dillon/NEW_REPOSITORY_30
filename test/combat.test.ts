@@ -7,8 +7,8 @@ import {
   newBeast, reshape, startRun, step,
 } from "../game/run.js";
 import {
-  CHARGE_CORE, CHARGE_TIME, ECHO_DELAY, FALTER_TIME, GAMBIT_GAP, RIPOSTE_REFUND, catchReach,
-  chargeLength, chargeReach, hurtSovereign,
+  CHARGE_CORE, CHARGE_TIME, ECHO_DELAY, FALTER_TIME, GAMBIT_GAP, GAMBIT_WIND, RIPOSTE_COOL,
+  RIPOSTE_REFUND, RIPOSTE_STAGGER, catchReach, chargeLength, chargeReach, hurtSovereign,
   echoArms, riposte, riposteDamage, shockReach,
 } from "../game/combat.js";
 import { AEGIS_REACH, allies, callAlly } from "../game/allies.js";
@@ -74,7 +74,9 @@ function bursting(run: Run): void {
 /** Put the next wind-up one frame away, long enough after the last gambit to be one. */
 function nextIsGambit(run: Run): void {
   run.fray.lastGambit = -Infinity;
-  run.throne.beat = VOLLEY_WIND + 0.005;
+  // A gambit is decided a GAMBIT_WIND ahead, not a VOLLEY_WIND: that is the
+  // whole of the fix for a shock nobody could get out of.
+  run.throne.beat = GAMBIT_WIND + 0.005;
 }
 
 function kinds(run: Run): string[] { return run.events.map((e) => e.kind); }
@@ -224,7 +226,7 @@ test("a charge runs down the lane it showed at the start of its wind, and steppi
   // Step north, off the lane. The lane does not follow.
   run.you.y -= 100e-6;
   const start = { x: run.throne.x, y: run.throne.y };
-  for (let i = 0; i < 60 * 1.2; i++) {
+  for (let i = 0; i < 60 * 1.6; i++) {
     step(run, IDLE, DT);
     assert.deepEqual(run.fray.lane ?? lane, lane, "the telegraph never turns");
   }
@@ -236,7 +238,7 @@ test("a charge runs down the lane it showed at the start of its wind, and steppi
   const stood = fight(4);
   nextIsGambit(stood);
   let cause = "";
-  for (let i = 0; i < 60 * (VOLLEY_WIND + CHARGE_TIME + 0.2); i++) {
+  for (let i = 0; i < 60 * (GAMBIT_WIND + CHARGE_TIME + 0.2); i++) {
     step(stood, IDLE, DT);
     for (const ev of stood.events) if (ev.kind === "hit") cause = ev.cause;
   }
@@ -248,7 +250,7 @@ test("a shock hits only as its front crosses you, stops at its ring, and a burst
     const run = fight(2, dx);
     nextIsGambit(run);
     let cause = "";
-    for (let i = 0; i < 60 * 2.2; i++) {
+    for (let i = 0; i < 60 * 3.2; i++) {
       if (burst) run.you.iframe = 0.2;
       step(run, IDLE, DT);
       for (const ev of run.events) if (ev.kind === "hit") cause = ev.cause;
@@ -275,7 +277,7 @@ test("a king fed twenty helpings charges with its core, not its whole body", () 
   // Inside its body, beside the lane: a body that size is where you fight it.
   run.you.y -= chargeReach(run.throne) + 30e-6;
   let hit = false;
-  for (let i = 0; i < 60 * 1.2; i++) {
+  for (let i = 0; i < 60 * 1.6; i++) {
     step(run, IDLE, DT);
     if (run.events.some((e) => e.kind === "hit")) hit = true;
   }
@@ -290,7 +292,7 @@ test("an echo throws the arms it drew, turned half a gap, a beat after the volle
   const shown = echoArms(run);
   const first = volley(run.throne).length;
   let t = 0;
-  while (run.bolts.length === 0 && t < 2) { step(run, IDLE, DT); t += DT; }
+  while (run.bolts.length === 0 && t < 3) { step(run, IDLE, DT); t += DT; }
   assert.equal(run.bolts.length, first, "the volley first");
   const thrownAt = run.t;
   while (run.bolts.length === first && run.t - thrownAt < ECHO_DELAY + 0.2) step(run, IDLE, DT);
@@ -548,6 +550,8 @@ test("one burst catches one arm, so standing on the king is not a farm", () => {
   run.you.dashCool = 0;
   run.wave.stamina = 60;
   run.bolts = run.bolts.filter((b) => !b.thrown);
+  run.t += RIPOSTE_COOL;                         // and the recovery has passed
+  run.fray.catchReadyAt = run.t;
   step(run, { move: { x: 0, y: -1 }, grip: false, dash: true }, DT);
   assert.equal(run.fray.stats.caught, 2, "a new burst may");
 });
@@ -881,4 +885,83 @@ test("later waters carry them, and the early ones do not", () => {
   assert.ok(wildlifeFor(WATER, 4, 50).includes("leech"));
   assert.ok(!wildlifeFor(WATER, 4, 50).includes("tender"));
   assert.ok(wildlifeFor(WATER, 5, 50).includes("tender"));
+});
+
+test("a gambit is drawn for longer than the volley it replaces", () => {
+  // Twelve hits from thirty shocks in play, because a front that starts at a
+  // two-hundred-micron king's edge with half a second of warning cannot be
+  // walked out of. The warning is what changed.
+  const run = fight(2, 200e-6);
+  nextIsGambit(run);
+  step(run, IDLE, DT);
+  assert.equal(run.fray.next, "shock");
+  assert.ok(run.throne.beat > VOLLEY_WIND,
+    "it is announced while there is still more than a volley's warning left");
+  let warned = 0;
+  while (run.fray.next === "shock") { step(run, IDLE, DT); warned += DT; }
+  assert.ok(warned > VOLLEY_WIND, `a shock warns for ${warned.toFixed(2)} s`);
+  assert.ok(Math.abs(warned - GAMBIT_WIND) < 0.1);
+
+  // A plain volley still draws its arms at the old half-second.
+  const plain = fight(1, 200e-6);
+  plain.throne.beat = GAMBIT_WIND + 0.005;
+  let toArms = 0;
+  while (!plain.events.some((e) => e.kind === "aiming")) {
+    plain.events.length = 0;
+    step(plain, IDLE, DT);
+    toArms += DT;
+  }
+  assert.ok(Math.abs(plain.throne.beat - VOLLEY_WIND) < 0.02,
+    "the arms come up with half a second to go, as they always did");
+  assert.ok(toArms > 0.3);
+});
+
+test("a thrown arm is worth twice what it was, and only one every RIPOSTE_COOL", () => {
+  const run = fight(1, 90e-6);
+  run.throne.maxHp = 4000;
+  run.throne.hp = 4000;
+  const worth = riposteDamage(run);
+  assert.equal(worth, Math.max(3, Math.round(2 / 3 * run.throne.mass / volley(run.throne).length)));
+
+  bursting(run);
+  run.bolts = [incoming(run)];
+  riposte(run, false, DT, run.you);
+  assert.equal(run.fray.stats.caught, 1);
+  assert.ok(run.fray.catchReadyAt > run.t, "and the next one has to wait");
+
+  // Inside the recovery a burst still eats the arm: your i-frames saved you
+  // either way, and nothing is lost by trying.
+  run.fray.burstCaught = false;
+  const stamina = run.wave.stamina;
+  run.bolts.push(incoming(run));
+  riposte(run, false, DT, run.you);
+  assert.equal(run.bolts.filter((b) => !b.thrown).length, 0, "the arm is gone");
+  assert.equal(run.fray.stats.caught, 1, "but it was not thrown home");
+  assert.equal(run.wave.stamina, stamina, "and it paid nothing back");
+
+  run.t += RIPOSTE_COOL;
+  run.fray.burstCaught = false;
+  run.bolts = [incoming(run)];
+  riposte(run, false, DT, run.you);
+  assert.equal(run.fray.stats.caught, 2, "after the recovery it throws again");
+});
+
+test("an arm that lands knocks the next volley back, but never one already drawn", () => {
+  const run = fight(1, 60e-6);
+  run.throne.maxHp = 4000;
+  run.throne.hp = 4000;
+  run.throne.beat = 2;
+  run.bolts = [{ x: run.throne.x, y: run.throne.y, vx: 0, vy: 0, life: 1, born: 0, thrown: true }];
+  riposte(run, false, DT, run.you);
+  assert.ok(Math.abs(run.throne.beat - (2 + RIPOSTE_STAGGER)) < 1e-9, "the next volley is later");
+
+  const winding = fight(1, 60e-6);
+  winding.throne.maxHp = 4000;
+  winding.throne.hp = 4000;
+  winding.throne.beat = 0.2;                     // arms already drawn
+  winding.bolts = [{
+    x: winding.throne.x, y: winding.throne.y, vx: 0, vy: 0, life: 1, born: 0, thrown: true,
+  }];
+  riposte(winding, false, DT, winding.you);
+  assert.equal(winding.throne.beat, 0.2, "what it has shown you, it throws on time");
 });

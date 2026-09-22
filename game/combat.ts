@@ -29,7 +29,7 @@
 // game it has always been.
 
 import {
-  type Bolt, type Run, BOLT_LIFE, BOLT_SPEED, birth, kill, prey,
+  type Bolt, type Run, BOLT_LIFE, BOLT_SPEED, VOLLEY_WIND, birth, kill, prey,
 } from "./run.js";
 import { beast } from "./beasts.js";
 import { together } from "./depth.js";
@@ -93,6 +93,8 @@ export interface Fray {
   lastHit: number;
   /** This burst has already caught its arm. A new burst clears it. */
   burstCaught: boolean;
+  /** When an arm can next be thrown home rather than merely eaten. */
+  catchReadyAt: number;
   /** When an aegis last turned a hit, so a strike held against it is said once. */
   turned: number;
   stats: FrayStats;
@@ -102,7 +104,7 @@ export function newFray(): Fray {
   return {
     beats: 0, lastGambit: 0, next: null, lane: null, charge: 0, daze: 0, rings: [], echo: null,
     snare: 0, falter: 0, faltered: false, repair: 0, lastHit: -Infinity,
-    burstCaught: false, turned: -Infinity,
+    burstCaught: false, catchReadyAt: 0, turned: -Infinity,
     stats: { caught: 0, landed: 0, damage: 0, gambits: 0, held: 0, calls: 0, repairs: 0 },
   };
 }
@@ -186,8 +188,34 @@ export const RIPOSTE_REFUND = 8;
  * now; a catch is something you aim.
  */
 export const RIPOSTE_INTO = 0.5;
-/** A thrown arm's share of the king's mass per arm. See `riposteDamage`. */
-export const RIPOSTE_SHARE = 1 / 3;
+/**
+ * A thrown arm's share of the king's mass per arm. See `riposteDamage`.
+ *
+ * DOUBLED, AND THEN RATE-LIMITED, because the first number was set against the
+ * wrong player. A bot that bursts into every arm it can reach catches about one
+ * a volley — 58 a minute against a late king — and a third of the mass per arm
+ * put that ceiling at a sensible three minutes to kill. A person catches about
+ * one every two minutes: thirteen in twenty-four, measured, for six per cent of
+ * a bar. Tuned to the ceiling, the floor was worth nothing, and the player's
+ * word for it was "nerfed".
+ *
+ * So a catch is worth twice as much and can only be thrown home every
+ * RIPOSTE_COOL seconds. The ceiling is unchanged — half as many catches, each
+ * twice the size — and the catch a person actually makes is twice the reward.
+ * Bursting into an arm while it recovers still eats the arm; it is your
+ * i-frames that saved you either way, and nothing is lost by trying.
+ */
+export const RIPOSTE_SHARE = 2 / 3;
+/** Seconds between arms you can throw home. */
+export const RIPOSTE_COOL = 2.5;
+/**
+ * And what landing one does to the king's rhythm.
+ *
+ * Its own arm, back in its face: the next volley is pushed back a third of a
+ * second. Never while it is winding up, because the arms it has drawn are a
+ * promise and this would be the surface quietly breaking it.
+ */
+export const RIPOSTE_STAGGER = 0.33;
 /*
  * ONE ARM A BURST. Without it the best place to stand was ON the king: every
  * arm of a volley is born at its centre, so a burst timed to the throw caught
@@ -253,11 +281,14 @@ export function riposte(
       if (closestApproach(ax, ay, bx, by) > reach) continue;
       const speed0 = Math.hypot(b.vx, b.vy) || 1e-12;
       if (-(you.dashX * b.vx + you.dashY * b.vy) / speed0 < RIPOSTE_INTO) continue;
-      f.stats.caught++;
       f.burstCaught = true;
-      run.wave.stamina = Math.min(100, run.wave.stamina + RIPOSTE_REFUND);
-      if (run.wave.stamina > 25) run.wave.spent = false;
-      if (!live || taming) {
+      const recovering = run.t < f.catchReadyAt;
+      if (!recovering) {
+        f.stats.caught++;
+        run.wave.stamina = Math.min(100, run.wave.stamina + RIPOSTE_REFUND);
+        if (run.wave.stamina > 25) run.wave.spent = false;
+      }
+      if (!live || taming || recovering) {
         b.life = 0;
         run.events.push({ kind: "riposte", x: b.x, y: b.y, thrown: false });
         break;
@@ -268,6 +299,7 @@ export function riposte(
       b.x = you.x; b.y = you.y;
       b.vx = (dx / r) * speed; b.vy = (dy / r) * speed;
       b.life = RIPOSTE_LIFE; b.thrown = true; b.born = run.t;
+      f.catchReadyAt = run.t + RIPOSTE_COOL;
       run.events.push({ kind: "riposte", x: you.x, y: you.y, thrown: true });
       break;
     }
@@ -297,6 +329,8 @@ export function riposte(
     if (damage <= 0) continue;
     f.stats.landed++;
     f.stats.damage += damage;
+    // Its own arm knocks the next volley back, but never one it has drawn.
+    if (k.beat > windLength(run)) k.beat += RIPOSTE_STAGGER;
     run.events.push({ kind: "riposte-hit", x: k.x, y: k.y, damage });
     if (k.hp <= 0) { birth(run); break; }
   }
@@ -314,6 +348,22 @@ export function closestApproach(ax: number, ay: number, bx: number, by: number):
 // ── the gambits ─────────────────────────────────────────────────────────────
 
 export const GAMBIT_FROM_AEON = 2;
+/**
+ * How long a gambit is drawn before it happens, seconds.
+ *
+ * ITS OWN WINDOW, and longer than a volley's. A shock sharing the volley's
+ * 0.55 s landed on 40 per cent of the times it was thrown in play — twelve
+ * hits from thirty — because a king fed thirty helpings is two hundred microns
+ * in radius, its front starts at that edge, and from inside it there was not
+ * time to reach open water without spending a burst. A set piece announces
+ * itself for longer than the thing it replaces.
+ */
+export const GAMBIT_WIND = 0.9;
+
+/** How long the wind-up in progress lasts: a gambit's, or a plain volley's. */
+export function windLength(run: Run): number {
+  return run.fray.next ? GAMBIT_WIND : VOLLEY_WIND;
+}
 /**
  * Seconds from one gambit to the next, at least.
  *
@@ -340,7 +390,7 @@ export const CHARGE_TOUCH = 12e-6;
  * is the core's width, and it is drawn that wide.
  */
 export const CHARGE_CORE = 36e-6;
-export const SHOCK_SPEED = 2.1e-4;
+export const SHOCK_SPEED = 1.75e-4;
 /** How far past the king's own edge a shock front carries, m. */
 export const SHOCK_REACH = 220e-6;
 

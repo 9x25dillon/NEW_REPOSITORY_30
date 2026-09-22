@@ -31,8 +31,8 @@ import {
 } from "./ecology.js";
 import { type Mitochondrion, metabolise } from "./organelles.js";
 import {
-  type Fray, type Gambit, beginWind, charging, faltering, frayStep, gambitContact, hurtSovereign,
-  newFray, resetFray, riposte, sovereignDrive, unleash,
+  type Fray, type Gambit, GAMBIT_WIND, beginWind, charging, faltering, frayStep, gambitContact,
+  hurtSovereign, newFray, resetFray, riposte, sovereignDrive, unleash, windLength,
 } from "./combat.js";
 import { allies, rushing, shielded } from "./allies.js";
 import {
@@ -2213,7 +2213,9 @@ function reign(run: Run, dt: number, taming = false): void {
   // Its volleys turn, so the gaps cannot be camped — but the spin STOPS while
   // it is winding up. A telegraph that is still rotating is not a telegraph, it
   // is a rumour: the arms you were shown have to be the arms it throws.
-  const winding = k.beat <= VOLLEY_WIND;
+  // A gambit is drawn for longer than the volley it replaces, so the wind-up
+  // it is planted for is longer too. See `windLength`.
+  const winding = k.beat <= windLength(run);
   // A snared king is held whole, and a faltering one has stopped of its own
   // accord: no drag, no spin, no volley clock, and nothing eaten.
   const snared = run.fray.snare > 0 || faltering(run);
@@ -2296,11 +2298,13 @@ function reign(run: Run, dt: number, taming = false): void {
   // that is when the telegraph starts and what is drawn has to be what is thrown.
   const boltSpeed = BOLT_SPEED * adaptation.boltSpeed;
   if (!snared) {
-    if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
-      const g = beginWind(run);
-      if (g !== "charge" && g !== "shock") {
-        run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
-      }
+    // WHAT IT IS GOING TO BE is decided a gambit's wind-up ahead, because that
+    // is when a gambit's telegraph has to start. A plain volley draws its arms
+    // at VOLLEY_WIND as it always has.
+    if (k.beat > GAMBIT_WIND && k.beat - dt <= GAMBIT_WIND) beginWind(run);
+    if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND
+      && run.fray.next !== "charge" && run.fray.next !== "shock") {
+      run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
     }
     k.beat -= dt;
     if (k.beat <= 0) {

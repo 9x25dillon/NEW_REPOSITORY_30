@@ -82,9 +82,18 @@ at the king. A sideways dodge stays a dodge.
 - One arm per burst. Without that limit, standing on the king and bursting on
   the throw caught its whole volley.
 - A catch refunds 8 of the burst's 14 stamina.
-- A thrown arm does a third of the king's mass per arm: about 1/180 of the bar
-  for a six-armed king, 1/60 for a two-armed one. It also kills hunters on your
-  plane that it passes through.
+- A thrown arm does **two thirds** of the king's mass per arm, and one can be
+  thrown home every **2.5 s**. Inside that recovery a burst still eats the arm
+  — your i-frames saved you either way — it just does not throw it. It also
+  kills hunters on your plane that it passes through.
+- **A landed arm knocks the king's next volley back 0.33 s**, but never one it
+  has already drawn.
+- *Retuned 2026-09-22 after a third report:* the first number was set against a
+  bot catching 58 arms a minute, where a person catches about one every two
+  minutes — thirteen in twenty-four, for six per cent of a bar. Tuned to that
+  ceiling the floor was worth nothing, and the player's word for it was
+  "nerfed". Twice the value and half the rate leaves the ceiling where it was
+  (about 500/min against a late king) and doubles what a real catch pays.
 - While you hold Y to offer a bond, catches are absorbed rather than thrown,
   and arms already in flight do no harm.
 - The catch is swept over the frame. A burst carries you about 32 µm per frame,
@@ -96,13 +105,20 @@ at the king. A sideways dodge stays a dodge.
 ## The kings' gambits
 
 From the second world, the first wind-up at least 7 s after the last gambit is
-the king's signature move instead of a volley. The first world has none. Each
-gambit is drawn for its whole wind-up.
+the king's signature move instead of a volley. The first world has none.
+
+**A gambit is drawn for 0.9 s, where a plain volley draws its arms for 0.55 s.**
+Sharing the volley's window, the shock landed on 40% of the times it was thrown
+in play — twelve hits from thirty — because a king fed thirty helpings is 202 µm
+in radius, its front starts at that edge, and from inside it there was no time
+to reach open water without spending a burst. Measured after the change, in the
+pool a player with two hundred buildings actually fights in: a bot that reads
+the telegraph takes **no** shock hits, and one that ignores it takes 6/min.
 
 | Form | Gambit | Telegraph | Answer |
 | --- | --- | --- | --- |
 | Strider (4, 7, …) | **Charge** | A lane, locked toward you when the wind-up starts | Step off it. The king is dazed for 1.1 s afterwards |
-| Warden (2, 5, …) | **Shock** | A dashed ring 220 µm past the king's edge | Be outside the ring, or burst as the front passes |
+| Warden (2, 5, …) | **Shock** | A dashed ring 220 µm past the king's edge, drawn for 0.9 s | Be outside the ring, or burst as the front passes. The front travels 175 µm/s |
 | Weaver (3, 6, …) | **Echo** | The volley, plus violet dashed arms half a gap over | The second set flies 0.42 s after the first |
 
 The charge hurts with the king's 36 µm core, not its whole body. The report's
@@ -177,6 +193,11 @@ choosing never shifts the world's random sequence.
 the aeon-29 run ended holding 140 cells with nothing to spend them on. **X**
 takes a card, **Start** enters — and entering without taking still takes the
 free one.
+
+The first Start press at a birth says what another card would cost, once, and
+the second press enters. A report came back with nine births, nine cards and
+280 cells left over: Start took the free card and entered, so a player who did
+not already know about buying never met it.
 
 **REFINE** is what the deck falls back on when everything else is capped: +3%
 to everything you do to a king, for ever. The same run had all nine original

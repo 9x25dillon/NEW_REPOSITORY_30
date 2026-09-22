@@ -20,7 +20,7 @@ import {
   type Entity, type Run,
   ARENA_H, ARENA_W, LURE_TIME, THRONE_RADIUS, dropLure,
   arrivalRate, settleCap, suspension,
-  DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
+  DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE,
   bearsOn, dischargeFalloff, wearRate, wearing, WEAR_TICKS_PER_SECOND,
   CHANNEL_H, beast, crown, currentAt, dischargesToKill, enterWorld, feedThrone,
   latticePitch,
@@ -59,8 +59,8 @@ import {
   MITO_REACH, growMitochondrion, mending, mitoCapacity, organelleHost, repairCost,
 } from "../game/organelles.js";
 import {
-  FALTER_TIME, catchReach, chargeLength, chargeReach, echoArms, faltering, riposteDamage,
-  shockReach,
+  FALTER_TIME, RIPOSTE_COOL, catchReach, chargeLength, chargeReach, echoArms, faltering,
+  riposteDamage, shockReach, windLength,
 } from "../game/combat.js";
 import { CALLS, callAlly, callCooldown, callWait, rushing, shielded } from "../game/allies.js";
 import {
@@ -416,6 +416,8 @@ export class Game {
   private pick = 0;
   /** The stick has to come back to centre before it steps the cards again. */
   private stickLatched = false;
+  /** Whether this birth has been told that a second card can be bought. */
+  private nudged = false;
   private controlLegend = "";
   private crowned = false;
   private seed = 20260830;
@@ -648,6 +650,17 @@ export class Game {
       if (it.place && offer.length > 0) this.take();
       if (it.confirm) {
         if (run.evolution.taken === 0 && offer.length > 0) this.take();
+        // ONCE PER BIRTH, AND ONLY WHEN IT IS AFFORDABLE. A report came back
+        // with nine births, nine cards and two hundred and eighty cells left
+        // in the rack: Start takes the free one and enters, so a player who
+        // does not already know about buying never meets it.
+        if (!this.nudged && run.evolution.offer.length > 0 && run.cells.length >= cardCost(run)) {
+          const keys = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+          this.nudged = true;
+          this.say(`ANOTHER CARD IS ${cardCost(run)} CELLS  ·  ${keys.place} TAKES IT  ·  `
+            + `${keys.confirm} AGAIN TO ENTER`);
+          return;
+        }
         this.enter();
       }
       return;
@@ -929,6 +942,7 @@ export class Game {
 
     if (run.phase === "birth" && this.screen !== "birth") {
       this.screen = "birth";
+      this.nudged = false;
       this.best = Math.max(this.best, run.score);
       this.deepest = Math.max(this.deepest, run.world.aeon);
     }
@@ -1130,8 +1144,12 @@ export class Game {
             this.hitstop = Math.max(this.hitstop, 0.04);
             this.popups.push({ x: ev.x, y: ev.y, text: "CAUGHT", life: 0.8, colour: GOLD, big: false });
           } else {
+            const cooling = run.t < run.fray.catchReadyAt;
             this.ring(ev.x, ev.y, 5, 30, 0.3, JADE);
-            this.popups.push({ x: ev.x, y: ev.y, text: "ABSORBED", life: 0.8, colour: `rgb(${JADE})`, big: false });
+            this.popups.push({
+              x: ev.x, y: ev.y, text: cooling ? "EATEN" : "ABSORBED", life: 0.8,
+              colour: `rgb(${JADE})`, big: false,
+            });
           }
           break;
         case "riposte-hit":
@@ -2894,7 +2912,8 @@ export class Game {
     // stand in the gaps between them. A charge or a shock throws no arms, so
     // it draws none: it draws the lane or the ring instead.
     const fray = this.run.fray;
-    const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
+    const windLen = windLength(this.run);
+    const wind = Math.max(0, (windLen - k.beat) / windLen);
     const plain = fray.next !== "charge" && fray.next !== "shock";
     if (wind > 0 && !plain) this.drawGambitWind(x, y, r, wind);
     if (wind > 0 && fray.next === "echo") this.drawEcho(x, y, echoArms(this.run), wind, 0.5);
@@ -3239,11 +3258,24 @@ export class Game {
 
     // THE CATCH WINDOW, while it is open: anything inside this ring now goes back.
     if (you.iframe > 0) {
-      g.strokeStyle = `rgba(255,201,74,${(0.35 + you.iframe * 3).toFixed(3)})`;
+      const ready = run.t >= run.fray.catchReadyAt;
+      g.strokeStyle = ready
+        ? `rgba(255,201,74,${(0.35 + you.iframe * 3).toFixed(3)})`
+        : `rgba(130,150,170,${(0.25 + you.iframe * 2).toFixed(3)})`;
       g.lineWidth = 1.4;
       g.setLineDash([2, 3]);
       g.beginPath(); g.arc(x, y, px(catchReach(run)), 0, Math.PI * 2); g.stroke();
       g.setLineDash([]);
+    }
+    // AND WHEN IT CAN THROW AGAIN. A catch inside the recovery still eats the
+    // arm, so this says what was lost rather than what went wrong.
+    const cool = run.fray.catchReadyAt - run.t;
+    if (cool > 0 && run.phase === "reign") {
+      g.strokeStyle = "rgba(255,201,74,0.5)";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(x, y, r + 9, -Math.PI / 2, -Math.PI / 2 + (1 - cool / RIPOSTE_COOL) * Math.PI * 2);
+      g.stroke();
     }
     if (rushing(run)) {
       g.strokeStyle = `rgba(255,201,74,${(0.35 + 0.25 * Math.sin(this.t * 14)).toFixed(3)})`;
@@ -4064,9 +4096,14 @@ export class Game {
       const perShot = Number.isFinite(need) ? run.throne.hp / Math.max(1, need) : 0;
       if (led.wasted >= 3 && perShot * n("sovereign-hit") > sated
         && run.throne.hp > run.throne.maxHp * 0.4) {
-        return `YOU FED IT ${run.throne.fed.length} AND THE FIRST ${led.bought} BOUGHT ALL `
-          + `THERE WAS - THE OTHER ${led.wasted} WERE ${led.health} HIT POINTS OF NOTHING. `
-          + `YOU HAVE ALREADY LANDED ENOUGH TO KILL A ${sated} HP KING`;
+        // COUNTED, NOT A PREFIX. Prime helpings buy something wherever they
+        // land, so "the first N bought all there was" stopped being true the
+        // day primes went in — and a report came back saying exactly that
+        // about a throne whose tenth, seventeenth and twenty-third helpings
+        // had each bought something.
+        return `${led.bought} OF YOUR ${run.throne.fed.length} HELPINGS BOUGHT SOMETHING - THE `
+          + `OTHER ${led.wasted} WERE ${led.health} HIT POINTS OF NOTHING. YOU HAVE ALREADY `
+          + `LANDED ENOUGH TO KILL A ${sated} HP KING`;
       }
     }
     // THE THIRD PLAY REPORT, and the one this whole chain was still missing.

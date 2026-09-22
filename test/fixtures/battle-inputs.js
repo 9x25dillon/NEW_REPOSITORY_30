@@ -84,7 +84,9 @@
   check((r.evolution.ranks[second] ?? 0) === 1, `a second card (${second}) can be bought`);
   check(r.cells.length === rack - 5, 'which is paid for out of the rack');
   tap(9);
-  check(g.screen === 'play' && r.world.aeon === 2, 'Start enters with what was taken');
+  check(g.screen === 'birth', 'the first Start says another card can be bought, once');
+  tap(9);
+  check(g.screen === 'play' && r.world.aeon === 2, 'and the second enters with what was taken');
   g.draw();
   check(document.body.scrollHeight <= innerHeight + 2, 'game and controls still fit the viewport');
   return checks;

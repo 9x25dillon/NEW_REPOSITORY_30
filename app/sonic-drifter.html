@@ -2187,6 +2187,7 @@
       repair: 0,
       lastHit: -Infinity,
       burstCaught: false,
+      catchReadyAt: 0,
       turned: -Infinity,
       stats: { caught: 0, landed: 0, damage: 0, gambits: 0, held: 0, calls: 0, repairs: 0 }
     };
@@ -2231,7 +2232,9 @@
   var RIPOSTE_LIFE = 2.2;
   var RIPOSTE_REFUND = 8;
   var RIPOSTE_INTO = 0.5;
-  var RIPOSTE_SHARE = 1 / 3;
+  var RIPOSTE_SHARE = 2 / 3;
+  var RIPOSTE_COOL = 2.5;
+  var RIPOSTE_STAGGER = 0.33;
   function catchReach(run) {
     const rush = run.t < run.bond.rushUntil ? 1.5 : 1;
     return RIPOSTE_REACH * (1 + 0.35 * rankOf(run, "reflex")) * rush;
@@ -2258,11 +2261,14 @@
         if (closestApproach(ax, ay, bx, by) > reach) continue;
         const speed0 = Math.hypot(b.vx, b.vy) || 1e-12;
         if (-(you.dashX * b.vx + you.dashY * b.vy) / speed0 < RIPOSTE_INTO) continue;
-        f.stats.caught++;
         f.burstCaught = true;
-        run.wave.stamina = Math.min(100, run.wave.stamina + RIPOSTE_REFUND);
-        if (run.wave.stamina > 25) run.wave.spent = false;
-        if (!live || taming) {
+        const recovering = run.t < f.catchReadyAt;
+        if (!recovering) {
+          f.stats.caught++;
+          run.wave.stamina = Math.min(100, run.wave.stamina + RIPOSTE_REFUND);
+          if (run.wave.stamina > 25) run.wave.spent = false;
+        }
+        if (!live || taming || recovering) {
           b.life = 0;
           run.events.push({ kind: "riposte", x: b.x, y: b.y, thrown: false });
           break;
@@ -2277,6 +2283,7 @@
         b.life = RIPOSTE_LIFE;
         b.thrown = true;
         b.born = run.t;
+        f.catchReadyAt = run.t + RIPOSTE_COOL;
         run.events.push({ kind: "riposte", x: you.x, y: you.y, thrown: true });
         break;
       }
@@ -2306,6 +2313,7 @@
       if (damage <= 0) continue;
       f.stats.landed++;
       f.stats.damage += damage;
+      if (k.beat > windLength(run)) k.beat += RIPOSTE_STAGGER;
       run.events.push({ kind: "riposte-hit", x: k.x, y: k.y, damage });
       if (k.hp <= 0) {
         birth(run);
@@ -2321,13 +2329,17 @@
     return Math.hypot(ax + dx * u, ay + dy * u);
   }
   var GAMBIT_FROM_AEON = 2;
+  var GAMBIT_WIND = 0.9;
+  function windLength(run) {
+    return run.fray.next ? GAMBIT_WIND : VOLLEY_WIND;
+  }
   var GAMBIT_GAP = 7;
   var CHARGE_SPEED = 75e-5;
   var CHARGE_TIME = 0.36;
   var CHARGE_DAZE = 1.1;
   var CHARGE_TOUCH = 12e-6;
   var CHARGE_CORE = 36e-6;
-  var SHOCK_SPEED = 21e-5;
+  var SHOCK_SPEED = 175e-6;
   var SHOCK_REACH = 22e-5;
   function chargeReach(k) {
     return Math.min(sovereignParticle(k).radius, CHARGE_CORE) + CHARGE_TOUCH;
@@ -3750,7 +3762,7 @@
     const k = run.throne;
     const form = formFor(run.world.aeon);
     const adaptation = ADAPTATIONS[form];
-    const winding = k.beat <= VOLLEY_WIND;
+    const winding = k.beat <= windLength(run);
     const snared = run.fray.snare > 0 || faltering(run);
     if (!winding && !snared) k.spin += dt * 0.55;
     let dx, dy;
@@ -3808,11 +3820,9 @@
     }
     const boltSpeed = BOLT_SPEED * adaptation.boltSpeed;
     if (!snared) {
-      if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
-        const g2 = beginWind(run);
-        if (g2 !== "charge" && g2 !== "shock") {
-          run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
-        }
+      if (k.beat > GAMBIT_WIND && k.beat - dt <= GAMBIT_WIND) beginWind(run);
+      if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND && run.fray.next !== "charge" && run.fray.next !== "shock") {
+        run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
       }
       k.beat -= dt;
       if (k.beat <= 0) {
@@ -4693,6 +4703,8 @@
       __publicField(this, "pick", 0);
       /** The stick has to come back to centre before it steps the cards again. */
       __publicField(this, "stickLatched", false);
+      /** Whether this birth has been told that a second card can be bought. */
+      __publicField(this, "nudged", false);
       __publicField(this, "controlLegend", "");
       __publicField(this, "crowned", false);
       __publicField(this, "seed", 20260830);
@@ -4978,6 +4990,12 @@
         if (it.place && offer.length > 0) this.take();
         if (it.confirm) {
           if (run.evolution.taken === 0 && offer.length > 0) this.take();
+          if (!this.nudged && run.evolution.offer.length > 0 && run.cells.length >= cardCost(run)) {
+            const keys = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+            this.nudged = true;
+            this.say(`ANOTHER CARD IS ${cardCost(run)} CELLS  \xB7  ${keys.place} TAKES IT  \xB7  ${keys.confirm} AGAIN TO ENTER`);
+            return;
+          }
           this.enter();
         }
         return;
@@ -5203,6 +5221,7 @@
       this.decay(dt);
       if (run.phase === "birth" && this.screen !== "birth") {
         this.screen = "birth";
+        this.nudged = false;
         this.best = Math.max(this.best, run.score);
         this.deepest = Math.max(this.deepest, run.world.aeon);
       }
@@ -5377,8 +5396,16 @@
               this.hitstop = Math.max(this.hitstop, 0.04);
               this.popups.push({ x: ev.x, y: ev.y, text: "CAUGHT", life: 0.8, colour: GOLD, big: false });
             } else {
+              const cooling = run.t < run.fray.catchReadyAt;
               this.ring(ev.x, ev.y, 5, 30, 0.3, JADE);
-              this.popups.push({ x: ev.x, y: ev.y, text: "ABSORBED", life: 0.8, colour: `rgb(${JADE})`, big: false });
+              this.popups.push({
+                x: ev.x,
+                y: ev.y,
+                text: cooling ? "EATEN" : "ABSORBED",
+                life: 0.8,
+                colour: `rgb(${JADE})`,
+                big: false
+              });
             }
             break;
           case "riposte-hit":
@@ -6949,7 +6976,8 @@
         g2.textAlign = "left";
       }
       const fray = this.run.fray;
-      const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
+      const windLen = windLength(this.run);
+      const wind = Math.max(0, (windLen - k.beat) / windLen);
       const plain = fray.next !== "charge" && fray.next !== "shock";
       if (wind > 0 && !plain) this.drawGambitWind(x, y, r, wind);
       if (wind > 0 && fray.next === "echo") this.drawEcho(x, y, echoArms(this.run), wind, 0.5);
@@ -7301,13 +7329,22 @@
       g2.arc(x, y, r, 0, Math.PI * 2);
       g2.stroke();
       if (you.iframe > 0) {
-        g2.strokeStyle = `rgba(255,201,74,${(0.35 + you.iframe * 3).toFixed(3)})`;
+        const ready = run.t >= run.fray.catchReadyAt;
+        g2.strokeStyle = ready ? `rgba(255,201,74,${(0.35 + you.iframe * 3).toFixed(3)})` : `rgba(130,150,170,${(0.25 + you.iframe * 2).toFixed(3)})`;
         g2.lineWidth = 1.4;
         g2.setLineDash([2, 3]);
         g2.beginPath();
         g2.arc(x, y, px(catchReach(run)), 0, Math.PI * 2);
         g2.stroke();
         g2.setLineDash([]);
+      }
+      const cool = run.fray.catchReadyAt - run.t;
+      if (cool > 0 && run.phase === "reign") {
+        g2.strokeStyle = "rgba(255,201,74,0.5)";
+        g2.lineWidth = 2;
+        g2.beginPath();
+        g2.arc(x, y, r + 9, -Math.PI / 2, -Math.PI / 2 + (1 - cool / RIPOSTE_COOL) * Math.PI * 2);
+        g2.stroke();
       }
       if (rushing(run)) {
         g2.strokeStyle = `rgba(255,201,74,${(0.35 + 0.25 * Math.sin(this.t * 14)).toFixed(3)})`;
@@ -8020,7 +8057,7 @@
         const need = dischargesToKill(run);
         const perShot = Number.isFinite(need) ? run.throne.hp / Math.max(1, need) : 0;
         if (led.wasted >= 3 && perShot * n("sovereign-hit") > sated && run.throne.hp > run.throne.maxHp * 0.4) {
-          return `YOU FED IT ${run.throne.fed.length} AND THE FIRST ${led.bought} BOUGHT ALL THERE WAS - THE OTHER ${led.wasted} WERE ${led.health} HIT POINTS OF NOTHING. YOU HAVE ALREADY LANDED ENOUGH TO KILL A ${sated} HP KING`;
+          return `${led.bought} OF YOUR ${run.throne.fed.length} HELPINGS BOUGHT SOMETHING - THE OTHER ${led.wasted} WERE ${led.health} HIT POINTS OF NOTHING. YOU HAVE ALREADY LANDED ENOUGH TO KILL A ${sated} HP KING`;
         }
       }
       if (run.throne.awake && run.throne.hp > 0 && n("discharge") > 0) {
