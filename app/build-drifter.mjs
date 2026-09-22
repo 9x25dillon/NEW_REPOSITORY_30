@@ -123,9 +123,7 @@ const BODY = `<header>
   <li><span class="dot small"></span><b>1.5&nbsp;&micro;m</b> below this, streaming wins</li>
 </ul>
 
-<p class="controls">
-  <kbd>HOLD</kbd> pull &nbsp; <kbd>SHIFT</kbd> push &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>M</kbd> mute
-</p>
+<p class="controls" id="controls">Connect your controller or press Space to begin. Pause for controls.</p>
 
 <script>${js}</script>`;
 

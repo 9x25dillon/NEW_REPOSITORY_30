@@ -18,7 +18,7 @@
 
 import {
   type Entity, type Run,
-  ARENA_H, ARENA_W, MAX_INTEGRITY, THRONE_RADIUS,
+  ARENA_H, ARENA_W, THRONE_RADIUS,
   arrivalRate, settleCap, suspension,
   DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE, VOLLEY_WIND,
   bearsOn, dischargeFalloff, wearRate, wearing, WEAR_TICKS_PER_SECOND,
@@ -26,7 +26,7 @@ import {
   latticePitch,
   liftCell,
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
-  startRun, step,
+  startRun, step, maxIntegrity,
 } from "../game/run.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
 import {
@@ -51,6 +51,19 @@ import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
 import { AMBIENT_C, MAX_C, viscosity } from "../game/thermal.js";
 import { Sfx } from "./sfx.js";
+import {
+  ADAPTATIONS, TAME_REACH, GUARD_REACH, SUPPORT_REACH,
+  canBond, companion, cycleCompanion, formFor, limbRole, tameHealth, tameTime, vulnerable,
+} from "../game/ecology.js";
+import {
+  MITO_REACH, growMitochondrion, mending, mitoCapacity, organelleHost, repairCost,
+} from "../game/organelles.js";
+import {
+  catchReach, chargeLength, chargeReach, echoArms, riposteDamage, shockReach,
+} from "../game/combat.js";
+import { CALLS, callAlly, callCooldown, callWait, rushing, shielded } from "../game/allies.js";
+import { type Trait, TRAITS, evolve, held, rankOf } from "../game/evolution.js";
+import { DASH_COST } from "../game/pilot.js";
 
 // ── scale ───────────────────────────────────────────────────────────────────
 
@@ -86,8 +99,8 @@ const WASH_H = 74;
 // ── palette ─────────────────────────────────────────────────────────────────
 
 const INK = "#cfe9f5";
-const DIM = "#4a6076";
-const FAINT = "#2b3e50";
+const DIM = "#8299ae";
+const FAINT = "#566d83";
 const NODE = "120,225,245";
 const ANTI = "255,140,190";
 const GOLD = "#ffc94a";
@@ -247,6 +260,48 @@ const LESSONS: Readonly<Record<string, Lesson>> = {
     id: "spent", title: "ENERGY DENSITY GOES AS PRESSURE SQUARED",
     body: "E = p^2 / 4 rho c^2. DOUBLE THE GRIP AND IT COSTS FOUR TIMES AS MUCH.",
   },
+  riposte: {
+    id: "riposte", title: "BURST INTO IT, AND IT GOES BACK",
+    body: "A BURST LEAVES YOU UNTOUCHABLE FOR A MOMENT. AN ARM THAT REACHES YOU INSIDE THAT "
+      + "MOMENT IS CAUGHT RATHER THAN SURVIVED, AND IT IS THROWN BACK AT THE KING THAT THREW "
+      + "IT. BURST INTO IT, NOT PAST IT: A SIDEWAYS DODGE IS STILL A DODGE. ONE ARM A BURST, "
+      + "AND A CATCH GIVES BACK MOST OF WHAT THE BURST COST. A GAME RULE, NOT ACOUSTICS.",
+  },
+  charge: {
+    id: "charge", title: "THE LANE IS FIXED WHEN IT STARTS TO WIND",
+    body: "A STRIDER KING CAN CHARGE. THE LANE IT WILL RUN DOWN IS DRAWN FOR THE WHOLE WIND-UP "
+      + "AND DOES NOT FOLLOW YOU, SO STEP OFF IT - OR BURST THROUGH AS IT ARRIVES. AFTERWARDS "
+      + "IT STANDS DAZED FOR A MOMENT, AND A DAZED KING IS EASY TO WALK INTO YOUR ARMS.",
+  },
+  shock: {
+    id: "shock", title: "THE FRONT STOPS AT THE RING",
+    body: "A WARDEN KING SENDS A SHOCK FRONT OUT TO THE DASHED RING. BE OUTSIDE THE RING WHEN "
+      + "IT GOES, OR BURST AS THE FRONT REACHES YOU AND IT PASSES THROUGH.",
+  },
+  echo: {
+    id: "echo", title: "IT THROWS TWICE",
+    body: "A WEAVER KING'S ECHO THROWS ITS VOLLEY, THEN THE SAME ARMS TURNED HALF A GAP, A "
+      + "BEAT LATER. BOTH SETS ARE DRAWN BEFORE EITHER FLIES: THE SAFE PLACE IS NOT THE GAP, "
+      + "IT IS OUT OF REACH - OR A BURST INTO ONE OF THEM.",
+  },
+  ally: {
+    id: "ally", title: "IT FIGHTS WITH YOU",
+    body: "YOUR COMPANION IS A BODY IN THE WATER. IT HOLDS HUNTERS UNTIL THEY COME APART, THE "
+      + "SAME WAY YOUR HAND DOES, AND ONE IT HAS HOLD OF CANNOT STRIKE. A STRIDER HUNTS, A "
+      + "WARDEN GOES FOR WHAT IS WINDING UP AT YOU, A WEAVER TETHERS FROM YOUR SIDE.",
+  },
+  call: {
+    id: "call", title: "CALL IT",
+    body: "EACH COMPANION HAS ONE CALL ON ITS OWN BUTTON. A STRIDER'S RUSH MAKES BURSTS FREE "
+      + "AND CATCHES WIDER. A WARDEN'S AEGIS CLEARS THE ARMS AROUND YOU AND TURNS THE NEXT "
+      + "HITS. A WEAVER'S SNARE HOLDS THE KING STILL, SO YOUR FIELD CAN WALK IT INTO AN ARM.",
+  },
+  repair: {
+    id: "repair", title: "A STATION MENDS WHAT A HIT TOOK",
+    body: "STAND AT YOUR MITOCHONDRIA WITH FULL STAMINA AND NO HIT FOR THREE SECONDS, AND "
+      + "THEIR STORE GOES INTO YOUR INTEGRITY. TWENTY STATIONS MEND NO FASTER THAN ONE - "
+      + "THEY LAST LONGER. THE KING EATS WHAT IS NEAR IT, INCLUDING THEM.",
+  },
   mote: {
     id: "mote", title: "BELOW THE CROSSOVER",
     body: "RADIATION FORCE GOES AS RADIUS CUBED, STREAMING DRAG AS RADIUS. UNDER ABOUT 1.5 "
@@ -320,6 +375,13 @@ export class Game {
   private mouseDash = false;
   /** How long the throne button has been held, and whether it already fired. */
   private crownHeld = 0;
+  private buildHeld = 0;
+  private organelleGrown = false;
+  /** Which evolution card is highlighted on the birth screen. */
+  private pick = 0;
+  /** The stick has to come back to centre before it steps the cards again. */
+  private stickLatched = false;
+  private controlLegend = "";
   private crowned = false;
   private seed = 20260830;
 
@@ -438,7 +500,13 @@ export class Game {
       wake();
       this.canvas.focus();
       if (this.screen === "title" || this.screen === "dead") { this.begin(); return; }
-      if (this.screen === "birth") { enterWorld(this.run); this.screen = "play"; return; }
+      if (this.screen === "birth") {
+        const { sx, sy } = world(e);
+        const card = this.cardAt(sx, sy);
+        if (card >= 0) this.pick = card;
+        this.enter();
+        return;
+      }
 
       const { sx, sy } = world(e);
       const slot = this.slotAt(sx, sy);
@@ -516,7 +584,25 @@ export class Game {
       return;
     }
     if (this.screen === "birth") {
-      if (it.confirm) { enterWorld(run); this.screen = "play"; }
+      // EVOLVE, THEN ENTER. The cards step with the rack's own buttons, the
+      // stick, or 1-3; confirming takes the highlighted one and goes in.
+      const offer = run.evolution.offer;
+      if (offer.length > 0) {
+        let stepBy = it.cycle;
+        const sx = it.move.x;
+        if (Math.abs(sx) < 0.3) this.stickLatched = false;
+        else if (!this.stickLatched && Math.abs(sx) > 0.6) {
+          this.stickLatched = true;
+          stepBy = sx > 0 ? 1 : -1;
+        }
+        if (stepBy !== 0) {
+          this.pick = (this.pick + stepBy + offer.length) % offer.length;
+          this.sfx.tick();
+        }
+        const key = this.pad.slotKey();
+        if (key > 0 && key <= offer.length) this.pick = key - 1;
+      }
+      if (it.confirm) this.enter();
       return;
     }
 
@@ -532,7 +618,29 @@ export class Game {
 
     const key = this.pad.slotKey();
     if (key > 0 && run.cells[key - 1]) { this.selected = key - 1; this.spend(key - 1); }
-    else if (it.place) this.spend(this.selected);
+    if (it.placeDown) {
+      this.buildHeld += dt;
+      if (this.buildHeld >= 0.85 && !this.organelleGrown) {
+        this.organelleGrown = true;
+        const result = growMitochondrion(run, this.selected);
+        const messages = {
+          "need-cells": "MITOCHONDRION NEEDS 2 CELLS IN HAND",
+          "need-host": "STAND ON ONE OF YOUR STRUCTURES TO GROW A MITOCHONDRION",
+          "already-grown": "THIS STRUCTURE ALREADY HAS A MITOCHONDRION",
+          "wrong-phase": "NOT NOW",
+          grown: "",
+        };
+        if (messages[result]) this.say(messages[result]);
+      }
+    } else {
+      if (this.buildHeld > 0 && !this.organelleGrown) this.spend(this.selected);
+      this.buildHeld = 0;
+      this.organelleGrown = false;
+    }
+
+    // CALL THE COMPANION. Its success is said by the `call` event; only the
+    // refusals are said here, for the reason `doFeed` gives.
+    if (it.call) this.doCall();
 
     // TAKE IT BACK UP. Your trap holds bodies and a placed cell is a body, so
     // there was never a reason a mistake had to be permanent.
@@ -551,6 +659,7 @@ export class Game {
     // mapping are up and down.
     if (it.depth !== 0) this.retune(it.depth);
 
+    if (run.phase === "reign") { this.crownHeld = 0; this.crowned = false; return; }
     if (it.crownDown) {
       this.crownHeld += dt;
       if (this.crownHeld >= Game.CROWN_HOLD && !this.crowned) {
@@ -596,7 +705,11 @@ export class Game {
   }
 
   private fit(): void {
-    const s = Math.min(window.innerWidth / (VIEW_W + 40), window.innerHeight / (VIEW_H + 96));
+    const style = getComputedStyle(document.body);
+    const chrome = ["header", ".legend", ".controls"].reduce((height, selector) =>
+      height + (document.querySelector(selector)?.getBoundingClientRect().height ?? 0), 0)
+      + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.rowGap) * 3 + 4;
+    const s = Math.max(0.2, Math.min((window.innerWidth - 36) / VIEW_W, (window.innerHeight - chrome) / VIEW_H));
     this.canvas.style.width = `${Math.floor(VIEW_W * s)}px`;
     this.canvas.style.height = `${Math.floor(VIEW_H * s)}px`;
   }
@@ -606,6 +719,9 @@ export class Game {
 
   private begin(): void {
     this.paused = false;
+    this.buildHeld = this.crownHeld = 0;
+    this.organelleGrown = this.crowned = false;
+    this.pick = 0;
     this.tally = {};
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
     this.run = startRun(this.seed, this.ebb);
@@ -624,9 +740,33 @@ export class Game {
     if (r === "wrong-phase") this.say("NOT NOW");
   }
 
+  private doCall(): void {
+    const run = this.run;
+    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const r = callAlly(run);
+    const c = companion(run);
+    if (r === "no-companion") {
+      this.say(`NO COMPANION YET  ·  WEAKEN A KING AND HOLD ${G.crown} NEAR IT TO BOND`);
+    }
+    if (r === "cooling" && c) this.say(`${CALLS[c.form].name} RETURNS IN ${callWait(run).toFixed(0)} S`);
+    if (r === "no-king") this.say("A SNARE NEEDS A KING AWAKE TO HOLD");
+    if (r === "wrong-phase") this.say("NOT NOW");
+  }
+
+  /** Take the highlighted card, if there is one, and step into the new world. */
+  private enter(): void {
+    const run = this.run;
+    const t = run.evolution.offer[this.pick];
+    if (t) evolve(run, t);
+    this.drain();
+    enterWorld(run);
+    this.screen = "play";
+    this.pick = 0;
+  }
+
   private doCrown(): void {
     const r = crown(this.run);
-    if (r === "nothing-fed") this.say("FEED THE THRONE FIRST - STAND ON IT AND PLACE");
+    if (r === "nothing-fed") this.say(`FEED THE THRONE FIRST - TAP ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT`);
   }
 
   // ── loop ──────────────────────────────────────────────────────────────────
@@ -662,7 +802,7 @@ export class Game {
     const run = this.run;
 
     const it = this.pad.read();
-    this.mouse(it);
+    if (this.screen === "play") this.mouse(it);
     this.intent = it;
 
     // Pause first, and only where there is something to pause. A menu is
@@ -671,7 +811,20 @@ export class Game {
       this.paused = !this.paused;
       this.sfx.tick();
     }
-    if (this.paused && this.screen === "play") return;
+    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const legend = `${G.move} move · ${G.grip} grip · ${G.dash} dash / catch · ${G.place} build / hold: mitochondrion · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause`;
+    if (legend !== this.controlLegend) {
+      this.controlLegend = legend;
+      const controls = document.getElementById("controls");
+      if (controls) controls.textContent = legend;
+      this.fit();
+    }
+    if (this.paused && this.screen === "play") {
+      if (it.cycle) cycleCompanion(run);
+      this.buildHeld = this.crownHeld = 0;
+      this.organelleGrown = this.crowned = false;
+      return;
+    }
 
     this.act(it, dt);
 
@@ -684,7 +837,7 @@ export class Game {
         dash: false,
       }, dt);
       run.wave.stamina = STAMINA_MAX;
-      run.integrity = MAX_INTEGRITY;
+      run.integrity = maxIntegrity(run);
       run.events.length = 0;
       this.decay(dt);
       return;
@@ -694,7 +847,7 @@ export class Game {
     if (gripping && !this.wasGrip) this.sfx.gripOn();
     this.wasGrip = gripping;
 
-    step(run, { move: it.move, grip: it.grip, dash: it.dash }, dt);
+    step(run, { move: it.move, grip: it.grip, dash: it.dash, tame: it.crownDown }, dt);
     this.drain();
     this.decay(dt);
 
@@ -718,6 +871,7 @@ export class Game {
     while (this.youTrail.length > 26) this.youTrail.shift();
 
     if (run.structures.length > 0) this.teach("build");
+    if (companion(run) && run.phase !== "birth") this.teach("call");
     if (run.wave.tC > AMBIENT_C + 12) this.teach("heat");
 
     // HOW THE KING DIES, said the first time it is actually true.
@@ -759,7 +913,10 @@ export class Game {
           // Two frames of held time. It is the cheapest weight there is.
           this.hitstop = Math.max(this.hitstop, 0.055);
           this.sfx.hurt(); this.burst(ev.x, ev.y, 16, "255,77,109");
-          this.say(`INTEGRITY ${run.integrity}`);
+          this.say(ev.cause === "charge" ? `IT RAN YOU DOWN  ·  INTEGRITY ${run.integrity}`
+            : ev.cause === "shock" ? `THE FRONT CAUGHT YOU  ·  INTEGRITY ${run.integrity}`
+              : `INTEGRITY ${run.integrity}`);
+          if (ev.cause === "volley") this.teach("riposte");
           break;
         case "kill":
           this.burst(ev.x, ev.y, 12, warmth(beastPhi(run, ev.species)));
@@ -785,7 +942,7 @@ export class Game {
           this.burst(ev.x, ev.y, 30, "255,201,74");
           this.ring(ev.x, ev.y, 8, 84, 0.7, "255,201,74");
           this.popups.push({ x: ev.x, y: ev.y, text: ev.group, life: 1.6, colour: GOLD, big: true });
-          this.sfx.capture(3); this.say(`${ev.group}  ·  PRESS ITS NUMBER TO PLACE IT`);
+          this.sfx.capture(3); this.say(`${ev.group}  ·  ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).place} TO PLACE IT`);
           this.teach("crystal");
           break;
         case "place":
@@ -857,6 +1014,80 @@ export class Game {
           break;
         case "sovereign-hit":
           this.burst(ev.x, ev.y, 10, "255,201,74");
+          break;
+        case "guard":
+          this.ring(ev.x, ev.y, 8, 38, 0.4, "255,201,74");
+          this.burst(ev.x, ev.y, 5, "255,201,74");
+          break;
+        case "riposte":
+          this.teach("riposte");
+          if (ev.thrown) {
+            this.sfx.riposte();
+            this.ring(ev.x, ev.y, 6, 44, 0.35, "255,201,74");
+            this.burst(ev.x, ev.y, 10, "255,230,150");
+            this.hitstop = Math.max(this.hitstop, 0.04);
+            this.popups.push({ x: ev.x, y: ev.y, text: "CAUGHT", life: 0.8, colour: GOLD, big: false });
+          } else {
+            this.ring(ev.x, ev.y, 5, 30, 0.3, JADE);
+            this.popups.push({ x: ev.x, y: ev.y, text: "ABSORBED", life: 0.8, colour: `rgb(${JADE})`, big: false });
+          }
+          break;
+        case "riposte-hit":
+          this.sfx.riposteHit();
+          this.burst(ev.x, ev.y, 14, "255,201,74");
+          this.shake = Math.max(this.shake, 4);
+          this.popups.push({ x: ev.x, y: ev.y, text: `-${ev.damage}`, life: 1, colour: GOLD, big: false });
+          break;
+        case "gambit": {
+          this.sfx.gambit(ev.gambit);
+          this.teach(ev.gambit);
+          const name = ADAPTATIONS[formFor(run.world.aeon)].name;
+          this.say(ev.gambit === "charge" ? `${name} WINDS A CHARGE  ·  STEP OFF THE LANE`
+            : ev.gambit === "shock" ? `${name} GATHERS A SHOCK  ·  GET OUTSIDE THE RING`
+              : `${name} WINDS AN ECHO  ·  TWO SETS OF ARMS`);
+          break;
+        }
+        case "charge":
+          this.shake = Math.max(this.shake, 6);
+          this.sfx.strike();
+          break;
+        case "shock":
+          this.shake = Math.max(this.shake, 7);
+          this.sfx.thump();
+          break;
+        case "ally":
+          this.teach("ally");
+          this.ring(ev.x, ev.y, 6, 40, 0.4, JADE);
+          break;
+        case "call":
+          this.sfx.call();
+          this.ring(ev.x, ev.y, 10, 120, 0.6, ev.form === "warden" ? "255,201,74" : JADE);
+          this.say(`${CALLS[ev.form].name}  ·  ${CALLS[ev.form].says}`);
+          break;
+        case "repair":
+          this.teach("repair");
+          this.sfx.mend();
+          this.ring(ev.x, ev.y, 8, 50, 0.6, JADE);
+          this.popups.push({ x: ev.x, y: ev.y, text: "+1", life: 1.2, colour: `rgb(${JADE})`, big: true });
+          this.say(`MENDED  ·  INTEGRITY ${run.integrity}/${maxIntegrity(run)}`);
+          break;
+        case "mended":
+          this.sfx.mend();
+          this.popups.push({ x: ev.x, y: ev.y, text: "+1", life: 1.2, colour: `rgb(${JADE})`, big: true });
+          this.say(`PHAGOCYTE  ·  INTEGRITY ${run.integrity}/${maxIntegrity(run)}`);
+          break;
+        case "evolved":
+          this.sfx.capture(4);
+          this.say(`EVOLVED  ·  ${TRAITS[ev.trait].name} ${ev.rank}/${TRAITS[ev.trait].max}`);
+          break;
+        case "organelle":
+          this.ring(ev.x, ev.y, 8, 60, 0.8, JADE);
+          this.say("MITOCHONDRION GROWN · CHARGES WHILE YOU EXPLORE · RETURN FOR STAMINA");
+          this.sfx.capture(3);
+          break;
+        case "tamed":
+          this.burst(ev.x, ev.y, 28, JADE);
+          this.say("BONDED · A SOVEREIGN WILL TRAVEL WITH YOU");
           break;
         case "birth":
           this.flash = 1; this.flashRed = false; this.shake = 14;
@@ -1015,14 +1246,17 @@ export class Game {
     this.drawSites();
     this.drawBodies();
     this.drawStructures();
+    this.drawOrganelles();
     this.drawBound();
     this.drawThrone();
     this.drawTrails();
     this.drawEntities();
     this.drawSovereign();
+    this.drawGambits();
     this.drawBolts();
     this.drawSparks();
     this.drawRings();
+    this.drawCompanion();
     this.drawYou();
     this.drawPopups();
     g.restore();
@@ -1495,7 +1729,27 @@ export class Game {
       // are not, so it is dashed and it is labelled with the plane it lands on.
       for (const limb of limbsOf(body, pitch)) {
         const tip = limb.cells[0];
+        if (!this.onCamera(tip.x, tip.y, 100)) continue;
         const tx = px(tip.x), ty = px(tip.y);
+        const role = limbRole(limb);
+        const active = limb.layers.includes(run.layer);
+        const nearTip = active && Math.hypot(tip.x - run.you.x, tip.y - run.you.y) <= SUPPORT_REACH;
+        const ready = (run.bond.limbReadyAt.get(tip.id) ?? 0) <= run.t;
+        g.strokeStyle = role === "guard" ? `rgba(255,201,74,${ready ? 0.8 : 0.2})` : `rgba(${JADE},0.7)`;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        if (role === "guard") g.arc(tx, ty, px(GUARD_REACH), 0, Math.PI * 2);
+        else if (role === "sail") {
+          g.moveTo(tx - 9, ty + 7); g.lineTo(tx, ty - 13); g.lineTo(tx + 9, ty + 7); g.closePath();
+        } else {
+          g.ellipse(tx, ty, 12, 6, this.t * 0.7, 0, Math.PI * 2);
+        }
+        g.stroke();
+        if (nearTip) {
+          g.font = `700 8px ${MONO}`; g.fillStyle = INK; g.textAlign = "center";
+          g.fillText(role === "sail" ? "DASH RECOVERY" : role === "guard" ? "VOLLEY GUARD" : "FASTER BONDING", tx, ty - 21);
+          g.textAlign = "left";
+        }
         if (limb.leg) {
           g.strokeStyle = "rgba(255,201,74,0.55)";
           g.lineWidth = 2;
@@ -1520,7 +1774,6 @@ export class Game {
 
       // What it is, in the vocabulary the rest of the repository speaks.
       const sym = symbolOf(body);
-      const run = this.run;
       if (sym) {
         g.textAlign = "center";
         g.font = `700 11px ${MONO}`;
@@ -1548,13 +1801,209 @@ export class Game {
     }
   }
 
+  /** Small procedural silhouettes: shape carries role, colour still carries contrast. */
+  private creature(x: number, y: number, r: number, form: string, rgb: string, angle: number, alpha = 1): void {
+    const g = this.ctx;
+    g.save();
+    g.translate(x, y); g.rotate(angle);
+    g.globalAlpha *= alpha;
+    g.strokeStyle = `rgba(${rgb},0.85)`;
+    g.fillStyle = `rgba(${rgb},0.16)`;
+    g.lineWidth = 1.4;
+    if (form === "warden" || form === "sentinel" || form === "husk") {
+      // Articulated plates, open at the joints.
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        g.beginPath();
+        g.moveTo(Math.cos(a - 0.4) * r * 0.65, Math.sin(a - 0.4) * r * 0.65);
+        g.lineTo(Math.cos(a - 0.28) * r, Math.sin(a - 0.28) * r);
+        g.lineTo(Math.cos(a + 0.28) * r, Math.sin(a + 0.28) * r);
+        g.lineTo(Math.cos(a + 0.4) * r * 0.65, Math.sin(a + 0.4) * r * 0.65);
+        g.closePath(); g.fill(); g.stroke();
+      }
+    } else if (form === "weaver" || form === "ribbon" || form === "splitter") {
+      // A bell and four independent, swimming tendrils.
+      g.beginPath(); g.ellipse(0, -r * 0.15, r * 0.8, r * 0.52, 0, Math.PI, Math.PI * 2);
+      g.quadraticCurveTo(r * 0.4, r * 0.45, -r * 0.8, -r * 0.15);
+      g.fill(); g.stroke();
+      for (let i = 0; i < 4; i++) {
+        const tx = (i - 1.5) * r * 0.38;
+        const sway = Math.sin(this.t * 3 + i * 1.7 + x * 0.01) * r * 0.3;
+        g.beginPath(); g.moveTo(tx, 0);
+        g.bezierCurveTo(tx + sway, r * 0.5, tx - sway, r, tx + sway * 0.5, r * 1.35);
+        g.stroke();
+      }
+    } else {
+      // Segmented swimmer, with four pairs of paddles.
+      for (let i = 0; i < 4; i++) {
+        const cy = (i - 1.5) * r * 0.43;
+        const width = r * (0.65 - Math.abs(i - 1.5) * 0.1);
+        g.beginPath(); g.ellipse(0, cy, width, r * 0.3, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+        for (const sign of [-1, 1]) {
+          const kick = Math.sin(this.t * 5 + i) * r * 0.13;
+          g.beginPath(); g.moveTo(sign * width * 0.8, cy);
+          g.quadraticCurveTo(sign * r, cy + kick, sign * r * 0.9, cy + r * 0.27 + kick);
+          g.stroke();
+        }
+      }
+    }
+    g.fillStyle = "rgba(240,255,255,0.9)";
+    for (const sign of [-1, 1]) {
+      g.beginPath(); g.arc(sign * r * 0.2, -r * 0.38, Math.max(1, r * 0.07), 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+  }
+
+  private drawOrganelles(): void {
+    const run = this.run, g = this.ctx;
+    const hosts = new Map(run.structures.map((s) => [s.id, s]));
+    for (const o of run.organelles) {
+      const host = hosts.get(o.hostId);
+      if (!host || !this.onCamera(host.x, host.y, 100)) continue;
+      const x = px(host.x), y = px(host.y);
+      g.save();
+      g.globalAlpha = host.serves.includes(run.layer) ? 1 : 0.25;
+      const near = Math.hypot(host.x - run.you.x, host.y - run.you.y) < MITO_REACH;
+      if (near) {
+        g.setLineDash([3, 7]); g.strokeStyle = `rgba(${JADE},0.2)`;
+        g.beginPath(); g.arc(x, y, px(MITO_REACH), 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+      }
+      const cap = mitoCapacity(run);
+      g.fillStyle = "#0a2628"; g.strokeStyle = `rgba(${JADE},${0.4 + Math.min(1, o.energy / cap) * 0.6})`;
+      g.lineWidth = 2;
+      g.beginPath(); g.ellipse(x, y, 21, 12, -0.35, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.lineWidth = 1;
+      g.beginPath();
+      for (let i = 0; i <= 8; i++) {
+        const xx = x - 14 + i * 3.5;
+        const yy = y + Math.sin(i * 2.2 + this.t * 0.6) * 6;
+        if (i === 0) g.moveTo(xx, yy); else g.lineTo(xx, yy);
+      }
+      g.stroke();
+      if (o.supplying) {
+        g.strokeStyle = o.mending ? "rgba(255,201,74,0.7)" : `rgba(${JADE},0.65)`;
+        g.setLineDash([2, 5]); g.lineDashOffset = -this.t * 16;
+        g.beginPath(); g.moveTo(x, y); g.lineTo(px(run.you.x), px(run.you.y)); g.stroke();
+        g.setLineDash([]); g.lineDashOffset = 0;
+      }
+      g.font = `700 8px ${MONO}`; g.textAlign = "center";
+      g.fillStyle = o.mending ? GOLD : `rgb(${JADE})`;
+      g.fillText(o.mending ? `ATP → MEND ${Math.round(run.fray.repair)}/${Math.round(repairCost(run))}`
+        : o.supplying ? "ATP → STAMINA" : `MITO ${Math.round(o.energy)}/${Math.round(cap)}`, x, y + 19);
+      g.restore();
+    }
+  }
+
+  private drawCompanion(): void {
+    const run = this.run, c = companion(run);
+    if (!c) return;
+    const g = this.ctx;
+    const ally = run.bond.ally;
+    const orbit = this.t * 0.5;
+    const x = ally ? px(ally.x) : px(run.you.x) + Math.cos(orbit) * 36;
+    const y = ally ? px(ally.y) : px(run.you.y) + Math.sin(orbit) * 27;
+    const rgb = warmth(selfContrast(run.you, run.wave));
+    const target = ally && ally.target >= 0
+      ? run.entities.find((e) => e.id === ally.target) : undefined;
+    let heading = Math.sin(orbit) * 0.2;
+    if (target && ally) {
+      // WHAT IT IS DOING, drawn on the thing it is doing it to: a dart line on
+      // its way, a tether for a Weaver, and the hold filling like your own.
+      const tx = px(target.x), ty = px(target.y);
+      heading = Math.atan2(ty - y, tx - x) + Math.PI / 2;
+      if (c.form === "weaver") {
+        const dx = tx - x, dy = ty - y, len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        g.strokeStyle = `rgba(${JADE},${ally.holding ? 0.8 : 0.3})`;
+        g.lineWidth = ally.holding ? 1.6 : 1;
+        g.beginPath();
+        for (let i = 0; i <= 12; i++) {
+          const f = i / 12;
+          const wob = Math.sin(f * Math.PI) * Math.sin(this.t * 9 + f * 8) * (ally.holding ? 2 : 5);
+          const qx = x + dx * f + nx * wob, qy = y + dy * f + ny * wob;
+          if (i === 0) g.moveTo(qx, qy); else g.lineTo(qx, qy);
+        }
+        g.stroke();
+      } else if (!ally.holding) {
+        g.strokeStyle = `rgba(${JADE},0.4)`;
+        g.setLineDash([3, 4]);
+        g.beginPath(); g.moveTo(x, y); g.lineTo(tx, ty); g.stroke();
+        g.setLineDash([]);
+      }
+      if (ally.holding) {
+        const f = Math.min(1, (target.seized ?? 0) / beast(target.species).hold);
+        g.strokeStyle = `rgb(${JADE})`;
+        g.lineWidth = 2.2;
+        g.beginPath();
+        g.arc(tx, ty, Math.max(2.4, px(particleOf(target).radius)) + 11,
+          -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+        g.stroke();
+      }
+    } else {
+      g.strokeStyle = `rgba(${JADE},0.3)`;
+      g.setLineDash([2, 4]); g.beginPath();
+      g.moveTo(px(run.you.x), px(run.you.y)); g.lineTo(x, y); g.stroke(); g.setLineDash([]);
+    }
+    this.creature(x, y, 10 + c.rank, c.form, rgb, heading);
+    if (c.form === "warden" && run.t >= run.bond.shieldReadyAt) {
+      g.strokeStyle = "rgba(255,201,74,0.55)";
+      g.beginPath(); g.arc(px(run.you.x), px(run.you.y), 28, 0, Math.PI * 2); g.stroke();
+    }
+  }
+
+  private drawJourney(): void {
+    const run = this.run, g = this.ctx;
+    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const c = companion(run);
+    const x = VIEW_W - 286, y = 122;
+    const tall = c ? 96 : 76;
+    g.fillStyle = "rgba(6,17,28,0.86)"; g.fillRect(x, y, 230, tall);
+    g.fillStyle = `rgb(${JADE})`; g.fillRect(x, y, 2, tall);
+    g.textAlign = "left"; g.font = `700 9px ${MONO}`;
+    g.fillText(c ? `${ADAPTATIONS[c.form].name} · BOND ${c.rank}/3` : "GROW · EXPLORE · BOND", x + 10, y + 10);
+    g.fillStyle = INK; g.font = `600 8px ${MONO}`;
+    if (run.phase === "reign") {
+      g.fillText(`${ADAPTATIONS[formFor(run.world.aeon)].name} · WEAKEN TO ${Math.round(tameHealth(run) * 100)}%`, x + 10, y + 28);
+      g.fillText(`THEN HOLD ${G.crown} NEARBY TO TAME`, x + 10, y + 43);
+      g.fillText(`GIFT: ${ADAPTATIONS[formFor(run.world.aeon)].gift}`, x + 10, y + 58);
+    } else {
+      g.fillText(`${run.organelles.length} MITOCHONDRIA · ${run.bond.companions.length}/3 COMPANIONS`, x + 10, y + 28);
+      g.fillText(`HOLD ${G.place} ON A STRUCTURE`, x + 10, y + 43);
+      const costs = run.cells.length >= 2
+        ? `${run.cells[this.selected]?.group.hm ?? run.cells[0].group.hm} + ${run.cells[(this.selected + 1) % run.cells.length].group.hm}`
+        : "NEEDS 2 CELLS";
+      g.fillText(`COST: ${costs} · SELECTED + NEXT`, x + 10, y + 58);
+    }
+    if (this.buildHeld > 0) {
+      bar(g, x + 10, y + 68, 206, 3, Math.min(1, this.buildHeld / 0.85), `rgb(${JADE})`, "");
+    }
+    const host = organelleHost(run);
+    if (host && !run.organelles.some((o) => o.hostId === host.id)) {
+      g.fillStyle = DIM; g.fillText("HOST IN REACH", x + 130, y + 10);
+    }
+    // THE CALL, and when it is back. A cooldown with no readout is a button
+    // that seems to work at random.
+    if (c) {
+      const wait = callWait(run);
+      const full = callCooldown(run, c.rank);
+      g.font = `700 8px ${MONO}`;
+      g.fillStyle = wait > 0 ? DIM : GOLD;
+      g.fillText(wait > 0
+        ? `${G.call} ${CALLS[c.form].name} · ${wait.toFixed(0)} S`
+        : `${G.call} ${CALLS[c.form].name} READY`, x + 10, y + 78);
+      bar(g, x + 110, y + 80, 106, 3, 1 - wait / Math.max(1, full), wait > 0 ? DIM : GOLD, "");
+    }
+  }
+
   private drawStructures(): void {
     const g = this.ctx;
     const run = this.run;
     const k = run.throne;
     const fighting = run.phase === "reign" && k.awake && k.hp > 0;
+    const organelleIds = new Set(run.organelles.map((o) => o.hostId));
 
     for (const s of run.structures) {
+      if (organelleIds.has(s.id)) continue;
       // CULLED, which it never was. A player with 212 buildings was drawing
       // every one of them every frame, most of them off screen — and each one
       // built a radial gradient PER LOBE, so a six-lobed crystal came to about
@@ -1746,7 +2195,9 @@ export class Game {
     const run = this.run;
     const b = run.bound;
     const g = this.ctx;
-    const x = 18, y = 62, w = 232, h = 11;
+    const x = 18, y = 150, w = 232, h = 11;
+    g.fillStyle = "rgba(6,17,28,0.86)";
+    g.fillRect(x - 8, y - 23, w + 16, 90);
 
     g.font = `600 9px ${MONO}`;
     g.fillStyle = DIM;
@@ -1793,9 +2244,8 @@ export class Game {
 
     g.font = `700 9px ${MONO}`;
     g.fillStyle = b.free ? `rgb(${JADE})` : `rgb(${NODE})`;
-    g.fillText(
-      b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
-      x, y + h + 20);
+    wrap(g, b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
+      x, y + h + 20, w, 11);
   }
 
   /**
@@ -2014,7 +2464,8 @@ export class Game {
     // what it would take to kill.
     if (run.throne.fed.length > 0) {
       const need = dischargesToKill(run);
-      const beyond = !Number.isFinite(need) || need > run.structures.length + run.cells.length;
+      const weapons = run.structures.length - run.organelles.length + run.cells.length;
+      const beyond = !Number.isFinite(need) || need > weapons;
       g.font = `700 9px ${MONO}`;
       g.fillStyle = beyond ? RED : GOLD;
       g.fillText(
@@ -2024,7 +2475,7 @@ export class Game {
       if (beyond) {
         g.fillStyle = RED;
         g.font = `600 8px ${MONO}`;
-        g.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
+        g.fillText(`YOU HAVE ${weapons}`, x, y - R - 37);
       }
 
       // AND WHAT THE FEEDING BOUGHT, which nothing said until the king was
@@ -2166,8 +2617,9 @@ export class Game {
       if (e.faction === "motif") {
         drawMotif(g, x, y, r, e.parts[e.parts.length - 1], rgb, e.spin);
       } else {
+        this.creature(x, y, r * 1.8, e.species, rgb, Math.atan2(this.run.you.y - e.y, this.run.you.x - e.x) + Math.PI / 2);
         g.fillStyle = `rgb(${rgb})`;
-        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(x, y, r * 0.6, 0, Math.PI * 2); g.fill();
         g.fillStyle = "rgba(255,255,255,0.45)";
         g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.3, 0, Math.PI * 2); g.fill();
       }
@@ -2251,12 +2703,29 @@ export class Game {
 
   private drawSovereign(): void {
     const k = this.run.throne;
-    if (!k.awake || k.hp <= 0) return;
+    if (!k.awake || k.hp <= 0 || this.run.phase !== "reign") return;
     const g = this.ctx;
     const p = sovereignParticle(k);
     const x = px(k.x), y = px(k.y);
     const r = px(p.radius);
-    const rgb = k.anchored ? "210,190,255" : "150,220,255";
+    const form = formFor(this.run.world.aeon);
+    const rgb = warmth(contrastFactor(p, waterAt(this.run, k.y)));
+    this.creature(x, y, r * 1.8, form, rgb, k.spin, 0.65);
+    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    g.font = `700 10px ${MONO}`;
+    g.fillStyle = INK;
+    g.textAlign = "center";
+    g.fillText(ADAPTATIONS[form].name, x, y - r - 57);
+    if (vulnerable(k, tameHealth(this.run))) {
+      g.strokeStyle = `rgba(${JADE},0.25)`;
+      g.setLineDash([4, 6]);
+      g.beginPath(); g.arc(x, y, px(TAME_REACH), 0, Math.PI * 2); g.stroke();
+      g.setLineDash([]);
+      g.fillStyle = `rgb(${JADE})`;
+      g.fillText(canBond(this.run) ? `HOLD ${G.crown} TO BOND` : "WEAKENED · APPROACH TO BOND", x, y + r + 35);
+      bar(g, x - 55, y + r + 50, 110, 5, this.run.bond.progress / tameTime(this.run), `rgb(${JADE})`, "");
+    }
+    g.textAlign = "left";
 
     const glow = g.createRadialGradient(x, y, 0, x, y, r * 4);
     glow.addColorStop(0, `rgba(${rgb},0.34)`);
@@ -2266,7 +2735,7 @@ export class Game {
 
     // Your bare hand on it. The same condition the damage is applied under, so
     // what is drawn is never a flattering account of what is happening.
-    if (wearing(this.run)) {
+    if (wearing(this.run) && !this.intent?.crownDown) {
       const beat = 0.6 + 0.4 * Math.sin(this.t * 22);
       g.strokeStyle = `rgba(255,255,255,${(0.3 * beat).toFixed(3)})`;
       g.lineWidth = 3;
@@ -2280,9 +2749,15 @@ export class Game {
 
     // The wind-up. Its spin stops while it gathers, so what is drawn here is
     // exactly what it throws — the arms grow out to their real reach and you
-    // stand in the gaps between them.
+    // stand in the gaps between them. A charge or a shock throws no arms, so
+    // it draws none: it draws the lane or the ring instead.
+    const fray = this.run.fray;
     const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
-    if (wind > 0) {
+    const plain = fray.next !== "charge" && fray.next !== "shock";
+    if (wind > 0 && !plain) this.drawGambitWind(x, y, r, wind);
+    if (wind > 0 && fray.next === "echo") this.drawEcho(x, y, echoArms(this.run), wind, 0.5);
+    if (fray.echo) this.drawEcho(x, y, fray.echo.arms, 1, 0.85);
+    if (wind > 0 && plain) {
       const arms = volley(k);
       g.lineWidth = 1 + wind * 2.6;
       for (const [dx, dy] of arms) {
@@ -2298,6 +2773,43 @@ export class Game {
       g.strokeStyle = `rgba(255,120,150,${(0.25 + wind * 0.5).toFixed(3)})`;
       g.lineWidth = 2;
       g.beginPath(); g.arc(x, y, r + 6 + (1 - wind) * 26, 0, Math.PI * 2); g.stroke();
+    }
+
+    // A charge leaves a wake; the daze after it and a snare are both a king
+    // that is not moving itself, and both are drawn as such.
+    if (fray.charge > 0 && fray.lane) {
+      g.strokeStyle = `rgba(${rgb},0.35)`;
+      g.lineWidth = r * 1.2;
+      g.lineCap = "round";
+      g.beginPath();
+      g.moveTo(x - fray.lane.dx * 40, y - fray.lane.dy * 40); g.lineTo(x, y);
+      g.stroke();
+      g.lineCap = "butt";
+    }
+    if (fray.daze > 0) {
+      g.fillStyle = "rgba(255,240,160,0.85)";
+      for (let i = 0; i < 3; i++) {
+        const a2 = this.t * 4 + (i * Math.PI * 2) / 3;
+        g.beginPath(); g.arc(x + Math.cos(a2) * (r + 9), y - r - 4 + Math.sin(a2) * 4, 2, 0, Math.PI * 2); g.fill();
+      }
+      g.font = `700 8px ${MONO}`; g.textAlign = "center";
+      g.fillText("DAZED", x, y + r + 26);
+      g.textAlign = "left";
+    }
+    if (fray.snare > 0) {
+      g.strokeStyle = `rgba(${JADE},0.55)`;
+      g.lineWidth = 1;
+      for (let i = 0; i < 8; i++) {
+        const a2 = (i * Math.PI) / 4 + 0.2;
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a2) * (r + 18), y + Math.sin(a2) * (r + 18)); g.stroke();
+      }
+      for (const rr of [r + 7, r + 13, r + 18]) {
+        g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.stroke();
+      }
+      g.fillStyle = `rgb(${JADE})`;
+      g.font = `700 8px ${MONO}`; g.textAlign = "center";
+      g.fillText(`SNARED ${fray.snare.toFixed(1)}S`, x, y + r + 26);
+      g.textAlign = "left";
     }
 
     // its body carries its own group's arms, turning
@@ -2323,6 +2835,12 @@ export class Game {
     g.fillRect(x - w / 2, y - r - 22, w, 5);
     g.fillStyle = k.anchored ? "#d2beff" : "#8ce9ff";
     g.fillRect(x - w / 2, y - r - 22, w * (k.hp / k.maxHp), 5);
+    // WHERE IT CAN BE TAMED, on the bar itself. A report came back at 772 of
+    // 2310 — thirty-three per cent, three points above the line — with no mark
+    // anywhere saying how close that was.
+    const share = tameHealth(this.run);
+    g.fillStyle = `rgb(${JADE})`;
+    g.fillRect(x - w / 2 + w * share - 1, y - r - 25, 2, 11);
 
     // WHAT WOULD ACTUALLY MOVE THAT BAR. `drawThrone` prints "N DISCHARGES TO
     // KILL" while you are feeding it and then returns early the moment it wakes
@@ -2332,20 +2850,21 @@ export class Game {
     // needed TWO of them, and was instead fought by hand for nine minutes
     // against a thing that heals 0.9 hp/s off the buildings it eats.
     const need = dischargesToKill(this.run);
-    const bearing = this.run.structures.filter((st) => bearsOn(st, k.x, k.y)).length;
+    const organelleIds = new Set(this.run.organelles.map((o) => o.hostId));
+    const bearing = this.run.structures.filter((st) => !organelleIds.has(st.id) && bearsOn(st, k.x, k.y)).length;
     g.font = `700 9px ${MONO}`;
     g.textAlign = "center";
     g.fillStyle = bearing > 0 ? "#8ce9ff" : "rgba(255,255,255,0.45)";
     g.fillText(
       Number.isFinite(need)
         ? `${need} DISCHARGE${need === 1 ? "" : "S"} TO KILL`
-        : "NOTHING YOU OWN CAN KILL IT",
+        : k.anchored ? "BUILD STRUCTURES TO WEAKEN IT" : "GRIP TO WEAKEN · BUILD TO DISCHARGE",
       x, y - r - 30);
     g.fillStyle = bearing > 0 ? "#8ce9ff" : "#ff5a5a";
     g.font = `700 8px ${MONO}`;
     g.fillText(
       bearing > 0
-        ? `${bearing} OF YOUR BUILDINGS BEAR ON IT  ·  ${GLYPH.keys.grip} ONE TO FIRE IT`
+        ? `${bearing} OF YOUR BUILDINGS BEAR ON IT  ·  ${G.grip} ONE TO FIRE IT`
         : "NOTHING YOU OWN IS AIMED AT IT  ·  MOVE THE KING INTO AN ARM",
       x, y - r - 41);
     g.textAlign = "left";
@@ -2360,9 +2879,39 @@ export class Game {
 
   private drawBolts(): void {
     const g = this.ctx;
-    for (const b of this.run.bolts) {
+    const run = this.run;
+    const you = run.you;
+    // WHEN A BURST WOULD CATCH IT. Shown only while a burst is actually
+    // available, on arms that are closing on you, brightest at the reach where
+    // a catch happens — so the cue is never a promise the pilot cannot keep.
+    const ready = you.dash <= 0 && you.dashCool <= 0 && !run.wave.spent
+      && run.wave.stamina >= DASH_COST;
+    const cue = 70e-6;
+    for (const b of run.bolts) {
+      if (!this.onCamera(b.x, b.y, 40)) continue;
       const x = px(b.x), y = px(b.y);
       const a = Math.min(1, b.life);
+      if (b.thrown) {
+        g.strokeStyle = `rgba(255,201,74,${(a * 0.9).toFixed(2)})`;
+        g.lineWidth = 3;
+        g.beginPath();
+        g.moveTo(x - b.vx * PX * 0.05, y - b.vy * PX * 0.05);
+        g.lineTo(x, y);
+        g.stroke();
+        g.fillStyle = `rgba(255,245,200,${a.toFixed(2)})`;
+        g.beginPath(); g.arc(x, y, 3.2, 0, Math.PI * 2); g.fill();
+        continue;
+      }
+      if (ready) {
+        const dx = you.x - b.x, dy = you.y - b.y;
+        const d = Math.hypot(dx, dy);
+        if (d < cue && dx * b.vx + dy * b.vy > 0) {
+          const f = 1 - Math.max(0, d - catchReach(run)) / (cue - catchReach(run));
+          g.strokeStyle = `rgba(255,201,74,${(0.2 + 0.7 * f).toFixed(2)})`;
+          g.lineWidth = 1.4;
+          g.beginPath(); g.arc(x, y, 4 + (1 - f) * 9, 0, Math.PI * 2); g.stroke();
+        }
+      }
       g.strokeStyle = `rgba(255,140,190,${(a * 0.85).toFixed(2)})`;
       g.lineWidth = 2;
       g.beginPath();
@@ -2371,6 +2920,84 @@ export class Game {
       g.stroke();
       g.fillStyle = `rgba(255,200,225,${a.toFixed(2)})`;
       g.beginPath(); g.arc(x, y, 2.4, 0, Math.PI * 2); g.fill();
+    }
+  }
+
+  /** A charge's lane or a shock's reach, for the whole of the wind-up. */
+  private drawGambitWind(x: number, y: number, r: number, wind: number): void {
+    const g = this.ctx;
+    const fray = this.run.fray;
+    if (fray.next === "charge" && fray.lane) {
+      const len = px(chargeLength()) + r;
+      const half = px(chargeReach(this.run.throne));
+      g.save();
+      g.translate(x, y);
+      g.rotate(Math.atan2(fray.lane.dy, fray.lane.dx));
+      g.fillStyle = `rgba(255,120,150,${(0.06 + wind * 0.2).toFixed(3)})`;
+      g.fillRect(0, -half, len, half * 2);
+      g.strokeStyle = `rgba(255,120,150,${(0.3 + wind * 0.5).toFixed(3)})`;
+      g.lineWidth = 1.2;
+      g.strokeRect(0, -half, len, half * 2);
+      // chevrons marching down it, so it reads as a direction and not a wall
+      g.lineWidth = 2;
+      for (let i = 0; i < 4; i++) {
+        const raw = (this.t * 1.6 + i / 4) % 1;
+        const u = (raw < 0 ? raw + 1 : raw) * len;
+        g.beginPath(); g.moveTo(u - 6, -half * 0.5); g.lineTo(u, 0); g.lineTo(u - 6, half * 0.5); g.stroke();
+      }
+      g.restore();
+      g.fillStyle = `rgba(255,150,175,${(0.5 + wind * 0.5).toFixed(2)})`;
+      g.font = `700 9px ${MONO}`; g.textAlign = "center";
+      g.fillText("CHARGE  ·  STEP OFF THE LANE", x + fray.lane.dx * len * 0.6, y + fray.lane.dy * len * 0.6 - half - 6);
+      g.textAlign = "left";
+    }
+    if (fray.next === "shock") {
+      const R = px(shockReach(this.run.throne));
+      g.strokeStyle = `rgba(255,120,150,${(0.3 + wind * 0.55).toFixed(3)})`;
+      g.lineWidth = 1.5;
+      g.setLineDash([6, 6]);
+      g.beginPath(); g.arc(x, y, R, 0, Math.PI * 2); g.stroke();
+      g.setLineDash([]);
+      g.lineWidth = 3;
+      g.beginPath(); g.arc(x, y, r + 4 + (1 - wind) * 30, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = `rgba(255,150,175,${(0.5 + wind * 0.5).toFixed(2)})`;
+      g.font = `700 9px ${MONO}`; g.textAlign = "center";
+      g.fillText("SHOCK  ·  GET OUTSIDE THE RING", x, y - R - 8);
+      g.textAlign = "left";
+    }
+  }
+
+  /** An echo's second set: dashed while it waits, and it waits in plain sight. */
+  private drawEcho(x: number, y: number, arms: ReadonlyArray<readonly [number, number]>, wind: number, alpha: number): void {
+    const g = this.ctx;
+    g.strokeStyle = `rgba(200,160,255,${(alpha * (0.35 + 0.5 * wind)).toFixed(3)})`;
+    g.lineWidth = 1.5;
+    g.setLineDash([5, 5]);
+    for (const [dx, dy] of arms) {
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + dx * 240 * wind, y + dy * 240 * wind);
+      g.stroke();
+    }
+    g.setLineDash([]);
+  }
+
+  /** Shock fronts on their way out, and where they stop. */
+  private drawGambits(): void {
+    const fray = this.run.fray;
+    if (fray.rings.length === 0) return;
+    const g = this.ctx;
+    for (const ring of fray.rings) {
+      const x = px(ring.x), y = px(ring.y);
+      const f = Math.min(1, ring.r / ring.max);
+      g.strokeStyle = `rgba(255,120,150,${(0.9 - f * 0.5).toFixed(3)})`;
+      g.lineWidth = 4;
+      g.beginPath(); g.arc(x, y, px(ring.r), 0, Math.PI * 2); g.stroke();
+      g.strokeStyle = "rgba(255,120,150,0.25)";
+      g.lineWidth = 1;
+      g.setLineDash([6, 6]);
+      g.beginPath(); g.arc(x, y, px(ring.max), 0, Math.PI * 2); g.stroke();
+      g.setLineDash([]);
     }
   }
 
@@ -2459,11 +3086,43 @@ export class Game {
     g.fillStyle = glow;
     g.beginPath(); g.arc(x, y, r * 4.5, 0, Math.PI * 2); g.fill();
 
-    g.fillStyle = `rgba(${rgb},0.9)`;
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    const form = companion(run)?.form ?? "strider";
+    const heading = Math.atan2(run.aim.y - you.y, run.aim.x - you.x) + Math.PI / 2;
+    this.creature(x, y, r * 1.65, form, rgb, heading);
+    g.fillStyle = `rgba(${rgb},0.6)`;
+    g.beginPath(); g.arc(x, y, r * 0.65, 0, Math.PI * 2); g.fill();
     g.strokeStyle = "#eaffff";
     g.lineWidth = 1.4;
     g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+
+    // THE CATCH WINDOW, while it is open: anything inside this ring now goes back.
+    if (you.iframe > 0) {
+      g.strokeStyle = `rgba(255,201,74,${(0.35 + you.iframe * 3).toFixed(3)})`;
+      g.lineWidth = 1.4;
+      g.setLineDash([2, 3]);
+      g.beginPath(); g.arc(x, y, px(catchReach(run)), 0, Math.PI * 2); g.stroke();
+      g.setLineDash([]);
+    }
+    if (rushing(run)) {
+      g.strokeStyle = `rgba(255,201,74,${(0.35 + 0.25 * Math.sin(this.t * 14)).toFixed(3)})`;
+      g.lineWidth = 2;
+      for (let i = 0; i < 6; i++) {
+        const a2 = this.t * 3 + (i * Math.PI) / 3;
+        g.beginPath(); g.arc(x, y, r + 11, a2, a2 + 0.5); g.stroke();
+      }
+    }
+    if (shielded(run)) {
+      g.strokeStyle = "rgba(255,201,74,0.75)";
+      g.fillStyle = "rgba(255,201,74,0.08)";
+      g.lineWidth = 2;
+      g.beginPath();
+      for (let i = 0; i <= 6; i++) {
+        const a2 = (i * Math.PI) / 3 + this.t;
+        const hx = x + Math.cos(a2) * (r + 16), hy = y + Math.sin(a2) * (r + 16);
+        if (i === 0) g.moveTo(hx, hy); else g.lineTo(hx, hy);
+      }
+      g.fill(); g.stroke();
+    }
 
     // A ring for the burst, and one for the cooldown coming back.
     if (you.dash > 0) {
@@ -2496,14 +3155,34 @@ export class Game {
 
   // ── hud ───────────────────────────────────────────────────────────────────
 
-  private slotRect(i: number): { x: number; y: number; w: number; h: number } {
-    return { x: VIEW_W - 18 - (i + 1) * 46 + 6, y: VIEW_H - 62, w: 40, h: 44 };
+  /**
+   * How many rack slots fit between the readout panel and the right edge.
+   *
+   * THE RACK HAD NO WINDOW. It drew every cell in a row leftwards from the
+   * corner, so the aeon-6 report's hundred cells ran four and a half thousand
+   * pixels off the left of the screen, and the selected cell was usually one of
+   * them. It now shows a window around the selection.
+   */
+  private static readonly RACK_SLOTS = 13;
+
+  private rackWindow(): { first: number; count: number } {
+    const n = this.run.cells.length;
+    const count = Math.min(n, Game.RACK_SLOTS);
+    const first = Math.max(0, Math.min(n - count, this.selected - Math.floor(count / 2)));
+    return { first, count };
+  }
+
+  /** The rectangle of the j-th VISIBLE slot, counted from the right. */
+  private slotRect(j: number): { x: number; y: number; w: number; h: number } {
+    return { x: VIEW_W - 18 - (j + 1) * 46 + 6, y: VIEW_H - 62, w: 40, h: 44 };
   }
 
   private slotAt(sx: number, sy: number): number {
-    for (let i = 0; i < this.run.cells.length; i++) {
-      const r = this.slotRect(i);
-      if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+    if (this.screen !== "play") return -1;
+    const { first, count } = this.rackWindow();
+    for (let j = 0; j < count; j++) {
+      const r = this.slotRect(j);
+      if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return first + j;
     }
     return -1;
   }
@@ -2514,7 +3193,7 @@ export class Game {
     const w = run.wave;
     g.textBaseline = "top";
 
-    for (let i = 0; i < MAX_INTEGRITY; i++) {
+    for (let i = 0; i < maxIntegrity(run); i++) {
       const on = i < run.integrity;
       g.fillStyle = on ? (run.integrity === 1 ? RED : "#5ef0c0") : "rgba(255,255,255,0.09)";
       g.beginPath(); g.arc(24 + i * 15, 22, on ? 5 : 3.5, 0, Math.PI * 2); g.fill();
@@ -2533,16 +3212,16 @@ export class Game {
     // the temperature is doing to the speed of the world.
     const hot = (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C);
     const rate = viscosity(AMBIENT_C) / viscosity(w.tC);
-    bar(g, 18, 66, 176, 7, hot,
+    bar(g, 18, 78, 176, 5, hot,
       hot > 0.66 ? "#ff5a5a" : hot > 0.33 ? "#ffa24a" : "#6ea8c8",
       `WATER ${w.tC.toFixed(0)}C`);
     if (hot > 0.08) {
       g.font = `700 8px ${MONO}`;
       g.fillStyle = hot > 0.66 ? "#ff5a5a" : "#8ce9ff";
-      g.fillText(`THIN - EVERYTHING x${rate.toFixed(2)}`, 200, 72);
+      g.fillText(`THIN - EVERYTHING x${rate.toFixed(2)}`, 200, 86);
     }
     const af = w.amplitude / w.maxAmplitude;
-    bar(g, 18, 76, 176, 7, af, w.inverted ? `rgb(${ANTI})` : `rgb(${NODE})`,
+    bar(g, 18, 103, 176, 4, af, w.inverted ? `rgb(${ANTI})` : `rgb(${NODE})`,
       w.inverted ? "GRIP · ANTINODE · PUSH" : "GRIP · NODE · PULL");
 
     // the world, honestly
@@ -2550,7 +3229,7 @@ export class Game {
     g.font = `600 9px ${MONO}`;
     g.fillStyle = FAINT;
     g.fillText(`${(frequency(w) / 1e6).toFixed(1)} MHZ   ${world.medium.c.toFixed(0)} M/S`
-      + `   ${world.medium.rho.toFixed(0)} KG/M3   PITCH ${(world.pitch * 1e6).toFixed(0)} UM`, 18, 100);
+      + `   ${world.medium.rho.toFixed(0)} KG/M3   PITCH ${(world.pitch * 1e6).toFixed(0)} UM`, 18, 222);
 
     g.textAlign = "center";
     g.fillStyle = INK;
@@ -2589,6 +3268,7 @@ export class Game {
     g.textAlign = "left";
 
     this.drawRack();
+    this.drawJourney();
     this.drawChannel();
     this.drawObjective();
     this.drawReadout();
@@ -2619,7 +3299,10 @@ export class Game {
     const spent = run.delivered >= suspension(run)
       && run.entities.filter((e) => e.faction === "motif").length < suspension(run) * 0.4;
     const hint = run.phase === "reign"
-      ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   ·   ${G.dash} TO BURST CLEAR`
+      ? vulnerable(run.throne, tameHealth(run))
+        ? `HOLD ${G.crown} NEAR THE BOSS TO BOND   ·   LET GO TO KEEP FIGHTING`
+        : `${G.grip} ON YOUR BUILDINGS TO FIRE   ·   ${G.dash} INTO AN ARM THROWS IT BACK   ·   `
+          + `TAME BELOW ${Math.round(tameHealth(run) * 100)}%`
       : run.throne.fed.length === 0 && spent
         ? `THIS WATER IS GATHERED OUT   ·   ${G.crown} ON THE THRONE FEEDS IT   ·   `
           + "A NEW WORLD IS THE ONLY NEW WATER"
@@ -2689,8 +3372,30 @@ export class Game {
       g.textAlign = "left";
       return;
     }
-    run.cells.forEach((c, i) => {
-      const r = this.slotRect(i);
+    const selected = run.cells[this.selected] ?? run.cells[0];
+    const role = selected.ability === "anchor" ? "VOLLEY GUARD" : selected.ability === "thrust" ? "DASH RECOVERY" : "FASTER BONDING";
+    const { first, count } = this.rackWindow();
+    let summary = "";
+    if (run.cells.length > count) {
+      const tally = new Map<string, number>();
+      for (const c of run.cells) tally.set(c.group.hm, (tally.get(c.group.hm) ?? 0) + 1);
+      summary = `  ·  RACK ${run.cells.length}: ` + [...tally].sort((a, b) => b[1] - a[1])
+        .slice(0, 4).map(([hm, n]) => `${hm}x${n}`).join(" ");
+    }
+    g.font = `600 9px ${MONO}`; g.textAlign = "right"; g.fillStyle = INK;
+    g.fillText(`LIMB TIP: ${role}${summary}`, VIEW_W - 18, VIEW_H - 98);
+    if (first + count < run.cells.length) {
+      g.fillStyle = DIM; g.textAlign = "left";
+      g.fillText(`< +${run.cells.length - first - count}`, this.slotRect(count - 1).x, VIEW_H - 78);
+    }
+    if (first > 0) {
+      g.fillStyle = DIM; g.textAlign = "right";
+      g.fillText(`+${first} >`, VIEW_W - 18, VIEW_H - 78);
+    }
+    g.textAlign = "left";
+    run.cells.slice(first, first + count).forEach((c, j) => {
+      const i = first + j;
+      const r = this.slotRect(j);
       const tint = c.ability === "thrust" ? NODE : c.ability === "weave" ? JADE : "255,201,74";
       const picked = i === this.selected;
       g.fillStyle = picked ? "rgba(26,44,62,0.92)" : "rgba(10,18,28,0.8)";
@@ -2707,7 +3412,7 @@ export class Game {
       g.font = `600 8px ${MONO}`;
       g.fillText(`${c.structure}·${c.freedom}`, r.x + r.w / 2, r.y + 21);
       g.fillStyle = FAINT;
-      g.fillText(`${lobes(c.group.hm).length} ARM`, r.x + r.w / 2, r.y + 32);
+      g.fillText(`${lobes(c.group.hm).length} SHOT`, r.x + r.w / 2, r.y + 32);
       g.textAlign = "left";
       g.fillStyle = FAINT;
       g.font = `600 8px ${MONO}`;
@@ -2776,15 +3481,17 @@ export class Game {
 
     g.fillStyle = GOLD;
     g.font = `700 13px ${MONO}`;
-    g.fillText("OUT OF THE BODY", VIEW_W / 2, 118);
+    g.fillText(run.bond.tamed ? "A SOVEREIGN BECOMES A COMPANION" : "OUT OF THE BODY", VIEW_W / 2, 118);
 
     g.fillStyle = INK;
     g.font = `700 38px ${MONO}`;
     g.fillText(run.world.name, VIEW_W / 2, 150);
 
     const e = epitaphFor(run.throne, run.world);
+    const offer = run.evolution.offer;
+    const top = offer.length ? 214 : 236, rowH = offer.length ? 19 : 30;
     e.lines.forEach(([k, v], i) => {
-      const y = 236 + i * 30;
+      const y = top + i * rowH;
       g.textAlign = "right";
       g.fillStyle = DIM;
       g.font = `600 10px ${MONO}`;
@@ -2795,14 +3502,87 @@ export class Game {
       g.fillText(v, VIEW_W / 2 + 18, y);
     });
 
+    if (offer.length) this.drawOffer();
+
     g.textAlign = "center";
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.font = `700 14px ${MONO}`;
-    g.fillText("ENTER IT", VIEW_W / 2, VIEW_H - 84);
+    g.fillText(offer.length ? `${run.bond.tamed ? "EVOLVE AND ENTER TOGETHER" : "EVOLVE AND ENTER"}`
+      : run.bond.tamed ? "ENTER TOGETHER" : "ENTER IT", VIEW_W / 2, VIEW_H - 84);
+    const ally = companion(run);
+    if (run.bond.tamed && ally) {
+      g.fillStyle = `rgb(${JADE})`;
+      g.font = `700 12px ${MONO}`;
+      g.fillText(`${ADAPTATIONS[ally.form].name} · ${ADAPTATIONS[ally.form].gift} · BOND ${ally.rank}/3`, VIEW_W / 2, 192);
+    }
     g.fillStyle = FAINT;
     g.font = `600 9px ${MONO}`;
-    g.fillText("EVERYTHING ABOVE IS COMPUTED FROM WHAT YOU FED THE THRONE", VIEW_W / 2, VIEW_H - 58);
+    // The cards are game rules and the world is not, and the line says which.
+    g.fillText(offer.length
+      ? "THE WORLD ABOVE IS COMPUTED FROM WHAT YOU FED THE THRONE  ·  THE CARDS ARE GAME RULES"
+      : "EVERYTHING ABOVE IS COMPUTED FROM WHAT YOU FED THE THRONE", VIEW_W / 2, VIEW_H - 58);
+    g.textAlign = "left";
+  }
+
+  /** Where the i-th of n evolution cards sits on the birth screen. */
+  private cardRect(i: number, n: number): { x: number; y: number; w: number; h: number } {
+    const w = 262, h = 92, gap = 14;
+    const total = n * w + (n - 1) * gap;
+    return { x: VIEW_W / 2 - total / 2 + i * (w + gap), y: 420, w, h };
+  }
+
+  private cardAt(sx: number, sy: number): number {
+    const n = this.run.evolution.offer.length;
+    for (let i = 0; i < n; i++) {
+      const r = this.cardRect(i, n);
+      if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+    }
+    return -1;
+  }
+
+  /** Three ways to change, one to take. */
+  private drawOffer(): void {
+    const g = this.ctx;
+    const run = this.run;
+    const offer = run.evolution.offer;
+    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    g.textAlign = "center";
+    g.font = `700 10px ${MONO}`;
+    g.fillStyle = `rgb(${JADE})`;
+    g.fillText("THE ORGANISM CHANGES  ·  CHOOSE ONE", VIEW_W / 2, 402);
+    offer.forEach((t: Trait, i) => {
+      const r = this.cardRect(i, offer.length);
+      const on = i === this.pick;
+      const info = TRAITS[t];
+      const rank = rankOf(run, t);
+      g.fillStyle = on ? "rgba(20,48,52,0.96)" : "rgba(8,18,28,0.9)";
+      g.fillRect(r.x, r.y, r.w, r.h);
+      g.strokeStyle = on ? `rgb(${JADE})` : "rgba(160,255,214,0.25)";
+      g.lineWidth = on ? 2 : 1;
+      g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      g.textAlign = "left";
+      g.fillStyle = on ? `rgb(${JADE})` : INK;
+      g.font = `700 12px ${MONO}`;
+      g.fillText(info.name, r.x + 12, r.y + 10);
+      g.textAlign = "right";
+      g.fillStyle = DIM;
+      g.font = `600 9px ${MONO}`;
+      g.fillText(rank > 0 ? `RANK ${rank} → ${rank + 1} OF ${info.max}` : `NEW · ${info.max} RANKS`,
+        r.x + r.w - 10, r.y + 12);
+      g.textAlign = "left";
+      g.fillStyle = "#9fbdd0";
+      g.font = `600 9px ${MONO}`;
+      wrap(g, info.says(rank), r.x + 12, r.y + 34, r.w - 24, 13);
+      g.fillStyle = FAINT;
+      g.font = `600 8px ${MONO}`;
+      g.fillText(String(i + 1), r.x + 4, r.y + r.h - 12);
+    });
+    g.textAlign = "center";
+    g.fillStyle = FAINT;
+    g.font = `600 9px ${MONO}`;
+    g.fillText(`${this.pad.connected ? `${G.cycle} / D-PAD / STICK` : "Q / A-D / 1-3 / CLICK"} TO CHOOSE`
+      + `  ·  ${G.confirm} TO TAKE IT`, VIEW_W / 2, 522);
     g.textAlign = "left";
   }
 
@@ -2831,11 +3611,17 @@ export class Game {
           + `${autonomous(b) ? "  ·  IT WORKED ALONE" : ""}`;
       })()],
       ["THE BOUND FIELD", run.bound.free ? "FREED" : n("tuned") > 0 ? "CAUGHT, THEN LOST" : "NEVER CAUGHT"],
-      ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, ${n("hit:touched")} DRIFTED INTO`],
+      ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, `
+        + `${n("hit:charge") + n("hit:shock")} GAMBITS, ${n("hit:touched")} DRIFTED INTO`],
+      // Short enough to stay on screen with every clause in it: it starts at the
+      // centre line, so it has 430 pixels, which is about sixty characters.
+      ["FOUGHT BACK", `${run.fray.stats.caught} CAUGHT, ${run.fray.stats.landed} THROWN HOME`
+        + `${run.fray.stats.held ? `  ·  ALLY HELD ${run.fray.stats.held}` : ""}`
+        + `${run.fray.stats.repairs ? `  ·  MENDED ${run.fray.stats.repairs}` : ""}`],
       ["SCORE", String(run.score)],
     ];
     rows.forEach(([k, v], i) => {
-      const y = 244 + i * 26;
+      const y = 236 + i * 24;
       g.textAlign = "right";
       g.fillStyle = DIM;
       g.font = `600 10px ${MONO}`;
@@ -2851,15 +3637,15 @@ export class Game {
     g.font = `700 11px ${MONO}`;
     g.fillStyle = `rgb(${NODE})`;
     this.verdict ??= this.diagnosis();
-    g.fillText(this.verdict, VIEW_W / 2, 412);
+    wrap(g, this.verdict, VIEW_W / 2, 430, 820, 14, true);
 
     g.fillStyle = DIM;
     g.font = `600 10px ${MONO}`;
-    g.fillText(`BEST ${this.best}   ·   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 436);
+    g.fillText(`BEST ${this.best}   ·   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 470);
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
     g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
     g.font = `700 14px ${MONO}`;
-    g.fillText("BEGIN AGAIN", VIEW_W / 2, 470);
+    g.fillText("BEGIN AGAIN", VIEW_W / 2, 500);
     g.textAlign = "left";
   }
 
@@ -2903,6 +3689,13 @@ export class Game {
     g.font = `700 34px ${MONO}`;
     g.fillStyle = INK;
     g.fillText("STOPPED", VIEW_W / 2, 118);
+    const ally = companion(run);
+    if (ally) {
+      g.font = `600 10px ${MONO}`;
+      g.fillStyle = `rgb(${JADE})`;
+      g.fillText(`${ADAPTATIONS[ally.form].name} ${ally.rank}/3 · ${ADAPTATIONS[ally.form].gift}`
+        + `  ·  ${G.call} ${CALLS[ally.form].name}`, VIEW_W / 2, 92);
+    }
 
     g.font = `600 10px ${MONO}`;
     g.fillStyle = `rgb(${NODE})`;
@@ -2918,26 +3711,32 @@ export class Game {
     const lines = [
       `${pad(G.move)}POINT WHERE TO GO. THE NODE LEADS YOU, AND YOU FALL INTO IT.`,
       `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
-      `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
-      `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
+      `${pad(G.dash)}BURST - HOW YOU GATHER AND DODGE. AN ARM THAT REACHES YOU IN ONE GOES BACK.`,
+      `${pad(G.place)}TAP: BUILD. HOLD: GROW MITOCHONDRION ON A STRUCTURE (2 CELLS).`,
       `${pad(G.lift)}TAKE THE BUILDING YOU ARE STANDING ON BACK INTO YOUR HAND.`,
       `${pad(G.cycle)}CHOOSE WHICH CELL.`,
-      `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
+      `${pad(G.crown)}FEED / CROWN. IN COMBAT: HOLD NEAR A WEAKENED BOSS TO BOND.`,
       `${pad(G.depth)}RETUNE THE CHANNEL. THE ONLY WAY ANYTHING MOVES IN DEPTH.`,
+      `${pad(G.call)}CALL YOUR COMPANION: RUSH, AEGIS OR SNARE, ON A COOLDOWN.`,
       `${pad(G.mute)}SOUND.`,
       "",
-      "HARD WALLS ARE PRESSURE ANTINODES, SO A RESONANCE NEEDS A WHOLE NUMBER",
-      "OF HALF WAVELENGTHS ACROSS THE CHANNEL: MODE N PUTS N PLANES IN THE",
-      "WATER. NOTHING SWIMS UP. YOU MOVE EVERY PLANE, OR YOU MOVE NOTHING.",
+      "LIMB TIPS: POLAR = DASH RECOVERY, PIEZOELECTRIC = FASTER BONDING,",
+      "ANCHOR = VOLLEY SHIELD. STAND NEAR A TIP TO USE ITS SUPPORT.",
+      `MITOCHONDRIA STORE ENERGY. RETURN FOR STAMINA - AND IN A LULL, ${Math.round(repairCost(run))} OF IT MENDS ONE INTEGRITY.`,
       "",
-      "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
-      "WHOSE BAND GAP CATCHES IT: HOW MUCH YOU BUILD DECIDES WHETHER THERE IS",
-      "A GAP, AND HOW FAR APART DECIDES WHERE IT SITS.",
+      `BOND: BELOW ${Math.round(tameHealth(run) * 100)}% HEALTH, HOLD ${G.crown} NEAR THE BOSS FOR ${tameTime(run)} SECONDS.`,
+      "HITS INTERRUPT YOU. YOUR WEAPONS REST WHILE YOU OFFER A BOND.",
+      `${G.cycle}: SWITCH COMPANION WHILE PAUSED. REPEATED BONDS GROW TO RANK 3.`,
+      "FROM THE SECOND WORLD, EVERY SEVEN SECONDS OR SO THE KING PLAYS ITS GAMBIT. IT IS DRAWN FIRST.",
       "",
       "WHAT SHARES YOUR CONTRAST COMES TO YOUR FEET. THE REST IS HELD OFF.",
       "A HUNTER STOPS AND GATHERS BEFORE IT STRIKES, AND GOES WHERE IT POINTED.",
     ];
-    lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 196 + i * 17));
+    const traits = held(run);
+    if (traits.length) {
+      lines.push("", `EVOLVED: ${traits.map(([t, r]) => `${TRAITS[t].name} ${r}`).join("  ·  ")}`);
+    }
+    lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 186 + i * 15));
 
     // THE DECISIVE TEST, on the screen somebody opens when a control is not
     // doing what they expect. Two lines: what the browser is handing over, and
@@ -3086,6 +3885,7 @@ export class Game {
     // drifting into things and one from a strike was told to dodge better.
     const causes: Array<[string, number]> = [
       ["struck", n("hit:struck")], ["volley", n("hit:volley")], ["touched", n("hit:touched")],
+      ["charge", n("hit:charge")], ["shock", n("hit:shock")],
     ];
     const worst = causes.sort((a, b) => b[1] - a[1])[0];
     if (worst[1] > 0) {
@@ -3094,7 +3894,16 @@ export class Game {
           ? "THEY TELEGRAPH. WHEN ONE STOPS AND GATHERS, BURST OFF THE LINE IT SHOWS"
           : "CLOSE YOUR HAND ON ONE AND IT CANNOT STRIKE AT ALL";
       }
-      if (worst[0] === "volley") return "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
+      if (worst[0] === "volley") {
+        return run.fray.stats.caught === 0
+          ? "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS - OR BURST INTO ONE "
+            + "AS IT ARRIVES AND IT GOES BACK AT THE KING"
+          : "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
+      }
+      if (worst[0] === "charge") return "A CHARGE'S LANE IS LOCKED WHEN IT STARTS TO WIND. STEP OFF IT";
+      if (worst[0] === "shock") {
+        return "A SHOCK FRONT STOPS AT ITS DASHED RING. BE OUTSIDE IT, OR BURST AS IT PASSES";
+      }
       return "WHAT SHARES YOUR CONTRAST IS DRAWN INTO YOUR NODE. HOLD IT OR LEAVE";
     }
     if (n("spent") >= 3) return "YOU RAN THE DRIVE DRY. THE LATTICE IS YOUR COVER - LET IT BACK UP";
@@ -3113,7 +3922,18 @@ export class Game {
     const keys = Object.keys(t).sort();
     return [
       `SONIC DRIFTER  ${run.t.toFixed(0)}s  aeon ${run.world.aeon} (${run.world.name})  phase ${run.phase}`,
-      `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
+      `you: integrity ${run.integrity}/${maxIntegrity(run)} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
+      `companions: ${run.bond.companions.map((c, i) => `${i === run.bond.active ? "*" : ""}${c.form}:${c.rank}`).join(" ") || "none"}; bond ${run.bond.progress.toFixed(2)}s`
+        + `${companion(run) ? `; call ${callWait(run) > 0 ? `in ${callWait(run).toFixed(0)}s` : "ready"}` : ""}`,
+      `mitochondria: ${run.organelles.length}; stored energy ${run.organelles.reduce((n, o) => n + o.energy, 0).toFixed(0)}`
+        + `; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
+      // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather
+      // than inferred from events, so damage is in it and not just a count.
+      `battle: arms caught ${run.fray.stats.caught}, thrown home ${run.fray.stats.landed} for ${run.fray.stats.damage}`
+        + ` (${run.throne.hm ? `${riposteDamage(run)} each now` : "no king"}); gambits ${run.fray.stats.gambits}`
+        + `; companion held ${run.fray.stats.held}; calls ${run.fray.stats.calls}; mended ${run.fray.stats.repairs}`,
+      `evolution: ${held(run).map(([t, r]) => `${t}:${r}`).join(" ") || "none"}`
+        + `${run.evolution.offer.length ? `; offered [${run.evolution.offer.join(" ")}]` : ""}`,
       `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
       `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}`
         + `${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}`
@@ -3349,8 +4169,12 @@ function drawMotif(
 
 function wrap(
   g: CanvasRenderingContext2D, text: string,
-  x: number, y: number, maxW: number, lh: number,
+  x: number, y: number, maxW: number, lh: number, centred = false,
 ): void {
+  // Centred text is measured from its middle, so the caller's x is the centre
+  // and the width test is the same.
+  const was = g.textAlign;
+  if (centred) g.textAlign = "center";
   let line = "";
   let row = 0;
   for (const word of text.split(" ")) {
@@ -3361,6 +4185,7 @@ function wrap(
     } else { line = test; }
   }
   if (line) g.fillText(line, x, y + row * lh);
+  g.textAlign = was;
 }
 
 // ── boot ────────────────────────────────────────────────────────────────────

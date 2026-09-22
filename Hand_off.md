@@ -1,204 +1,253 @@
-# Session handoff — 2026-09-05 (evening)
+# Next-session handoff — 2026-09-22 (battle pass), over 2026-09-21
 
-**This is not `HANDOFF.md`.** That file is the project's standing document: what
-SONIC DRIFTER is, the 23 load-bearing rules, what is still unmeasured. It
-outlives sessions and it is the one to read first.
+Start here. This file is current session context; `HANDOFF.md` is the older
+standing architecture and design record. The previous version of this file is
+preserved verbatim as `SESSION-2026-09-05.md`, including historical machine
+troubleshooting. Do not treat those old machine settings as newly verified.
 
-This file is smaller and more perishable: what happened in one session, and the
-things a next session would otherwise have to re-derive from journals and git.
-Everything here was checked at the time of writing. **If it disagrees with the
-code or the machine, they are right and this is stale.**
+## 2026-09-22: the battle pass
 
----
+The user asked for improvements to the 2026-09-21 additions, with battle
+mechanics, tools and allies. The work was aimed at the aeon-6 report in
+`drifter.report().txt`: all 17 hits were volleys, 22 mitochondria held 1298
+energy at death, the rack held 100 cells, no king was ever tamed, and the king
+died at 33%. [docs/BATTLE.md](docs/BATTLE.md) is the play guide and the record
+of how the numbers were set.
 
-## What today was
-
-Two unrelated jobs that happened to share a cause.
-
-The desktop hard-locked on 2026-09-05 at 17:03:37, seven minutes after the last
-file was saved and before anything had been committed. So the session opened as
-two questions — *where was the work* and *why did the machine die* — and the
-second one turned out to be worth more than the first, because the answer was
-"nothing on this box was in a position to tell you."
-
-The work was all on disk. Nothing was lost.
-
----
-
-## Repo state
-
-```
-branch    main, level with origin/main
-commit    803528a  "the lattice gets a say in what grows, and the kill count
-                    was quoting the muzzle"     (pushed 2026-09-05)
-tests     306, all passing        (npm test, ~152 s)
-typecheck clean                   (npm run typecheck, both tsconfigs)
-tree      clean
-repo      github.com/9x25dillon/NEW_REPOSITORY_30 — verified PRIVATE, which is
-          what config/subject.ts assumes. Check again before that changes.
-```
-
-**One stale line:** `HANDOFF.md` says `tests 305`. It is 306. Off by one — a
-test was added after that line was written. Worth correcting in passing rather
-than trusting.
-
----
-
-## What shipped in 803528a
-
-Three threads, all from one play report. `HANDOFF.md` carries the durable
-versions — rule 22, and two rewritten entries under *What is still open*. Do not
-re-derive them from here; this is only the index.
-
-1. **`seatedGroup` / `growable` (`game/body.ts`)** — a square trap net will not
-   seat a 3- or 6-fold axis, so a body's effective group is the part of the
-   cell's symmetry that also leaves the lattice fixed. Always one of 1, 2, 222,
-   4, 422. Growth and walking go through `growable()`; firing keeps the full
-   orbit via `shape.lobes()`. **A 622 fires six arms and grows two.**
-
-2. **`dischargesToKill` (`game/run.ts`)** — was quoting damage at the muzzle,
-   which lies inside `DEVOUR_REACH`, so it named a price payable only by losing
-   the building. Now counted at the edge of safety; a structure that cannot
-   outrange the mouth is not counted at all.
-
-3. **Limbs now depend on something** — and the reward was measured, found to
-   already exist, and found to be weak (5 of 7 seeds). **An aura was built to
-   pay for limbs and the measurement threw it out.** `HANDOFF.md` says in
-   capitals not to build it again, and gives the reason that rules out the whole
-   family: a merge needs two motifs within `BIND_RADIUS` *of each other*, so
-   farming rewards concentration, and any "an arm gathers over a wider area"
-   idea is fighting the merge rule.
-
----
-
-## The machine
-
-This section exists because none of it is in the repo, and the next session will
-not find it by reading code.
-
-### The two lockups
-
-| | |
-| --- | --- |
-| Fri 2026-09-04 02:02:47 | boot `-3`, hard lockup |
-| Sat 2026-09-05 17:03:37 | boot `-1`, hard lockup — the one that ended the session |
-
-Both have the same signature: **the journal stops mid-sentence.** No shutdown
-sequence, no OOM line, no kernel panic, nothing in `/sys/fs/pstore`, no
-coredump. Next boot reported `user-1000.journal corrupted or uncleanly shut
-down`. Every other boot back to 2026-08-30 shut down cleanly, so this is a
-pattern that started that week, not a standing condition.
-
-Ruled out at the time, with evidence: thermal (62 °C package against a 100 °C
-crit, fans normal), disk full (26% of 1.9 T), and disk error (nothing in the
-kernel log). **Not** ruled out: memory, and the GPU.
-
-Two suspects remain, and they are roughly equally weighted:
-
-- **i915 on a release-candidate kernel.** The box runs
-  `6.19.0-rc6-1-cachyos-rc-lto` — an *rc*, not a release — driving KDE/Wayland
-  on the integrated HD 530 of an i7-6700. The display engine is inside the CPU
-  package, so an i915 hang is not confined to the compositor. Boot `-1` logged
-  `kwin_wayland: atomic commit failed: Device or resource busy` four times, the
-  last at 16:55:18 — eight minutes before death — then fifteen rounds of
-  `libpng error: Write Error` from `kwin_wayland_wrapper` between 17:01:05 and
-  17:01:30.
-- **Memory pressure with no relief valve.** At the time of the crash `/tmp` was
-  a 48 G tmpfs on a 62 G machine, the only swap was zram with
-  `backing_dev = none` (compressed RAM, no path to disk), and *nothing* was
-  watching for OOM — `systemd-oomd` inactive, `earlyoom` not installed. In that
-  configuration heavy pressure can livelock in page reclaim before the kernel
-  OOM killer fires, and a reclaim livelock produces exactly the evidence above:
-  a frozen box and an empty log.
-
-### What was changed, and why
-
-All four changes are live and persisted. Backups are dated `*.backup.20260905-*`.
-
-| change | value | why |
+| What | Where | Control |
 | --- | --- | --- |
-| `/tmp` | 48 G kept, `+nosuid,nodev` | size is deliberate — the user wants to use this RAM. Only the hardening gap was closed |
-| `/mnt/ramdisk` | one line, 16 G, `+nosuid,nodev` | `fstab` had **two conflicting entries** (16 G and 8 G). Nothing on the system references this mount |
-| swap | `/swap/swapfile`, 32 G, **pri 10** | zram stays pri 100 and is still used first; disk only catches what would otherwise have nowhere to go. **This is the relief valve** — before it, RAM had no exit |
-| `earlyoom` | active, enabled, `-r 3600` | an OOM now kills one process and is **logged**, instead of the box freezing silently |
-| `BUILDDIR` | `/tmp/makepkg` | was commented out, so AUR builds were compiling on disk for no reason |
+| Riposte: a burst into a volley arm (±60°) catches it and throws it home. One per burst, swept over the frame | `game/combat.ts` | A |
+| Gambits from aeon 2, at most one per 7 s: Strider charge lane (36 µm core), Warden shock ring (220 µm past its edge), Weaver echo volley | `game/combat.ts`, `reign()` in run.ts | — |
+| Companions as bodies that hold hunters (a held hunter cannot strike). Calls: rush / aegis / snare | `game/allies.ts`, Bond fields in ecology.ts | R3 / R |
+| Mitochondria mend integrity at full stamina, 3 s after a hit, 40 energy a point | `game/organelles.ts` | — |
+| Evolution: three trait cards at every birth; nine traits with rank caps | `game/evolution.ts`, birth screen | B / D-pad / stick, Start |
+| Rack window (13 slots, overflow counts, group tally), D-pad ←/→ steps the rack | `app/drifter.ts`, `app/pad.ts` | D-pad |
 
-`earlyoom` avoids `init|systemd|kwin_wayland|plasmashell|sddm|sshd|dbus-daemon`
-and prefers `firefox|firefox-esr|chromium|node|electron`. It fires only when
-free RAM **and** free swap are both under 10%, which with 62 G of each is
-genuinely near-death.
+Keep these rules:
 
-**The swapfile is in its own nested btrfs subvolume `/swap`.** That is not
-decoration — `snapper`, `snap-pac` and `btrfs-assistant` are all installed, and
-btrfs snapshots do not recurse into nested subvolumes, so this is what keeps a
-32 G file out of every snapshot. It was created with
-`btrfs filesystem mkswapfile`, which makes it NOCOW and uncompressed; btrfs
-refuses `swapon` on a file that is either, so a successful `swapon` is itself
-the proof.
+- **A catch must be head-on.** Sideways catches made dodging deal about 3000
+  damage/min.
+- **One catch per burst.** Standing on the king otherwise catches whole volleys.
+- **Gambits run on a time gap, not every Nth wind-up.** Heavy kings wind up
+  every 1.15 s.
+- **A charge hits with a capped core.** Huge kings are 142 µm in radius.
+- **The riposte catch stays swept.** A burst moves about 32 µm a frame, more
+  than the 24 µm reach.
+- **The birth footer says the cards are game rules.** Only the world above
+  them is computed from the throne.
+- **Holding Y ceases fire.** Caught arms are absorbed and thrown arms do no
+  harm.
+- **The first world has no gambits.**
 
-### What to do if it locks up again
+`maxIntegrity(run)` replaces bare `MAX_INTEGRITY` wherever the cap is applied.
+`vulnerable(k, tameHealth(run))` and `tameTime(run)` carry EMPATHY.
 
-This is the point of the whole exercise. `earlyoom` now writes a memory report
-to the journal **every hour**, so there is a trace running up to any future
-freeze where before there was nothing.
+**Module cycle.** `combat.ts`, `allies.ts`, `evolution.ts` and `organelles.ts`
+import functions and constants from `run.ts`, which imports them back. This is
+the same cycle `ecology.ts` already had. It is safe only because those imports
+are used inside functions. Top-level code in these modules must not read a
+`run.ts` binding, or the bundle will see it uninitialised.
+
+Verification this session, all from the runner:
+
+- Baseline was 344/344. The final full run, after every change, was 367/367
+  (about 104 s). Both typechecks pass and `git diff --check` is clean.
+- `test/combat.test.ts`: 22 tests. The swept-catch test was mutation-checked:
+  it fails against the old point test.
+- Chromium: `node test/browser-upgrades.mjs --interactions --battle` gives 29
+  checks (the 14 earlier ones plus 15 new) with no exceptions. `--battle-scene`
+  wrote staged screenshots of combat, the birth cards, pause and death, and each
+  was inspected. Use `SHOT_DIR` for the output folder.
+- Headless measurements, with the bot scripts kept outside the repo, are
+  summarised in BATTLE.md. They bound behaviour; they are not feel.
+
+Not verified: physical Elite 2 feel for R3 and head-on bursts; whether a person
+can read the charge lane and shock ring at speed; whether catching is fun or
+fiddly at 24 µm; whether companions now make hunters trivial in the late game
+(measured about 75% fewer landed strikes on a passive player); and whether
+evolution cards change how later worlds feel. A real play report is the next
+input. The new `battle:` and `evolution:` report lines exist to answer these.
+
+Git: at the user's request, this session's work and the uncommitted 2026-09-21
+work were committed together as one commit on the branch `battle-pass`. They
+are interleaved in the same files and were not split. `main` was not moved and
+nothing was pushed. Check with `git log --oneline main..battle-pass`.
+
+---
+
+# The 2026-09-21 handoff, as it was
+
+## User intent and preferences
+
+The user usually plays SONIC DRIFTER with an **Xbox Elite Series 2**. Their
+problem is loss of interest in later levels. They asked for visual improvement,
+useful limbs, more enemy/boss/player variety, bosses that can be tamed and used,
+and more activities such as building mitochondria.
+
+The important outcome is a richer set of meaningful things to do. An increased
+feature count alone does not establish that outcome. Prefer play evidence when
+choosing the next improvement. The user welcomes creative implementation and
+mid-session steering; they do not need to specify every technical detail.
+
+They explicitly authorized committing, pushing and integrating this session's
+work. That authorization concerns this release, not unspecified future work.
+
+## Where the work stands
+
+A first playable “living worlds” pass is implemented. Read
+`docs/LIVING_WORLDS.md` for precise mechanics and controls and
+`SESSION-2026-09-21.md` for decisions, unresolved assumptions and the retrospective.
+
+- Mitochondria: hold X for 0.85 s beside an owned structure. The selected cell
+  and next rack cell are consumed; the preview shows the cost. Storage is 60,
+  charge rate 3/s, supply rate at most 14/s across nearby organelles, reach
+  85 microns. The host no longer fires automatically. Losing/lifting the host
+  loses its organelle; retained hosts keep their organelles across worlds.
+- Taming: boss health at or below 30%, within 120 microns, hold Y for 3 s.
+  Releasing, leaving range, healing above the threshold or taking damage
+  interrupts progress. The damage grace period prevents immediately resuming.
+  Holding Y rests the player's weapons; enemies remain active. Bonding creates
+  the next world while keeping the sovereign alive as a companion.
+- Companions: Strider improves dash recovery; Warden intercepts a nearby bolt
+  and recharges; Weaver adds stamina recovery while not gripping. One active
+  companion, three forms, rank capped at three. Start pauses; B cycles the
+  active companion. This collection persists within the run, not after reload.
+- Limbs: polar tips support dash recovery; non-polar piezoelectric tips speed
+  bonding by 1.75x; anchor tips block bolts with a 2 s cooldown. Support respects
+  the limb's depth planes. No expanded farming aura was added.
+- Boss forms cycle Strider/Warden/Weaver by aeon. Feeding still controls group
+  symmetry and world inheritance. Ribbons unlock at aeon 3 and Sentinels at 4.
+- Creature silhouettes and the player's companion-dependent appearance are
+  procedural canvas drawings. Colours still communicate acoustic contrast.
+  HUD overlap and viewport fit were corrected; control prompts follow input.
+
+## Code map
+
+| Location | Responsibility |
+| --- | --- |
+| `game/ecology.ts` | Boss forms, companion collection, bonding predicates, limb roles/support |
+| `game/organelles.ts` | Host selection, construction cost, stored energy and transfer |
+| `game/run.ts` | Simulation integration, ceasefire, bonding transition, utility-host exclusions |
+| `game/beasts.ts`, `game/world.ts` | New hunters and later-world unlocks |
+| `app/pad.ts` | `placeDown` alongside the existing one-shot place intent |
+| `app/drifter.ts` | Tap/hold actions, visuals, HUD, controls, report fields |
+| `app/build-drifter.mjs` | Generates both standalone pages from source |
+| `test/ecology.test.ts`, `test/pad.test.ts` | Mechanics and input regression coverage |
+| `test/browser-upgrades.mjs` | Chromium CDP interaction checks and optional staged screenshot |
+| `test/fixtures/upgrade-inputs.js` | Simulated standard Xbox inputs driving the actual Game update |
+
+The `run.ts`/`ecology.ts` relationship includes a runtime import of latticePitch
+back into ecology. It currently works because that function is used after module
+initialization. Avoid new eager initialization across that boundary. Refactor
+shared geometry only if the next change warrants it.
+
+## Verification already performed
+
+- Baseline: 333 tests passed, about 507 s on this machine.
+- Upgraded full suite: 344 tests passed, zero failures, about 427 s.
+- Final small cost-selection/presentation refinements: focused ecology and pad
+  tests passed; both TypeScript configurations passed; both HTML variants rebuilt.
+- Chromium: 14 simulated-controller checks passed, including X tap/hold, exact
+  resource use, pause/resume, switching companions, live bonding and entering
+  the next world. No rendering exceptions were reported.
+- Screenshots were inspected and the HUD corrected. Screenshots use a staged
+  scene; do not describe them as a natural late-game playthrough.
+- A resource-cost mutation was deliberately introduced, rejected by the ecology
+  tests, restored, and followed by a passing focused run.
+
+The physical Elite 2 and late-game enjoyment are **not verified**. No claim of
+wireless/paddle compatibility beyond the existing standard mapping was made.
+
+Commands, from the repository root:
 
 ```sh
-journalctl -b -1 -u earlyoom --no-pager | tail -40   # memory, hour by hour, up to the freeze
-journalctl --list-boots                              # a boot with no shutdown = hard lockup
-journalctl -b -1 -n 50 -o short-precise              # what the last minutes looked like
+npm run typecheck
+node --import tsx --test test/ecology.test.ts test/pad.test.ts
+npm test
+node app/build-drifter.mjs --body
+git diff --check
 ```
 
-- **If the reports show memory climbing into the freeze** — it was memory. The
-  swap tier and `earlyoom` should already have prevented it; if it happened
-  anyway, the next lever is shrinking `/tmp` after all.
-- **If memory was flat** — memory is cleared and the i915 is the answer. The
-  next move is **booting the stable CachyOS kernel instead of the `-rc`**, which
-  is the cheapest way to isolate the biggest variable. Keep the rc installed,
-  just stop defaulting to it.
+The focused Node runner displayed file-level summaries in this environment;
+those two reported files are not a replacement count for the 344-test suite.
+For browser checks, start Chromium with a local remote debugging endpoint on
+port 9222, then run `node test/browser-upgrades.mjs --interactions`. CDP_URL can
+change the endpoint; `--scene` writes `/tmp/sonic-upgrades.png`. Stop the browser
+you launched when done. Temporary /tmp logs and screenshots are not durable
+session evidence; the tests and this record are committed.
 
----
+The sandbox blocked the tsx CLI's IPC socket, GitHub access, Chromium startup
+and its localhost debugger connection. Approved runs outside the sandbox worked.
+If this recurs, use the permission tool with the actual failure reason. Do not
+interpret a blocked connection as a game failure or repeatedly retry it unchanged.
 
-## Working on this machine
+## Best next session
 
-**`sudo` requires a password and there is no TTY in the Claude Code session**, so
-root work cannot be run directly. The pattern that works: write the script, then
-have the user run it with `pkexec`, which raises a graphical prompt through the
-KDE polkit agent that is always running.
+Unless the user chooses a different priority, evaluate the current build before
+adding another major system:
 
+1. Read this file and the short play guide. Inspect git status and the latest
+   commit; preserve unrelated user edits. Do not rerun the whole suite merely
+   to rediscover the documented baseline.
+2. Get a real play observation: aeon, approximate elapsed time, controller
+   connection, what became repetitive or confusing, and `drifter.report()`.
+   Ask only for missing facts that affect the next decision; continue independent
+   investigation while waiting. Current reports include companions and stored
+   organelle energy, but not detailed bond-failure reasons or energy throughput.
+3. Investigate the biggest observed problem. Good first measurements are bond
+   successes/interruptions, useful limb activations, energy drawn per organelle,
+   and meaningful choices after all companion forms have been collected.
+4. Exercise one full loop: gather → build host → grow mitochondrion → explore
+   → return for stamina → weaken boss → tame → select companion → enter world.
+   Verify failure cases as well as success. Preserve the option to kill a boss.
+5. Adjust the smallest supported cause, check the relevant mechanics and browser
+   flow, rebuild both HTML variants, and state what remains a playtest hypothesis.
+
+Still open: whether the two-cell cost is worth it; whether energy stations
+encourage camping; whether the three-second bond survives late volleys; whether
+high-damage builds skip the taming window; whether anchor guards arrive too late;
+and whether the repeating three-form cycle becomes stale after rank caps.
+These are questions, not confirmed defects. Do not retune them all on a hunch.
+
+## Working rules that matter
+
+- The user-requested gameplay adaptations belong in game/, not the instrument
+  in src/. Never connect game/ to personal/ or config/.
+- Keep movement field-driven. Damage must remain telegraphed. Volley directions
+  shown during the warning must match those actually fired.
+- Respect controller context. Use GLYPH rather than hardcoded keyboard prompts.
+  Tap/hold release behavior must not place an extra cell or feed accidentally.
+- Organelle hosts are utility structures: exclude them from automatic discharge,
+  available-gun estimates and targeting prompts. Preserve depth and host lifetime.
+- Keep late-world population/render loops culled and spatially indexed. Current
+  support tests prove behavior, not a frame-time budget for hundreds of cells.
+- Act runs before simulation events are drained. Do not write an action toast
+  that the same frame's event handler will overwrite; durable feedback belongs
+  in the event handler.
+- The published page must come from the TypeScript source. Regenerate both
+  `app/sonic-drifter.html` and `app/sonic-drifter.body.html` with `--body`.
+- Search within the repo first. Avoid `find ..` through the user's home folder.
+  Use meaningful wait intervals for long tests and do independent work meanwhile.
+- Prefer a small, complete playable increment with an early screenshot and
+  real input check. Tests passing does not prove the new activity is interesting.
+
+## Git and publication context
+
+At the start of release preparation, the active branch was main and both local
+HEAD and the remote default branch were `f0d8f5a`. GitHub repository
+`9x25dillon/NEW_REPOSITORY_30` was verified private. This session's changes were
+already on main, so no separate feature-branch merge was required. Do not merge
+`the-body-in-the-water` merely because that historical local branch exists.
+
+This handoff is included in the release commit. Confirm the actual current
+commit and remote relationship rather than relying on an embedded hash:
+
+```sh
+git status --short --branch
+git log -2 --oneline
+git rev-parse HEAD
+git ls-remote origin refs/heads/main
 ```
-! pkexec /usr/bin/bash /path/to/script.sh
-```
 
-Write those scripts **idempotent, with a backup and a validation step that rolls
-back on failure**, because each one costs the user a password prompt and re-runs
-are likely. For `fstab` specifically, validate with `findmnt --verify` before
-`systemctl daemon-reload`.
-
----
-
-## First things to do next session
-
-1. **Read `HANDOFF.md` first**, not this file. Especially the 23 rules and
-   *What is still open*.
-2. `npm test` — expect **306** passing. Correct the `305` in `HANDOFF.md`.
-3. Check whether the machine stayed up: `journalctl --list-boots`. A boot with
-   no shutdown sequence is another lockup, and the `earlyoom` reports above are
-   the first thing to read if so.
-4. The game's open questions are all in `HANDOFF.md`. The largest one left is
-   the one today did *not* close: **an arm must not be paid in farming, and
-   nothing else has been proposed to pay it.** `Cell.ability` is still dropped
-   by `structureFrom`, `Cell.blurb` is still shown nowhere, and `aura()` is
-   still dead code whose comment disagrees with its body.
-
----
-
-## Gotchas
-
-- **This file's name collides with `HANDOFF.md`** in the same directory, and
-  they differ only by case and an underscore. That is a real hazard for both
-  people and tools. Renaming this to `SESSION-2026-09-05.md` would fix it.
-- This file is **untracked**. Decide whether it belongs in the repo — much of it
-  is about the machine, not the project — or in `.gitignore`.
-- `python3 -m http.server` on `app/` must be served **with no-store headers**. A
-  plain `http.server` once cost a whole play session debugging code that had
-  already been fixed.
+The user's final request was to commit/push/integrate, produce the session
+review, and replace Hand_off.md with useful instructions for the next session.

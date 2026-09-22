@@ -18,7 +18,7 @@
 
 import { type Particle } from "../src/gorkov.js";
 
-export type Behaviour = "hunt" | "drift" | "split";
+export type Behaviour = "hunt" | "drift" | "split" | "orbit" | "ambush";
 
 export interface Beast {
   id: string;
@@ -62,6 +62,16 @@ const FAINT = { rho: 1050, c: 1520 };
  * walk through your idle field and they do not walk through your grip.
  */
 export const BEASTS: Readonly<Record<string, Beast>> = {
+  ribbon: {
+    id: "ribbon", label: "RIBBON", particle: { radius: 4.5e-6, ...LIPID },
+    hold: 1.1, speed: 6e-5, behaviour: "orbit", damage: 1, drain: 0, score: 5,
+    wind: 0.65, strike: 0.28, surge: 6,
+  },
+  sentinel: {
+    id: "sentinel", label: "SENTINEL", particle: { radius: 10e-6, ...FLESH },
+    hold: 1.8, speed: 4e-5, behaviour: "ambush", damage: 1, drain: 0, score: 6,
+    wind: 0.85, strike: 0.45, surge: 7,
+  },
   vesicle: {
     id: "vesicle", label: "VESICLE", particle: { radius: 5.5e-6, ...LIPID },
     hold: 1.05, speed: 5.0e-5, behaviour: "hunt", damage: 1, drain: 0, score: 2,

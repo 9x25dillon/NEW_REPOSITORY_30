@@ -1,5 +1,25 @@
 # Handoff
 
+**2026-09-22 battle pass:** see [Battle pass](docs/BATTLE.md). `game/combat.ts`
+owns the riposte (burst into a volley arm to throw it back) and each king
+form's telegraphed gambit (charge, shock, echo) from the second world on.
+`game/allies.ts` makes the active companion a body that holds hunters, plus
+its R3 call. `game/evolution.ts` deals three trait cards at every birth.
+Mitochondria now mend integrity in a lull. The numbers were set from headless
+measurements against the aeon-6 report's king, recorded in that file. None of
+this touches `src/`.
+
+**2026-09-21 gameplay extension:** see [Living worlds](docs/LIVING_WORLDS.md)
+for the user's requested mitochondria, useful limb tips, visual variety and
+tameable bosses. `game/ecology.ts` owns companion/limb support and
+`game/organelles.ts` owns energy reserves. Boss death is now one route forward;
+bonding with a weakened living boss is the other. Mitochondrion hosts become
+utility structures and are excluded from automatic discharge and gun estimates.
+The farming aura rejected below has not been reintroduced. X places on release
+so holding it can grow an organelle; Y in combat offers a bond. These additions
+supersede the older statements below that limbs have no reward and every
+sovereign must die. Gameplay adaptations stay out of the instrument library.
+
 Written at the end of the session of 2026-08-31, extended 2026-09-02, and
 extended again at the end of 2026-09-02 (the chip session), for whoever picks
 this up next.
@@ -67,7 +87,7 @@ DOM so `src/` cannot reach for a browser; `tsconfig.build.json` covers `app/`.
 | --- | --- |
 | `game/wave.ts` | the field: crossed standing waves, apodisation, stamina, and `advance()` — substepped integration sized by the **relaxation rate**, not by displacement |
 | `game/pilot.ts` | you: a 9 µm lipid particle. The stick is a trap *offset*, not a velocity. Grip is apodisation. The dash is the amplifier's peak rating |
-| `game/beasts.ts` | four bodies, told apart only by contrast factor |
+| `game/beasts.ts` | six creatures, with physical contrast and telegraphed hunting, circling and ambush behaviours |
 | `game/lattice.ts` | the 11 chiral cells, the recipes, `optionsFor()` |
 | `game/shape.ts` | what a point group looks like from above — firing arcs and king volleys, which stand on nothing and keep the full orbit |
 | `game/world.ts` | worlds, sovereigns, what is born from a body |

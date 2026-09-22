@@ -322,6 +322,8 @@ export function wildlifeFor(medium: Medium, aeon: number, mass: number): string[
   if (aeon >= 2 && rings.length > 0) out.push(rings[0]);
   if (aeon >= 3 && mass >= 10 && rings.length > 1) out.push(rings[1]);
 
+  if (aeon >= 3) out.push("ribbon");
+  if (aeon >= 4) out.push("sentinel");
   return [...new Set(out)];
 }
 

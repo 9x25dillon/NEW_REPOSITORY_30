@@ -400,6 +400,19 @@ amber to **blue**, not green, and the app says so.
 
 ## The game
 
+The [living-worlds playtest](docs/LIVING_WORLDS.md) adds buildable mitochondria,
+functional limb tips, three tameable boss forms and persistent companions within
+a run, plus new late-world hunters and creature silhouettes. On Xbox, tap X to
+build, hold X on a structure to grow a mitochondrion, and hold Y near a weakened
+boss to bond. Pause and press B to switch companions.
+
+The [battle pass](docs/BATTLE.md) makes the fight two-sided. Burst **A** into a
+volley arm to catch it and throw it back. From the second world, kings play a
+telegraphed signature move (a charge lane, a shock ring, or an echo volley) every
+seven seconds or so. Companions fight hunters in the water, and **R3** calls
+their special (rush, aegis, snare). Mitochondria mend integrity in a lull, and
+every king you end deals three evolution cards to choose from.
+
 `app/sonic-drifter.html` — one self-contained file, no build step to open it, no
 network. **You are a body in the water, and only the field moves you.**
 
@@ -420,10 +433,12 @@ under.
 | **A** | burst | the amplifier's peak rating against its continuous one. Twice the drive for 120 ms, and force goes as pressure squared, so four times the speed — about 200 µm, and every other body in the water lurches with you. |
 | **X** | build | a cell onto the ground. It never feeds the throne. |
 | **LB** | lift | take the building you are standing on back into your hand, as the cell it was. |
-| **Y** | tap to feed, **hold** to crown | the throne is at the centre of the arena, which is where you build — so an act you cannot undo does not share a button with one you make sixty times a run. |
+| **Y** | tap to feed, **hold** to crown | the throne is at the centre of the arena, which is where you build — so an act you cannot undo does not share a button with one you make sixty times a run. In a fight, hold near a weakened king to bond. |
+| **R3** | call your companion | a gameplay rule, not a device: rush, aegis or snare, on a cooldown. See [BATTLE.md](docs/BATTLE.md). |
+| **D-pad ←/→** | step the rack | back and forward; ↑/↓ still retune the channel. |
 | **START** | stop the world | and the pause screen carries the verbs, because that is the screen you open when you cannot remember what the game lets you do. |
 
-Keyboard plays the same game: WASD, space, K, E or 1–9, C, ESC. There is no
+Keyboard plays the same game: WASD, space, K, E or 1–9, C, R, Q, ESC. There is no
 restart key — beginning again lives on the screen you reach by dying, because a
 bare keypress once threw away a ten-minute run.
 
@@ -972,7 +987,10 @@ app/listen.html      the chord: a separate page, sharing no code with the bench
 game/wave.ts         the field: crossed standing waves, apodisation, stamina
 game/pilot.ts        you, as a body the field moves: steering, grip, the burst
 game/lattice.ts      the eleven cells a chiral world permits, and why not a twelfth
-game/beasts.ts       four bodies, told apart by contrast factor and nothing else
+game/beasts.ts       six creatures with physical contrast and telegraphed behaviours
+game/combat.ts       the riposte, thrown arms, and each king form's telegraphed gambit
+game/allies.ts       companions as bodies in the water, and their calls
+game/evolution.ts    the trait cards dealt at every birth
 game/shape.ts        what a point group looks like from directly above it
 game/world.ts        worlds, sovereigns, and what is born out of a body
 game/bound.ts        the other field, and the band gap that will not carry it

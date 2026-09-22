@@ -1,0 +1,18 @@
+"SONIC DRIFTER  1102s  aeon 6 (THE SIXFOLD WATER)  phase dead
+you: integrity 0/6 stamina 100 score 18444
+companions: none; bond 0.00s
+mitochondria: 22; stored energy 1298
+built 757 cells; 257 standing; rack [622 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 6 622 622 622 622 622 622 622 622 622 622 6 622 622 622 6 622 622 6 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 6 622 622 6 622 6 622 622 622 622 622 622 6 622 622 6 622 6 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 6 6 622 622]
+throne: fed [622 6 622 622 622 622 622 622 622 622 622 622 622 622 6 622 622 622 622 622] -> 622 awake 772/2310  (5 of 20 bought anything; 1740 hp of nothing)  at mid-channel, 71um from you
+bodies: 5 limbs 0 legs 0 largest 253 cells P222 fed 23 seated 222 grows 2 AUTONOMOUS  lattice 85um
+bound: 14.83 MHz  FREED  crystal a=83um fill=0.62  gap 80.6-104.8
+water: 450 standing of 848; delivered 848; arrivals 4.39/s; hunters allowed 5
+heat: 26.6C (ambient 25)  viscosity x0.96  everything moves x1.04  water c=1724
+chip: 12/12 in reach; flow on you 0um/s
+events: aiming=177 birth=5 coil=40 crown=6 crystal=757 dash=281 death=1 devour=8 discharge=53 fed=52 freed=6 hit=17 hit:volley=17 kill=8 merge=3330 organelle=46 place=511 refuse=17248 retune=9 sovereign-hit=53 spent=5 step=176 strike=29 tuned=13 volley=175 wearing=31
+pad: 045e-0b00-Microsoft X-Box One  | standard | AXES 0.00 0.16 -0.05 -0.01 | DOWN - | READ WHILE UNFOCUSED - THE AXES ABOVE ARE STALE
+diagnosis: 53 DISCHARGES IS NOT ENOUGH - IT NEEDS 7 MORE FROM WHERE YOU CAN STAND. AND IT HAS A SECOND BAR: YOUR HAND TAKES 2/S OFF IT"
+
+1
+
+drifter.report()

@@ -95,9 +95,7 @@
   <li><span class="dot small"></span><b>1.5&nbsp;&micro;m</b> below this, streaming wins</li>
 </ul>
 
-<p class="controls">
-  <kbd>HOLD</kbd> pull &nbsp; <kbd>SHIFT</kbd> push &nbsp; <kbd>R</kbd> restart &nbsp; <kbd>M</kbd> mute
-</p>
+<p class="controls" id="controls">Connect your controller or press Space to begin. Pause for controls.</p>
 
 <script>"use strict";
 (() => {
@@ -110,6 +108,34 @@
   var FLESH = { rho: 1100, c: 1570 };
   var FAINT = { rho: 1050, c: 1520 };
   var BEASTS = {
+    ribbon: {
+      id: "ribbon",
+      label: "RIBBON",
+      particle: { radius: 45e-7, ...LIPID },
+      hold: 1.1,
+      speed: 6e-5,
+      behaviour: "orbit",
+      damage: 1,
+      drain: 0,
+      score: 5,
+      wind: 0.65,
+      strike: 0.28,
+      surge: 6
+    },
+    sentinel: {
+      id: "sentinel",
+      label: "SENTINEL",
+      particle: { radius: 1e-5, ...FLESH },
+      hold: 1.8,
+      speed: 4e-5,
+      behaviour: "ambush",
+      damage: 1,
+      drain: 0,
+      score: 6,
+      wind: 0.85,
+      strike: 0.45,
+      surge: 7
+    },
     vesicle: {
       id: "vesicle",
       label: "VESICLE",
@@ -1168,9 +1194,9 @@
   function streamingSpeed(amplitudePa) {
     return STREAMING_COEFF * amplitudePa * amplitudePa;
   }
-  function grip(w, held, dt) {
+  function grip(w, held2, dt) {
     if (w.spent && w.stamina > STAMINA_MAX * 0.25) w.spent = false;
-    const want = held && !w.spent ? w.maxAmplitude : 0;
+    const want = held2 && !w.spent ? w.maxAmplitude : 0;
     if (w.amplitude < want) w.amplitude = Math.min(want, w.amplitude + GRIP_RISE * dt);
     else if (w.amplitude > want) w.amplitude = Math.max(want, w.amplitude - GRIP_FALL * dt);
     const f = w.amplitude / w.maxAmplitude;
@@ -1395,6 +1421,302 @@
     return body.cells.length >= AUTONOMY;
   }
 
+  // game/evolution.ts
+  var TRAITS = {
+    membrane: {
+      name: "MEMBRANE",
+      max: 3,
+      says: () => "+1 MAXIMUM INTEGRITY, AND ONE MENDED NOW"
+    },
+    reflex: {
+      name: "REFLEX",
+      max: 2,
+      says: () => "BURSTS CATCH ARMS 35% WIDER AND THROW THEM 40% HARDER"
+    },
+    cristae: {
+      name: "CRISTAE",
+      max: 2,
+      says: () => "MITOCHONDRIA HOLD AND RECHARGE 50% MORE; REPAIR COSTS 25% LESS"
+    },
+    capacitor: {
+      name: "CAPACITOR",
+      max: 2,
+      says: () => "BUILDINGS CHARGE 25% FASTER UNDER YOUR HAND"
+    },
+    empathy: {
+      name: "EMPATHY",
+      max: 2,
+      says: () => "A KING CAN BE BONDED 8% SOONER, AND THE BOND TAKES 0.5 S LESS"
+    },
+    pack: {
+      name: "PACK",
+      max: 2,
+      says: () => "YOUR COMPANION HOLDS 25% HARDER; ITS CALL RETURNS 25% SOONER"
+    },
+    chitin: {
+      name: "CHITIN",
+      max: 2,
+      says: () => "+0.6 S OF MERCY AFTER EVERY HIT"
+    },
+    phagocyte: {
+      name: "PHAGOCYTE",
+      max: 2,
+      says: (r) => `EVERY ${phagocyteEvery(r + 1)} HUNTERS KILLED MENDS ONE INTEGRITY`
+    },
+    surge: {
+      name: "SURGE",
+      max: 2,
+      says: () => "BURSTS COST 30% LESS STAMINA"
+    }
+  };
+  var TRAIT_ORDER = Object.keys(TRAITS);
+  var OFFER_SIZE = 3;
+  function newEvolution() {
+    return { ranks: {}, offer: [], kills: 0 };
+  }
+  function rankOf(run, t) {
+    return run.evolution.ranks[t] ?? 0;
+  }
+  function phagocyteEvery(rank) {
+    return rank <= 0 ? Infinity : rank === 1 ? 8 : 5;
+  }
+  function eligible(run) {
+    return TRAIT_ORDER.filter((t) => rankOf(run, t) < TRAITS[t].max && (t !== "pack" || run.bond.companions.length > 0));
+  }
+  function offerFor(run) {
+    const pool = eligible(run);
+    const draw = rng(run.world.aeon * 2654435761 + run.built * 40503 + run.nextId * 97 >>> 0);
+    const out = [];
+    while (out.length < OFFER_SIZE && pool.length > 0) {
+      out.push(pool.splice(Math.floor(draw() * pool.length), 1)[0]);
+    }
+    return out;
+  }
+  function evolve(run, t) {
+    if (!run.evolution.offer.includes(t)) return false;
+    if (rankOf(run, t) >= TRAITS[t].max) return false;
+    run.evolution.ranks[t] = rankOf(run, t) + 1;
+    run.evolution.offer = [];
+    if (t === "membrane") run.integrity = Math.min(maxIntegrity(run), run.integrity + 1);
+    run.events.push({ kind: "evolved", trait: t, rank: rankOf(run, t) });
+    return true;
+  }
+  function held(run) {
+    return TRAIT_ORDER.filter((t) => rankOf(run, t) > 0).map((t) => [t, rankOf(run, t)]);
+  }
+
+  // game/ecology.ts
+  var FORMS = ["strider", "warden", "weaver"];
+  var ADAPTATIONS = {
+    strider: { name: "STRIDER", gift: "FASTER DASH RECOVERY", speed: 1, boltSpeed: 1, cadence: 1 },
+    warden: { name: "WARDEN", gift: "BLOCKS A VOLLEY HIT", speed: 0.55, boltSpeed: 0.7, cadence: 1.25 },
+    weaver: { name: "WEAVER", gift: "RESTORES STAMINA AT REST", speed: 0.9, boltSpeed: 1.2, cadence: 0.9 }
+  };
+  function formFor(aeon) {
+    return FORMS[(Math.max(1, aeon) - 1) % FORMS.length];
+  }
+  function newBond() {
+    return {
+      progress: 0,
+      companions: [],
+      active: 0,
+      shieldReadyAt: 0,
+      limbReadyAt: /* @__PURE__ */ new Map(),
+      tamed: false,
+      ally: null,
+      readyAt: 0,
+      rushUntil: 0,
+      aegisUntil: 0
+    };
+  }
+  function companion(run) {
+    return run.bond.companions[run.bond.active];
+  }
+  function cycleCompanion(run) {
+    if (run.bond.companions.length) {
+      run.bond.active = (run.bond.active + 1) % run.bond.companions.length;
+      const a = run.bond.ally;
+      if (a && a.target >= 0) {
+        const t = run.entities.find((e) => e.id === a.target);
+        if (t) t.seized = 0;
+      }
+      run.bond.ally = null;
+    }
+  }
+  var TAME_HEALTH = 0.3;
+  var TAME_REACH = 12e-5;
+  var TAME_TIME = 3;
+  function tameHealth(run) {
+    return TAME_HEALTH + 0.08 * rankOf(run, "empathy");
+  }
+  function tameTime(run) {
+    return TAME_TIME - 0.5 * rankOf(run, "empathy");
+  }
+  function vulnerable(k, share = TAME_HEALTH) {
+    return k.awake && k.hp > 0 && k.hp <= k.maxHp * share;
+  }
+  function canBond(run) {
+    return run.phase === "reign" && vulnerable(run.throne, tameHealth(run)) && Math.hypot(run.you.x - run.throne.x, run.you.y - run.throne.y) <= TAME_REACH;
+  }
+  function recruit(run) {
+    const form = formFor(run.world.aeon);
+    const found = run.bond.companions.findIndex((c) => c.form === form);
+    if (found >= 0) {
+      const c = run.bond.companions[found];
+      c.rank = Math.min(3, c.rank + 1);
+      c.hm = run.throne.hm;
+      run.bond.active = found;
+    } else {
+      run.bond.companions.push({ form, hm: run.throne.hm, rank: 1 });
+      run.bond.active = run.bond.companions.length - 1;
+    }
+    run.bond.tamed = true;
+  }
+  var ROLES = /* @__PURE__ */ new Map();
+  function limbRole(limb) {
+    const hm = limb.cells[0].hm;
+    let role = ROLES.get(hm);
+    if (!role) {
+      const ability = cellFor(hm).ability;
+      role = ability === "anchor" ? "guard" : ability === "thrust" ? "sail" : "resonator";
+      ROLES.set(hm, role);
+    }
+    return role;
+  }
+  var SUPPORT_REACH = 9e-5;
+  var GUARD_REACH = 32e-6;
+  var GUARD_COOLDOWN = 2;
+  function activeLimbs(run) {
+    return run.bodies.flatMap((body) => limbsOf(body, latticePitch(run)));
+  }
+  function supported(run, role) {
+    return activeLimbs(run).some((l) => limbRole(l) === role && l.layers.includes(run.layer) && Math.hypot(l.cells[0].x - run.you.x, l.cells[0].y - run.you.y) <= SUPPORT_REACH);
+  }
+  function support(run, dt) {
+    const c = companion(run);
+    const sail = supported(run, "sail");
+    const recovery = (c?.form === "strider" ? 0.25 + c.rank * 0.1 : 0) + (sail ? 0.6 : 0);
+    run.you.dashCool = Math.max(0, run.you.dashCool - recovery * dt);
+    if (c?.form === "weaver" && run.you.grip < 0.1) {
+      run.wave.stamina = Math.min(100, run.wave.stamina + (2 + c.rank) * dt);
+    }
+    const guards = /* @__PURE__ */ new Map();
+    for (const l of activeLimbs(run)) {
+      if (limbRole(l) !== "guard" || !l.layers.includes(run.layer)) continue;
+      const tip = l.cells[0];
+      const key3 = `${Math.floor(tip.x / GUARD_REACH)},${Math.floor(tip.y / GUARD_REACH)}`;
+      const bucket = guards.get(key3);
+      if (bucket) bucket.push(l);
+      else guards.set(key3, [l]);
+    }
+    for (const b of run.bolts) {
+      if (b.life <= 0 || b.thrown) continue;
+      const gx = Math.floor(b.x / GUARD_REACH), gy = Math.floor(b.y / GUARD_REACH);
+      for (let ox = -1; ox <= 1 && b.life > 0; ox++) {
+        for (let oy = -1; oy <= 1 && b.life > 0; oy++) {
+          for (const l of guards.get(`${gx + ox},${gy + oy}`) ?? []) {
+            const tip = l.cells[0];
+            if ((run.bond.limbReadyAt.get(tip.id) ?? 0) > run.t) continue;
+            if (Math.hypot(b.x - tip.x, b.y - tip.y) > GUARD_REACH) continue;
+            b.life = 0;
+            run.bond.limbReadyAt.set(tip.id, run.t + GUARD_COOLDOWN);
+            run.events.push({ kind: "guard", x: tip.x, y: tip.y });
+            break;
+          }
+        }
+      }
+      if (b.life > 0 && c?.form === "warden" && run.t >= run.bond.shieldReadyAt && Math.hypot(b.x - run.you.x, b.y - run.you.y) < 28e-6) {
+        b.life = 0;
+        run.bond.shieldReadyAt = run.t + 8 - c.rank;
+        run.events.push({ kind: "guard", x: run.you.x, y: run.you.y });
+      }
+    }
+    run.bolts = run.bolts.filter((b) => b.life > 0);
+  }
+
+  // game/organelles.ts
+  var MITO_COST = 2;
+  var MITO_CAPACITY = 60;
+  var MITO_REACH = 85e-6;
+  var MITO_GROW_REACH = 46e-6;
+  var REPAIR_COST = 40;
+  var REPAIR_CALM = 3;
+  function mitoCapacity(run) {
+    return MITO_CAPACITY * (1 + 0.5 * rankOf(run, "cristae"));
+  }
+  function repairCost(run) {
+    return REPAIR_COST * (1 - 0.25 * rankOf(run, "cristae"));
+  }
+  function mending(run) {
+    return run.integrity < maxIntegrity(run) && run.wave.stamina >= 95 && run.t - run.fray.lastHit >= REPAIR_CALM;
+  }
+  function organelleHost(run) {
+    let host;
+    let distance = MITO_GROW_REACH;
+    for (const s of run.structures) {
+      if (s.layer !== run.layer) continue;
+      const r = Math.hypot(s.x - run.you.x, s.y - run.you.y);
+      if (r <= distance) {
+        host = s;
+        distance = r;
+      }
+    }
+    return host;
+  }
+  function growMitochondrion(run, selected = 0) {
+    if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
+    const host = organelleHost(run);
+    if (!host) return "need-host";
+    if (run.organelles.some((o) => o.hostId === host.id)) return "already-grown";
+    if (run.cells.length < MITO_COST) return "need-cells";
+    const first = Math.max(0, Math.min(run.cells.length - 1, selected));
+    const second = (first + 1) % run.cells.length;
+    for (const index of [first, second].sort((a, b) => b - a)) run.cells.splice(index, 1);
+    run.organelles.push({ hostId: host.id, energy: 0, supplying: false });
+    run.events.push({ kind: "organelle", x: host.x, y: host.y });
+    return "grown";
+  }
+  function metabolise(run, dt) {
+    const hosts = new Map(run.structures.map((s) => [s.id, s]));
+    run.organelles = run.organelles.filter((o) => hosts.has(o.hostId));
+    const capacity = mitoCapacity(run);
+    const recharge = 3 * (1 + 0.5 * rankOf(run, "cristae"));
+    const mend = mending(run);
+    let transfer = 14 * dt;
+    let spentOnRepair = false;
+    for (const o of run.organelles) {
+      const host = hosts.get(o.hostId);
+      o.supplying = false;
+      o.mending = false;
+      const near = host.serves.includes(run.layer) && Math.hypot(host.x - run.you.x, host.y - run.you.y) <= MITO_REACH;
+      if (near && run.wave.stamina < 95 && o.energy > 0 && transfer > 0) {
+        const amount = Math.min(o.energy, transfer, 100 - run.wave.stamina);
+        run.wave.stamina += amount;
+        o.energy -= amount;
+        transfer -= amount;
+        o.supplying = amount > 0;
+        if (run.wave.stamina > 25) run.wave.spent = false;
+      } else if (near && mend && o.energy > 0 && transfer > 0) {
+        const amount = Math.min(o.energy, transfer);
+        run.fray.repair += amount;
+        o.energy -= amount;
+        transfer -= amount;
+        o.mending = o.supplying = amount > 0;
+        spentOnRepair = true;
+      } else if (!near || run.wave.stamina >= 95) {
+        o.energy = Math.min(capacity, o.energy + recharge * dt);
+      }
+    }
+    const cost = repairCost(run);
+    if (spentOnRepair && run.fray.repair >= cost && run.integrity < maxIntegrity(run)) {
+      run.fray.repair -= cost;
+      run.integrity += 1;
+      run.fray.stats.repairs++;
+      run.events.push({ kind: "repair", x: run.you.x, y: run.you.y });
+    }
+    if (run.integrity >= maxIntegrity(run)) run.fray.repair = 0;
+  }
+
   // game/depth.ts
   var CHANNEL_HEIGHT = 2e-4;
   var MAX_MODE = 4;
@@ -1421,100 +1743,6 @@
   function modeFor(mass, aeon) {
     if (aeon <= 1) return 1;
     return Math.max(1, Math.min(MAX_MODE, 1 + Math.floor(mass / 14) + Math.floor(aeon / 3)));
-  }
-
-  // game/chip.ts
-  var EDGE_GAIN = 32;
-  var CAVITY_GAIN = EDGE_GAIN;
-  var CAVITY_DRAW = 0.35;
-  var EDGE_STANDOFF_FRAC = 0.2;
-  var EDGE_REACH = 72e-5;
-  var CAVITY_REACH = 46e-5;
-  var EDGE_TILT = Math.PI / 6;
-  var EDGE_STATIONS = [0.14, 0.26, 0.74, 0.86];
-  function features(channelW, channelH) {
-    const out = [];
-    const standoff = channelH * EDGE_STANDOFF_FRAC;
-    let id = 0;
-    for (const wall of [-1, 1]) {
-      const y = wall < 0 ? standoff : channelH - standoff;
-      const inward = wall < 0 ? 1 : -1;
-      const along = wall < 0 ? 1 : -1;
-      for (const f of EDGE_STATIONS) {
-        out.push({
-          id: id++,
-          kind: "edge",
-          x: channelW * f,
-          y,
-          reach: EDGE_REACH,
-          jx: along * Math.sin(EDGE_TILT),
-          jy: inward * Math.cos(EDGE_TILT),
-          spin: 0
-        });
-      }
-    }
-    const cav = [
-      [channelW * 0.5, 0, 1],
-      [channelW * 0.5, channelH, -1],
-      [0, channelH * 0.5, -1],
-      [channelW, channelH * 0.5, 1]
-    ];
-    for (const [x, y, spin] of cav) {
-      out.push({ id: id++, kind: "cavity", x, y, reach: CAVITY_REACH, jx: 0, jy: 0, spin });
-    }
-    return out;
-  }
-  function fade(r, reach) {
-    if (r >= reach) return 0;
-    const k = 1 - r / reach;
-    return k * k;
-  }
-  function lobe(cos) {
-    return cos <= 0 ? 0 : cos * cos * cos;
-  }
-  function ring(r, reach) {
-    if (r >= reach) return 0;
-    const u = r / reach;
-    return 4 * u * (1 - u);
-  }
-  function flowAt(fs, x, y, amplitudePa) {
-    const u = streamingSpeed(amplitudePa);
-    let vx = 0, vy = 0;
-    if (u <= 0) return { x: 0, y: 0 };
-    for (const f of fs) {
-      const dx = x - f.x, dy = y - f.y;
-      const r = Math.hypot(dx, dy);
-      if (r >= f.reach) continue;
-      if (f.kind === "edge") {
-        const cos = r < 1e-9 ? 1 : (dx * f.jx + dy * f.jy) / r;
-        const s = u * EDGE_GAIN * fade(r, f.reach) * lobe(cos);
-        vx += f.jx * s;
-        vy += f.jy * s;
-      } else {
-        if (r < 1e-9) continue;
-        const s = u * CAVITY_GAIN * ring(r, f.reach);
-        vx += -dy / r * s * f.spin;
-        vy += dx / r * s * f.spin;
-        vx += -dx / r * s * CAVITY_DRAW;
-        vy += -dy / r * s * CAVITY_DRAW;
-      }
-    }
-    return { x: vx, y: vy };
-  }
-  function nearestFeature(fs, x, y) {
-    let best = null;
-    let bestR = Infinity;
-    for (const f of fs) {
-      const r = Math.hypot(x - f.x, y - f.y);
-      if (r < f.reach && r < bestR) {
-        best = f;
-        bestR = r;
-      }
-    }
-    return best ? { feature: best, r: bestR } : null;
-  }
-  function featureName(f) {
-    return f.kind === "edge" ? "A SHARP EDGE" : "A BUBBLE CAVITY";
   }
 
   // game/pilot.ts
@@ -1711,6 +1939,8 @@
     if (aeon >= 2) out.push("mote");
     if (aeon >= 2 && rings.length > 0) out.push(rings[0]);
     if (aeon >= 3 && mass >= 10 && rings.length > 1) out.push(rings[1]);
+    if (aeon >= 3) out.push("ribbon");
+    if (aeon >= 4) out.push("sentinel");
     return [...new Set(out)];
   }
   function firstWorld() {
@@ -1824,6 +2054,508 @@
     };
   }
 
+  // game/combat.ts
+  function newFray() {
+    return {
+      beats: 0,
+      lastGambit: 0,
+      next: null,
+      lane: null,
+      charge: 0,
+      daze: 0,
+      rings: [],
+      echo: null,
+      snare: 0,
+      repair: 0,
+      lastHit: -Infinity,
+      burstCaught: false,
+      turned: -Infinity,
+      stats: { caught: 0, landed: 0, damage: 0, gambits: 0, held: 0, calls: 0, repairs: 0 }
+    };
+  }
+  function resetFray(run) {
+    const f = run.fray;
+    f.beats = 0;
+    f.lastGambit = run.t;
+    f.next = null;
+    f.lane = null;
+    f.charge = 0;
+    f.daze = 0;
+    f.rings = [];
+    f.echo = null;
+    f.snare = 0;
+  }
+  var RIPOSTE_REACH = 24e-6;
+  var RIPOSTE_GAIN = 1.6;
+  var RIPOSTE_LIFE = 2.2;
+  var RIPOSTE_REFUND = 8;
+  var RIPOSTE_INTO = 0.5;
+  var RIPOSTE_SHARE = 1 / 3;
+  function catchReach(run) {
+    const rush = run.t < run.bond.rushUntil ? 1.5 : 1;
+    return RIPOSTE_REACH * (1 + 0.35 * rankOf(run, "reflex")) * rush;
+  }
+  function riposteDamage(run) {
+    const k = run.throne;
+    const arms = Math.max(1, volley(k).length);
+    return Math.max(3, Math.round(RIPOSTE_SHARE * k.mass / arms * (1 + 0.4 * rankOf(run, "reflex"))));
+  }
+  function fighting(run) {
+    return run.phase === "reign" && run.throne.awake && run.throne.hp > 0;
+  }
+  function riposte(run, taming, dt = 0, from = run.you) {
+    const you = run.you;
+    const k = run.throne;
+    const f = run.fray;
+    const live = fighting(run);
+    if (you.iframe > 0 && !f.burstCaught && run.bolts.length > 0) {
+      const reach = catchReach(run);
+      for (const b of run.bolts) {
+        if (b.thrown || b.life <= 0) continue;
+        const ax = b.x - b.vx * dt - from.x, ay = b.y - b.vy * dt - from.y;
+        const bx = b.x - you.x, by = b.y - you.y;
+        if (closestApproach(ax, ay, bx, by) > reach) continue;
+        const speed0 = Math.hypot(b.vx, b.vy) || 1e-12;
+        if (-(you.dashX * b.vx + you.dashY * b.vy) / speed0 < RIPOSTE_INTO) continue;
+        f.stats.caught++;
+        f.burstCaught = true;
+        run.wave.stamina = Math.min(100, run.wave.stamina + RIPOSTE_REFUND);
+        if (run.wave.stamina > 25) run.wave.spent = false;
+        if (!live || taming) {
+          b.life = 0;
+          run.events.push({ kind: "riposte", x: b.x, y: b.y, thrown: false });
+          break;
+        }
+        const dx = k.x - you.x, dy = k.y - you.y;
+        const r = Math.hypot(dx, dy) || 1e-12;
+        const speed = Math.hypot(b.vx, b.vy) * RIPOSTE_GAIN || BOLT_SPEED * RIPOSTE_GAIN;
+        b.x = you.x;
+        b.y = you.y;
+        b.vx = dx / r * speed;
+        b.vy = dy / r * speed;
+        b.life = RIPOSTE_LIFE;
+        b.thrown = true;
+        b.born = run.t;
+        run.events.push({ kind: "riposte", x: you.x, y: you.y, thrown: true });
+        break;
+      }
+      run.bolts = run.bolts.filter((b) => b.life > 0);
+    }
+    let any = false;
+    for (const b of run.bolts) if (b.thrown && b.life > 0) {
+      any = true;
+      break;
+    }
+    if (!any) return;
+    const hitR = sovereignParticle(k).radius + 6e-6;
+    const gone = /* @__PURE__ */ new Set();
+    for (const b of run.bolts) {
+      if (!b.thrown || b.life <= 0) continue;
+      for (const e of [...run.entities]) {
+        if (e.faction !== "beast" || gone.has(e.id)) continue;
+        if (beast(e.species).behaviour === "drift" || !together(e.layer, run.layer)) continue;
+        if (Math.hypot(e.x - b.x, e.y - b.y) > 12e-6 + beast(e.species).particle.radius) continue;
+        gone.add(e.id);
+        kill(run, e);
+      }
+      if (!live || Math.hypot(b.x - k.x, b.y - k.y) > hitR) continue;
+      b.life = 0;
+      if (taming) continue;
+      const damage = Math.min(k.hp, riposteDamage(run));
+      k.hp = Math.max(0, k.hp - damage);
+      f.stats.landed++;
+      f.stats.damage += damage;
+      run.events.push({ kind: "riposte-hit", x: k.x, y: k.y, damage });
+      if (k.hp <= 0) {
+        birth(run);
+        break;
+      }
+    }
+    run.bolts = run.bolts.filter((b) => b.life > 0);
+  }
+  function closestApproach(ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const u = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    return Math.hypot(ax + dx * u, ay + dy * u);
+  }
+  var GAMBIT_FROM_AEON = 2;
+  var GAMBIT_GAP = 7;
+  var CHARGE_SPEED = 75e-5;
+  var CHARGE_TIME = 0.36;
+  var CHARGE_DAZE = 1.1;
+  var CHARGE_TOUCH = 12e-6;
+  var CHARGE_CORE = 36e-6;
+  var SHOCK_SPEED = 21e-5;
+  var SHOCK_REACH = 22e-5;
+  function chargeReach(k) {
+    return Math.min(sovereignParticle(k).radius, CHARGE_CORE) + CHARGE_TOUCH;
+  }
+  function shockReach(k) {
+    return sovereignParticle(k).radius + SHOCK_REACH;
+  }
+  var ECHO_DELAY = 0.42;
+  function gambitFor(run) {
+    const form = formFor(run.world.aeon);
+    return form === "strider" ? "charge" : form === "warden" ? "shock" : "echo";
+  }
+  function chargeLength() {
+    return CHARGE_SPEED * CHARGE_TIME;
+  }
+  function beginWind(run) {
+    const f = run.fray;
+    const k = run.throne;
+    f.beats++;
+    f.next = run.world.aeon >= GAMBIT_FROM_AEON && run.t - f.lastGambit >= GAMBIT_GAP ? gambitFor(run) : null;
+    if (f.next) f.lastGambit = run.t;
+    f.lane = null;
+    if (f.next === "charge") {
+      const dx = run.you.x - k.x, dy = run.you.y - k.y;
+      const r = Math.hypot(dx, dy) || 1e-12;
+      f.lane = { dx: dx / r, dy: dy / r };
+    }
+    if (f.next) {
+      f.stats.gambits++;
+      run.events.push({ kind: "gambit", x: k.x, y: k.y, gambit: f.next });
+    }
+    return f.next;
+  }
+  function unleash(run, boltSpeed) {
+    const f = run.fray;
+    const k = run.throne;
+    const kind = f.next;
+    f.next = null;
+    if (kind === "charge" && f.lane) {
+      f.charge = CHARGE_TIME;
+      run.events.push({ kind: "charge", x: k.x, y: k.y });
+      return true;
+    }
+    if (kind === "shock") {
+      const r0 = sovereignParticle(k).radius;
+      f.rings.push({ x: k.x, y: k.y, r: r0, prev: r0, max: shockReach(k) });
+      run.events.push({ kind: "shock", x: k.x, y: k.y });
+      return true;
+    }
+    if (kind === "echo") f.echo = { at: run.t + ECHO_DELAY, arms: echoArms(run), speed: boltSpeed };
+    return false;
+  }
+  function echoArms(run) {
+    const arms = volley(run.throne);
+    if (arms.length === 0) return [];
+    const turn = Math.PI / arms.length;
+    const c = Math.cos(turn), s = Math.sin(turn);
+    return arms.map(([x, y]) => [x * c - y * s, x * s + y * c]);
+  }
+  function charging(run) {
+    return run.fray.charge > 0;
+  }
+  function sovereignDrive(run) {
+    const f = run.fray;
+    if (f.snare > 0) return { x: 0, y: 0 };
+    if (f.charge > 0 && f.lane) return { x: f.lane.dx * CHARGE_SPEED, y: f.lane.dy * CHARGE_SPEED };
+    if (f.daze > 0) return { x: 0, y: 0 };
+    return null;
+  }
+  function frayStep(run, dt) {
+    const f = run.fray;
+    const k = run.throne;
+    if (f.snare > 0) f.snare = Math.max(0, f.snare - dt);
+    if (f.charge > 0) {
+      f.charge = Math.max(0, f.charge - dt);
+      if (f.charge === 0) {
+        f.daze = CHARGE_DAZE;
+        f.lane = null;
+      }
+    } else if (f.daze > 0) f.daze = Math.max(0, f.daze - dt);
+    for (const ring2 of f.rings) {
+      ring2.prev = ring2.r;
+      ring2.r += SHOCK_SPEED * dt;
+    }
+    f.rings = f.rings.filter((ring2) => ring2.prev < ring2.max);
+    if (f.echo && run.t >= f.echo.at) {
+      for (const [dx, dy] of f.echo.arms) {
+        const bolt = {
+          x: k.x,
+          y: k.y,
+          vx: dx * f.echo.speed,
+          vy: dy * f.echo.speed,
+          life: BOLT_LIFE,
+          born: run.t
+        };
+        run.bolts.push(bolt);
+      }
+      run.events.push({ kind: "volley", x: k.x, y: k.y, arms: f.echo.arms.length });
+      f.echo = null;
+    }
+  }
+  function gambitContact(run) {
+    const f = run.fray;
+    const k = run.throne;
+    const you = run.you;
+    if (f.charge > 0) {
+      if (Math.hypot(you.x - k.x, you.y - k.y) < chargeReach(k)) return "charge";
+    }
+    for (const ring2 of f.rings) {
+      const d = Math.hypot(you.x - ring2.x, you.y - ring2.y);
+      if (d > ring2.prev && d <= Math.min(ring2.r, ring2.max)) return "shock";
+    }
+    return null;
+  }
+
+  // game/allies.ts
+  var ALLY_SCAN = {
+    strider: 17e-5,
+    warden: 95e-6,
+    weaver: 14e-5
+  };
+  var ALLY_LEASH = 24e-5;
+  var ALLY_GRAB = 16e-6;
+  var ALLY_DART = 11e-4;
+  var BASE_RATE = { strider: 1.1, warden: 0.9, weaver: 0.6 };
+  var BASE_COOL = { strider: 2.2, warden: 2.6, weaver: 1.2 };
+  function holdRate(run, form, rank) {
+    return (BASE_RATE[form] + 0.4 * rank) * (1 + 0.25 * rankOf(run, "pack"));
+  }
+  function allyCooldown(run, form, rank) {
+    return Math.max(0.4, BASE_COOL[form] - 0.3 * rank) * (1 - 0.25 * rankOf(run, "pack"));
+  }
+  function hunter(run, e) {
+    return e.faction === "beast" && beast(e.species).behaviour !== "drift" && together(e.layer, run.layer);
+  }
+  function pick(run, form) {
+    const you = run.you;
+    const scan = ALLY_SCAN[form];
+    let best = null;
+    let bestScore = Infinity;
+    for (const e of run.entities) {
+      if (!hunter(run, e)) continue;
+      const r = Math.hypot(e.x - you.x, e.y - you.y);
+      if (r > scan) continue;
+      const score = form === "warden" && (e.wind > 0 || e.strike > 0) ? r - 1 : r;
+      if (score < bestScore) {
+        bestScore = score;
+        best = e;
+      }
+    }
+    return best;
+  }
+  function letGo(run, a) {
+    const t = run.entities.find((e) => e.id === a.target);
+    if (t) t.seized = 0;
+    a.target = -1;
+    a.holding = false;
+  }
+  function allies(run, dt) {
+    const c = companion(run);
+    const bond = run.bond;
+    if (!c) {
+      bond.ally = null;
+      return;
+    }
+    const you = run.you;
+    const a = bond.ally ?? (bond.ally = { x: you.x + 3e-5, y: you.y, target: -1, cool: 0.5, holding: false });
+    a.cool = Math.max(0, a.cool - dt);
+    let t = a.target >= 0 ? run.entities.find((e) => e.id === a.target) ?? null : null;
+    if (t && (!hunter(run, t) || Math.hypot(t.x - you.x, t.y - you.y) > ALLY_LEASH)) {
+      letGo(run, a);
+      t = null;
+    }
+    if (!t && a.target >= 0) {
+      a.target = -1;
+      a.holding = false;
+    }
+    if (!t && a.cool <= 0) {
+      t = pick(run, c.form);
+      if (t) {
+        a.target = t.id;
+        a.holding = false;
+      }
+    }
+    if (t) {
+      if (c.form === "weaver") {
+        follow(run, a, dt);
+        a.holding = Math.hypot(t.x - you.x, t.y - you.y) <= ALLY_SCAN.weaver;
+      } else {
+        const dx = t.x - a.x, dy = t.y - a.y;
+        const r = Math.hypot(dx, dy);
+        if (r > ALLY_GRAB) {
+          const stepLen = Math.min(r, ALLY_DART * dt);
+          a.x += dx / (r || 1e-12) * stepLen;
+          a.y += dy / (r || 1e-12) * stepLen;
+        }
+        a.holding = Math.hypot(t.x - a.x, t.y - a.y) <= ALLY_GRAB;
+        if (a.holding) {
+          a.x = t.x;
+          a.y = t.y;
+        }
+      }
+      if (a.holding) {
+        t.seized = (t.seized ?? 0) + holdRate(run, c.form, c.rank) * dt;
+        t.wind = 0;
+        t.strike = 0;
+        if (t.seized >= beast(t.species).hold) {
+          run.fray.stats.held++;
+          run.events.push({ kind: "ally", x: t.x, y: t.y, species: t.species, form: c.form });
+          kill(run, t);
+          a.target = -1;
+          a.holding = false;
+          a.cool = allyCooldown(run, c.form, c.rank);
+        }
+      }
+    } else {
+      follow(run, a, dt);
+    }
+  }
+  function follow(run, a, dt) {
+    const ang = run.t * 0.5;
+    const tx = run.you.x + Math.cos(ang) * 34e-6;
+    const ty = run.you.y + Math.sin(ang) * 26e-6;
+    const k = Math.min(1, dt * 5);
+    a.x += (tx - a.x) * k;
+    a.y += (ty - a.y) * k;
+  }
+  var CALL_COOLDOWN = 22;
+  var RUSH_TIME = 4;
+  var AEGIS_TIME = 1.5;
+  var AEGIS_REACH = 17e-5;
+  var SNARE_TIME = 2.5;
+  var CALLS = {
+    strider: { name: "RUSH", says: "FREE BURSTS, AND EVERY CATCH REACHES FURTHER" },
+    warden: { name: "AEGIS", says: "CLEARS THE ARMS AROUND YOU AND TURNS THE NEXT HITS" },
+    weaver: { name: "SNARE", says: "HOLDS THE KING STILL: NO DRAG, NO SPIN, NO VOLLEYS" }
+  };
+  function callCooldown(run, rank) {
+    return (CALL_COOLDOWN - 3 * rank) * (1 - 0.25 * rankOf(run, "pack"));
+  }
+  function callWait(run) {
+    return Math.max(0, run.bond.readyAt - run.t);
+  }
+  function callAlly(run) {
+    if (run.phase !== "settle" && run.phase !== "reign") return "wrong-phase";
+    const c = companion(run);
+    if (!c) return "no-companion";
+    if (run.t < run.bond.readyAt) return "cooling";
+    const k = run.throne;
+    if (c.form === "weaver") {
+      if (run.phase !== "reign" || !k.awake || k.hp <= 0) return "no-king";
+      run.fray.snare = SNARE_TIME + 0.5 * c.rank;
+      run.fray.charge = 0;
+      run.fray.lane = null;
+    } else if (c.form === "warden") {
+      const you = run.you;
+      run.bolts = run.bolts.filter((b) => b.thrown || Math.hypot(b.x - you.x, b.y - you.y) > AEGIS_REACH);
+      run.fray.rings = [];
+      run.bond.aegisUntil = run.t + AEGIS_TIME + 0.25 * c.rank;
+    } else {
+      run.bond.rushUntil = run.t + RUSH_TIME + 0.5 * c.rank;
+      run.you.dashCool = 0;
+    }
+    run.bond.readyAt = run.t + callCooldown(run, c.rank);
+    run.fray.stats.calls++;
+    run.events.push({ kind: "call", form: c.form, x: run.you.x, y: run.you.y });
+    return "called";
+  }
+  function rushing(run) {
+    return run.t < run.bond.rushUntil;
+  }
+  function shielded(run) {
+    return run.t < run.bond.aegisUntil;
+  }
+
+  // game/chip.ts
+  var EDGE_GAIN = 32;
+  var CAVITY_GAIN = EDGE_GAIN;
+  var CAVITY_DRAW = 0.35;
+  var EDGE_STANDOFF_FRAC = 0.2;
+  var EDGE_REACH = 72e-5;
+  var CAVITY_REACH = 46e-5;
+  var EDGE_TILT = Math.PI / 6;
+  var EDGE_STATIONS = [0.14, 0.26, 0.74, 0.86];
+  function features(channelW, channelH) {
+    const out = [];
+    const standoff = channelH * EDGE_STANDOFF_FRAC;
+    let id = 0;
+    for (const wall of [-1, 1]) {
+      const y = wall < 0 ? standoff : channelH - standoff;
+      const inward = wall < 0 ? 1 : -1;
+      const along = wall < 0 ? 1 : -1;
+      for (const f of EDGE_STATIONS) {
+        out.push({
+          id: id++,
+          kind: "edge",
+          x: channelW * f,
+          y,
+          reach: EDGE_REACH,
+          jx: along * Math.sin(EDGE_TILT),
+          jy: inward * Math.cos(EDGE_TILT),
+          spin: 0
+        });
+      }
+    }
+    const cav = [
+      [channelW * 0.5, 0, 1],
+      [channelW * 0.5, channelH, -1],
+      [0, channelH * 0.5, -1],
+      [channelW, channelH * 0.5, 1]
+    ];
+    for (const [x, y, spin] of cav) {
+      out.push({ id: id++, kind: "cavity", x, y, reach: CAVITY_REACH, jx: 0, jy: 0, spin });
+    }
+    return out;
+  }
+  function fade(r, reach) {
+    if (r >= reach) return 0;
+    const k = 1 - r / reach;
+    return k * k;
+  }
+  function lobe(cos) {
+    return cos <= 0 ? 0 : cos * cos * cos;
+  }
+  function ring(r, reach) {
+    if (r >= reach) return 0;
+    const u = r / reach;
+    return 4 * u * (1 - u);
+  }
+  function flowAt(fs, x, y, amplitudePa) {
+    const u = streamingSpeed(amplitudePa);
+    let vx = 0, vy = 0;
+    if (u <= 0) return { x: 0, y: 0 };
+    for (const f of fs) {
+      const dx = x - f.x, dy = y - f.y;
+      const r = Math.hypot(dx, dy);
+      if (r >= f.reach) continue;
+      if (f.kind === "edge") {
+        const cos = r < 1e-9 ? 1 : (dx * f.jx + dy * f.jy) / r;
+        const s = u * EDGE_GAIN * fade(r, f.reach) * lobe(cos);
+        vx += f.jx * s;
+        vy += f.jy * s;
+      } else {
+        if (r < 1e-9) continue;
+        const s = u * CAVITY_GAIN * ring(r, f.reach);
+        vx += -dy / r * s * f.spin;
+        vy += dx / r * s * f.spin;
+        vx += -dx / r * s * CAVITY_DRAW;
+        vy += -dy / r * s * CAVITY_DRAW;
+      }
+    }
+    return { x: vx, y: vy };
+  }
+  function nearestFeature(fs, x, y) {
+    let best = null;
+    let bestR = Infinity;
+    for (const f of fs) {
+      const r = Math.hypot(x - f.x, y - f.y);
+      if (r < f.reach && r < bestR) {
+        best = f;
+        bestR = r;
+      }
+    }
+    return best ? { feature: best, r: bestR } : null;
+  }
+  function featureName(f) {
+    return f.kind === "edge" ? "A SHARP EDGE" : "A BUBBLE CAVITY";
+  }
+
   // game/streams.ts
   var STREAMS = 3;
   var STREAM_RHO = 60;
@@ -1907,6 +2639,9 @@
   var BIND_RADIUS = 24e-6;
   var BIND_DWELL = 0.26;
   var MAX_INTEGRITY = 6;
+  function maxIntegrity(run) {
+    return MAX_INTEGRITY + rankOf(run, "membrane");
+  }
   var IFRAME = 1.8;
   var KNOCKBACK = 15e-5;
   var DRIVE_RADIUS = 34e-6;
@@ -1914,6 +2649,10 @@
   function startRun(seed = 1, ebb = false) {
     const world = firstWorld();
     const run = {
+      bond: newBond(),
+      organelles: [],
+      fray: newFray(),
+      evolution: newEvolution(),
       world,
       wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
       you: newPilot(START.x + ARENA_W * 0.3, START.y + ARENA_H * 0.3),
@@ -2039,6 +2778,7 @@
     return Math.max(1.3, base - run.world.aeon * 0.3);
   }
   function step2(run, input, dt) {
+    if (!Number.isFinite(dt) || dt <= 0) return;
     run.t += dt;
     const w = run.wave;
     const you = run.you;
@@ -2049,6 +2789,9 @@
     grip(w, input.grip && alive, dt);
     if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
     if (alive && input.dash && beginDash(you, w, input.move.x, input.move.y)) {
+      const refund = rushing(run) ? DASH_COST : DASH_COST * 0.3 * rankOf(run, "surge");
+      if (refund > 0) w.stamina = Math.min(100, w.stamina + refund);
+      run.fray.burstCaught = false;
       run.events.push({ kind: "dash", x: you.x, y: you.y });
     }
     concentrate(you, w, input.grip && alive && !w.spent, dt);
@@ -2057,6 +2800,7 @@
     run.aim.y = trap.y;
     const cur = currentAt(run, you.x, you.y);
     const glass = chipFlow(run, you.x, you.y);
+    const from = { x: you.x, y: you.y };
     carry(you, w, dt, run.bounds, { x: cur.x + glass.x, y: cur.y + glass.y });
     if (run.iframe > 0) run.iframe -= dt;
     if (!alive) {
@@ -2091,9 +2835,17 @@
     mergePass(run, dt);
     washOut(run, dt);
     crystallise(run);
-    driveStructures(run, dt);
-    if (run.phase === "reign") reign(run, dt);
+    if (!input.tame) driveStructures(run, dt);
+    if (run.phase === "reign") reign(run, dt, !!input.tame);
+    if (run.phase !== "reign" && run.phase !== "settle") return;
+    support(run, dt);
+    allies(run, dt);
+    metabolise(run, dt);
+    riposte(run, !!input.tame, dt, from);
+    if (run.phase !== "reign" && run.phase !== "settle") return;
     contact(run, dt);
+    if (input.tame) bondWithSovereign(run, dt);
+    else run.bond.progress = 0;
   }
   function release(run, dt) {
     const b = run.bound;
@@ -2103,7 +2855,7 @@
       if (b.held >= RELEASE_TIME) {
         b.free = true;
         run.score += 80;
-        run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 1);
+        run.integrity = Math.min(maxIntegrity(run), run.integrity + 1);
         run.events.push({ kind: "freed", x: b.x, y: b.y });
       }
     } else if (b.held > 0) {
@@ -2184,7 +2936,7 @@
   function hunt(run, e, dt) {
     const b = beast(e.species);
     if (b.behaviour === "drift") return { x: 0, y: 0 };
-    if (e.held > 0) {
+    if (e.held > 0 || (e.seized ?? 0) > 0) {
       e.wind = 0;
       e.strike = 0;
       return { x: 0, y: 0 };
@@ -2212,6 +2964,15 @@
       run.events.push({ kind: "coil", x: e.x, y: e.y, species: e.species });
       return { x: 0, y: 0 };
     }
+    if (b.behaviour === "orbit") {
+      const turn = e.id % 2 ? 1 : -1;
+      const inward = r > STRIKE_RANGE * 0.9 ? 0.8 : 0.25;
+      return {
+        x: (hx * inward - hy * turn) / r * b.speed,
+        y: (hy * inward + hx * turn) / r * b.speed
+      };
+    }
+    if (b.behaviour === "ambush" && r > STRIKE_RANGE * 1.6) return { x: 0, y: 0 };
     return { x: hx / r * b.speed, y: hy / r * b.speed };
   }
   function capturedAt(w, x, y, p) {
@@ -2245,6 +3006,17 @@
     run.wave.stamina = Math.min(100, run.wave.stamina + KILL_REFUND);
     if (run.wave.stamina > 25) run.wave.spent = false;
     run.events.push({ kind: "kill", x: e.x, y: e.y, species: e.species, score: b.score });
+    const every = phagocyteEvery(rankOf(run, "phagocyte"));
+    if (Number.isFinite(every) && b.behaviour !== "drift") {
+      run.evolution.kills++;
+      if (run.evolution.kills >= every) {
+        run.evolution.kills = 0;
+        if (run.integrity < maxIntegrity(run)) {
+          run.integrity++;
+          run.events.push({ kind: "mended", x: e.x, y: e.y });
+        }
+      }
+    }
     if (b.behaviour === "split") {
       for (let i = 0; i < 2; i++) {
         run.entities.push(newBeast(run, "mote", {
@@ -2451,6 +3223,9 @@
     return run.spacing ? (run.spacing.lo + run.spacing.hi) / 2 : run.world.pitch * 1.3;
   }
   function reshape(run) {
+    const liveIds = new Set(run.structures.map((s) => s.id));
+    for (const id of run.bond.limbReadyAt.keys()) if (!liveIds.has(id)) run.bond.limbReadyAt.delete(id);
+    run.organelles = run.organelles.filter((o) => liveIds.has(o.hostId));
     const pitch = latticePitch(run);
     run.bodies = bodiesOf(run.structures, pitch);
     run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
@@ -2569,8 +3344,9 @@
   }
   function dischargesToKill(run) {
     let best = 0;
+    const organelleIds = new Set(run.organelles.map((o) => o.hostId));
     const hms = [
-      ...run.structures.map((s) => s.hm),
+      ...run.structures.filter((s) => !organelleIds.has(s.id)).map((s) => s.hm),
       ...run.cells.map((c) => c.group.hm)
     ];
     for (const hm of hms) {
@@ -2629,6 +3405,7 @@
     run.throne.awake = true;
     run.phase = "reign";
     run.spawnIn = 2;
+    resetFray(run);
     run.events.push({ kind: "crown", group: run.throne.hm, mass: run.throne.mass });
     return "crowned";
   }
@@ -2643,17 +3420,23 @@
     }
     const driving = handed(run.you);
     const spent = [];
+    const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+    const quicker = 1 - 0.25 * rankOf(run, "capacitor");
     const k = run.throne;
     const hunting = k.awake && k.hp > 0;
     for (const s of run.structures) {
+      if (organelleIds.has(s.id)) {
+        s.charge = 0;
+        continue;
+      }
       const near = Math.hypot(s.x - run.you.x, s.y - run.you.y) < DRIVE_RADIUS;
       if (driving && near) {
-        s.charge = Math.min(1, s.charge + dt / chargeTime(s));
+        s.charge = Math.min(1, s.charge + dt / (chargeTime(s) * quicker));
         if (s.charge >= 1 && (!hunting || bearsOn(s, k.x, k.y))) spent.push(s);
       } else {
         const f = chipFlow(run, s.x, s.y);
-        const held = Math.min(1, Math.hypot(f.x, f.y) / CHIP_FASTEST);
-        s.charge = Math.max(held, s.charge - dt * 0.35);
+        const held2 = Math.min(1, Math.hypot(f.x, f.y) / CHIP_FASTEST);
+        s.charge = Math.max(held2, s.charge - dt * 0.35);
       }
     }
     for (const s of spent) discharge(run, s);
@@ -2734,16 +3517,30 @@
     const k = run.throne;
     return run.phase === "reign" && k.awake && k.hp > 0 && wearRate(k) > 0 && localAmplitude(run.wave, k.x, k.y) >= HOLD_PRESSURE;
   }
-  function reign(run, dt) {
+  function reign(run, dt, taming = false) {
     const k = run.throne;
+    const form = formFor(run.world.aeon);
+    const adaptation = ADAPTATIONS[form];
     const winding = k.beat <= VOLLEY_WIND;
-    if (!winding) k.spin += dt * 0.55;
-    const hx = run.you.x - k.x, hy = run.you.y - k.y;
-    const r = Math.hypot(hx, hy) || 1e-12;
-    const sp = sovereignSpeed(k) * (winding ? 0.2 : 1);
-    let dx = hx / r * sp;
-    let dy = hy / r * sp;
-    if (!k.anchored) {
+    const snared = run.fray.snare > 0;
+    if (!winding && !snared) k.spin += dt * 0.55;
+    let dx, dy;
+    const override = sovereignDrive(run);
+    if (override) {
+      dx = override.x;
+      dy = override.y;
+    } else {
+      const hx = run.you.x - k.x, hy = run.you.y - k.y;
+      const r = Math.hypot(hx, hy) || 1e-12;
+      const sp = sovereignSpeed(k) * adaptation.speed * (winding ? 0.2 : 1);
+      dx = hx / r * sp;
+      dy = hy / r * sp;
+      if (form === "weaver" && !winding) {
+        dx = (hx - hy * 1.4) / r * sp;
+        dy = (hy + hx * 1.4) / r * sp;
+      }
+    }
+    if (!k.anchored && !charging(run)) {
       const moved = advance(run.wave, k.x, k.y, sovereignParticle(k), dt / sovereignInertia(k));
       dx += (moved.x - k.x) / dt;
       dy += (moved.y - k.y) / dt;
@@ -2751,7 +3548,7 @@
     const kb = run.bounds;
     k.x = Math.max(kb.x + 3e-5, Math.min(kb.x + kb.w - 3e-5, k.x + dx * dt));
     k.y = Math.max(kb.y + 3e-5, Math.min(kb.y + kb.h - 3e-5, k.y + dy * dt));
-    if (wearing(run)) {
+    if (!taming && wearing(run)) {
       k.hp = Math.max(0, k.hp - wearRate(k) * dt);
       if (run.rand() < dt * WEAR_TICKS_PER_SECOND) {
         run.events.push({ kind: "wearing", x: k.x, y: k.y });
@@ -2761,7 +3558,7 @@
         return;
       }
     }
-    if (run.structures.length > 0 && run.rand() < dt * 0.075) {
+    if (!snared && run.structures.length > 0 && run.rand() < dt * 0.075) {
       let victim = run.structures[0];
       let vr = Infinity;
       for (const s of run.structures) {
@@ -2779,25 +3576,34 @@
         retune(run);
       }
     }
-    if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
-      run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
-    }
-    k.beat -= dt;
-    if (k.beat <= 0) {
-      k.beat = cadence(k);
-      const arms = volley(k);
-      for (const [dx2, dy2] of arms) {
-        run.bolts.push({
-          x: k.x,
-          y: k.y,
-          vx: dx2 * BOLT_SPEED,
-          vy: dy2 * BOLT_SPEED,
-          life: BOLT_LIFE,
-          born: run.t
-        });
+    const boltSpeed = BOLT_SPEED * adaptation.boltSpeed;
+    if (!snared) {
+      if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
+        const g2 = beginWind(run);
+        if (g2 !== "charge" && g2 !== "shock") {
+          run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
+        }
       }
-      run.events.push({ kind: "volley", x: k.x, y: k.y, arms: arms.length });
+      k.beat -= dt;
+      if (k.beat <= 0) {
+        k.beat = cadence(k) * adaptation.cadence;
+        if (!unleash(run, boltSpeed)) {
+          const arms = volley(k);
+          for (const [dx2, dy2] of arms) {
+            run.bolts.push({
+              x: k.x,
+              y: k.y,
+              vx: dx2 * boltSpeed,
+              vy: dy2 * boltSpeed,
+              life: BOLT_LIFE,
+              born: run.t
+            });
+          }
+          run.events.push({ kind: "volley", x: k.x, y: k.y, arms: arms.length });
+        }
+      }
     }
+    frayStep(run, dt);
     for (const b of run.bolts) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
@@ -2806,6 +3612,19 @@
     run.bolts = run.bolts.filter(
       (bo) => bo.life > 0 && bo.x > run.bounds.x - 2e-5 && bo.x < run.bounds.x + run.bounds.w + 2e-5 && bo.y > run.bounds.y - 2e-5 && bo.y < run.bounds.y + run.bounds.h + 2e-5
     );
+  }
+  function bondWithSovereign(run, dt) {
+    if (!canBond(run) || run.iframe > 0) {
+      run.bond.progress = 0;
+      return false;
+    }
+    run.bond.progress += dt * (supported(run, "resonator") ? 1.75 : 1);
+    if (run.bond.progress < tameTime(run)) return false;
+    recruit(run);
+    run.events.push({ kind: "tamed", x: run.throne.x, y: run.throne.y });
+    run.bolts = [];
+    birth(run);
+    return true;
   }
   var TOUCH = 17e-6;
   var BOLT_TOUCH = 13e-6;
@@ -2818,6 +3637,7 @@
     for (const e of run.entities) {
       if (e.faction !== "beast") continue;
       if (e.held > 0) continue;
+      if ((e.seized ?? 0) > 0) continue;
       const b = beast(e.species);
       if (!together(e.layer, run.layer)) continue;
       if (Math.hypot(e.x - run.you.x, e.y - run.you.y) < TOUCH + particleOf(e).radius) {
@@ -2831,6 +3651,7 @@
       }
     }
     for (const b of run.bolts) {
+      if (b.thrown || b.life <= 0) continue;
       if (Math.hypot(b.x - run.you.x, b.y - run.you.y) < BOLT_TOUCH) {
         bite += 1;
         b.life = 0;
@@ -2838,18 +3659,26 @@
       }
     }
     run.bolts = run.bolts.filter((b) => b.life > 0);
+    const gambit = run.phase === "reign" ? gambitContact(run) : null;
+    if (gambit) bite += 1;
     if (drain > 0) {
       w.stamina = Math.max(0, w.stamina - drain * dt);
       if (w.stamina <= 0) w.spent = true;
     }
+    if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0 && shielded(run)) {
+      if (run.t - run.fray.turned > 0.3) run.events.push({ kind: "guard", x: run.you.x, y: run.you.y });
+      run.fray.turned = run.t;
+      bite = 0;
+    }
     if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0) {
       run.integrity -= 1;
-      run.iframe = IFRAME;
+      run.iframe = IFRAME + 0.6 * rankOf(run, "chitin");
+      run.fray.lastHit = run.t;
       run.events.push({
         kind: "hit",
         x: run.you.x,
         y: run.you.y,
-        cause: volleyed ? "volley" : struck ? "struck" : "touched"
+        cause: gambit ?? (volleyed ? "volley" : struck ? "struck" : "touched")
       });
       for (const e of run.entities) {
         if (e.faction !== "beast") continue;
@@ -2870,12 +3699,14 @@
   }
   function birth(run) {
     const k = run.throne;
+    if (run.phase !== "reign") return;
     const next = worldFrom(k, run.world.aeon + 1);
     run.phase = "birth";
     run.aeonsSurvived++;
     run.score += 40 + k.mass * 8;
     run.events.push({ kind: "birth", aeon: next.aeon, name: next.name });
     run.world = next;
+    run.evolution.offer = offerFor(run);
   }
   function enterWorld(run) {
     if (run.phase !== "birth") return;
@@ -2907,8 +3738,14 @@
     run.delivered = suspension(run);
     run.arriving = 0;
     run.bornAt = run.t;
-    run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
+    run.integrity = Math.min(maxIntegrity(run), run.integrity + 2);
     run.spawnIn = 4;
+    run.bond.progress = 0;
+    run.bond.tamed = false;
+    run.bond.ally = null;
+    run.bond.rushUntil = run.bond.aegisUntil = 0;
+    run.evolution.offer = [];
+    resetFray(run);
     run.phase = "settle";
   }
   function readoutFor(run, e) {
@@ -2941,6 +3778,7 @@
     grip: false,
     dash: false,
     place: false,
+    placeDown: false,
     lift: false,
     crown: false,
     crownDown: false,
@@ -2948,6 +3786,7 @@
     confirm: false,
     pause: false,
     depth: 0,
+    call: false,
     mute: false
   };
   var A = 0;
@@ -2960,18 +3799,22 @@
   var RT = 7;
   var BACK = 8;
   var START2 = 9;
+  var R3 = 11;
+  var LEFT = 14;
+  var RIGHT = 15;
   var STANDARD = {
     grip: [RT, RB],
     dash: [A, LT],
     place: [X],
     lift: [LB],
     crown: [Y],
-    prev: [],
-    next: [B],
+    prev: [LEFT],
+    next: [B, RIGHT],
     confirm: [START2, A],
     pause: [START2],
     up: [12],
     down: [13],
+    call: [R3],
     mute: [BACK]
   };
   var LOOSE = {
@@ -2980,12 +3823,13 @@
     place: [2],
     lift: [4],
     crown: [3],
-    prev: [],
-    next: [5],
+    prev: [14],
+    next: [5, 15],
     confirm: [0, 1, 2, 3, 8, 9],
     pause: [9, 8],
     up: [12],
     down: [13],
+    call: [10, 11],
     mute: [8]
   };
   var Pad = class {
@@ -3070,6 +3914,7 @@
         out.grip = anyDown(m.grip);
         out.dash = anyHit(m.dash);
         out.place = anyHit(m.place);
+        out.placeDown = anyDown(m.place);
         out.lift = anyHit(m.lift);
         out.crown = anyHit(m.crown);
         out.crownDown = anyDown(m.crown);
@@ -3077,6 +3922,7 @@
         out.confirm = anyHit(m.confirm);
         out.pause = anyHit(m.pause);
         out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
+        out.call = anyHit(m.call);
         out.mute = anyHit(m.mute);
         this.prev = [...gp.buttons].map((_, i) => down(i));
         if (!this.everMoved && (out.grip || out.dash || out.place || out.crownDown || out.confirm || Math.hypot(gp.axes[0] ?? 0, gp.axes[1] ?? 0) > DEADZONE)) {
@@ -3100,10 +3946,12 @@
       if (k("Space") || k("ShiftLeft") || k("ShiftRight")) out.grip = true;
       if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
       if (tap("KeyE") || tap("Enter")) out.place = true;
+      if (k("KeyE") || k("Enter")) out.placeDown = true;
       if (tap("KeyF")) out.lift = true;
       if (tap("KeyC")) out.crown = true;
       if (k("KeyC")) out.crownDown = true;
       if (tap("KeyQ")) out.cycle = -1;
+      if (tap("KeyR")) out.call = true;
       if (tap("KeyM")) out.mute = true;
       if (tap("Space") || tap("Enter")) out.confirm = true;
       if (tap("Escape") || tap("KeyP")) out.pause = true;
@@ -3166,6 +4014,7 @@
       confirm: "START",
       pause: "START",
       depth: "D-PAD",
+      call: "R3",
       mute: "BACK"
     },
     // Mouse first, because the movement this game wants is a direction WITH a
@@ -3182,6 +4031,7 @@
       confirm: "SPACE",
       pause: "ESC / P",
       depth: "WHEEL",
+      call: "R",
       mute: "M"
     }
   };
@@ -3292,6 +4142,46 @@
       this.noise(0.09, 0.05);
       this.tone(120, 0.1, "sawtooth", 0.035, 60);
     }
+    /** An arm caught in a burst: a bright rising pair, the opposite of `aiming`. */
+    riposte() {
+      this.tone(660, 0.06, "square", 0.035, 990);
+      this.tone(1320, 0.1, "triangle", 0.025, void 0, 0.05);
+    }
+    /** And it landing: the king's own low note, answered an octave up. */
+    riposteHit() {
+      this.tone(196, 0.12, "sawtooth", 0.035, 392);
+      this.noise(0.06, 0.025);
+    }
+    /** A gambit winding. Each form has its own figure so it can be heard coming. */
+    gambit(kind) {
+      if (kind === "charge") {
+        this.tone(82, 0.5, "sawtooth", 0.04, 165);
+        return;
+      }
+      if (kind === "shock") {
+        this.tone(60, 0.55, "sine", 0.06, 45);
+        this.noise(0.2, 0.02);
+        return;
+      }
+      this.tone(330, 0.12, "triangle", 0.03, void 0, 0);
+      this.tone(330, 0.12, "triangle", 0.03, void 0, 0.2);
+    }
+    /** The front going out. */
+    thump() {
+      this.tone(55, 0.3, "sine", 0.07, 35);
+      this.noise(0.12, 0.03);
+    }
+    /** A companion answering its call. */
+    call() {
+      this.tone(392, 0.09, "triangle", 0.035, void 0, 0);
+      this.tone(523, 0.09, "triangle", 0.035, void 0, 0.07);
+      this.tone(784, 0.16, "sine", 0.03, void 0, 0.14);
+    }
+    /** Integrity coming back. Soft, because it happens while you are resting. */
+    mend() {
+      this.tone(440, 0.18, "sine", 0.025, void 0, 0);
+      this.tone(554, 0.22, "sine", 0.02, void 0, 0.09);
+    }
     spent() {
       this.tone(300, 0.5, "sawtooth", 0.05, 55);
       this.noise(0.3, 0.035);
@@ -3314,8 +4204,8 @@
   var WASH_W = 100;
   var WASH_H = 74;
   var INK = "#cfe9f5";
-  var DIM = "#4a6076";
-  var FAINT2 = "#2b3e50";
+  var DIM = "#8299ae";
+  var FAINT2 = "#566d83";
   var NODE = "120,225,245";
   var ANTI = "255,140,190";
   var GOLD = "#ffc94a";
@@ -3429,6 +4319,41 @@
       title: "ENERGY DENSITY GOES AS PRESSURE SQUARED",
       body: "E = p^2 / 4 rho c^2. DOUBLE THE GRIP AND IT COSTS FOUR TIMES AS MUCH."
     },
+    riposte: {
+      id: "riposte",
+      title: "BURST INTO IT, AND IT GOES BACK",
+      body: "A BURST LEAVES YOU UNTOUCHABLE FOR A MOMENT. AN ARM THAT REACHES YOU INSIDE THAT MOMENT IS CAUGHT RATHER THAN SURVIVED, AND IT IS THROWN BACK AT THE KING THAT THREW IT. BURST INTO IT, NOT PAST IT: A SIDEWAYS DODGE IS STILL A DODGE. ONE ARM A BURST, AND A CATCH GIVES BACK MOST OF WHAT THE BURST COST. A GAME RULE, NOT ACOUSTICS."
+    },
+    charge: {
+      id: "charge",
+      title: "THE LANE IS FIXED WHEN IT STARTS TO WIND",
+      body: "A STRIDER KING CAN CHARGE. THE LANE IT WILL RUN DOWN IS DRAWN FOR THE WHOLE WIND-UP AND DOES NOT FOLLOW YOU, SO STEP OFF IT - OR BURST THROUGH AS IT ARRIVES. AFTERWARDS IT STANDS DAZED FOR A MOMENT, AND A DAZED KING IS EASY TO WALK INTO YOUR ARMS."
+    },
+    shock: {
+      id: "shock",
+      title: "THE FRONT STOPS AT THE RING",
+      body: "A WARDEN KING SENDS A SHOCK FRONT OUT TO THE DASHED RING. BE OUTSIDE THE RING WHEN IT GOES, OR BURST AS THE FRONT REACHES YOU AND IT PASSES THROUGH."
+    },
+    echo: {
+      id: "echo",
+      title: "IT THROWS TWICE",
+      body: "A WEAVER KING'S ECHO THROWS ITS VOLLEY, THEN THE SAME ARMS TURNED HALF A GAP, A BEAT LATER. BOTH SETS ARE DRAWN BEFORE EITHER FLIES: THE SAFE PLACE IS NOT THE GAP, IT IS OUT OF REACH - OR A BURST INTO ONE OF THEM."
+    },
+    ally: {
+      id: "ally",
+      title: "IT FIGHTS WITH YOU",
+      body: "YOUR COMPANION IS A BODY IN THE WATER. IT HOLDS HUNTERS UNTIL THEY COME APART, THE SAME WAY YOUR HAND DOES, AND ONE IT HAS HOLD OF CANNOT STRIKE. A STRIDER HUNTS, A WARDEN GOES FOR WHAT IS WINDING UP AT YOU, A WEAVER TETHERS FROM YOUR SIDE."
+    },
+    call: {
+      id: "call",
+      title: "CALL IT",
+      body: "EACH COMPANION HAS ONE CALL ON ITS OWN BUTTON. A STRIDER'S RUSH MAKES BURSTS FREE AND CATCHES WIDER. A WARDEN'S AEGIS CLEARS THE ARMS AROUND YOU AND TURNS THE NEXT HITS. A WEAVER'S SNARE HOLDS THE KING STILL, SO YOUR FIELD CAN WALK IT INTO AN ARM."
+    },
+    repair: {
+      id: "repair",
+      title: "A STATION MENDS WHAT A HIT TOOK",
+      body: "STAND AT YOUR MITOCHONDRIA WITH FULL STAMINA AND NO HIT FOR THREE SECONDS, AND THEIR STORE GOES INTO YOUR INTEGRITY. TWENTY STATIONS MEND NO FASTER THAN ONE - THEY LAST LONGER. THE KING EATS WHAT IS NEAR IT, INCLUDING THEM."
+    },
     mote: {
       id: "mote",
       title: "BELOW THE CROSSOVER",
@@ -3498,6 +4423,13 @@
       __publicField(this, "mouseDash", false);
       /** How long the throne button has been held, and whether it already fired. */
       __publicField(this, "crownHeld", 0);
+      __publicField(this, "buildHeld", 0);
+      __publicField(this, "organelleGrown", false);
+      /** Which evolution card is highlighted on the birth screen. */
+      __publicField(this, "pick", 0);
+      /** The stick has to come back to centre before it steps the cards again. */
+      __publicField(this, "stickLatched", false);
+      __publicField(this, "controlLegend", "");
       __publicField(this, "crowned", false);
       __publicField(this, "seed", 20260830);
       __publicField(this, "sparks", []);
@@ -3687,8 +4619,10 @@
           return;
         }
         if (this.screen === "birth") {
-          enterWorld(this.run);
-          this.screen = "play";
+          const { sx: sx2, sy: sy2 } = world(e);
+          const card = this.cardAt(sx2, sy2);
+          if (card >= 0) this.pick = card;
+          this.enter();
           return;
         }
         const { sx, sy } = world(e);
@@ -3756,10 +4690,23 @@
         return;
       }
       if (this.screen === "birth") {
-        if (it.confirm) {
-          enterWorld(run);
-          this.screen = "play";
+        const offer = run.evolution.offer;
+        if (offer.length > 0) {
+          let stepBy = it.cycle;
+          const sx = it.move.x;
+          if (Math.abs(sx) < 0.3) this.stickLatched = false;
+          else if (!this.stickLatched && Math.abs(sx) > 0.6) {
+            this.stickLatched = true;
+            stepBy = sx > 0 ? 1 : -1;
+          }
+          if (stepBy !== 0) {
+            this.pick = (this.pick + stepBy + offer.length) % offer.length;
+            this.sfx.tick();
+          }
+          const key4 = this.pad.slotKey();
+          if (key4 > 0 && key4 <= offer.length) this.pick = key4 - 1;
         }
+        if (it.confirm) this.enter();
         return;
       }
       if (run.cells.length > 0) {
@@ -3775,13 +4722,38 @@
       if (key3 > 0 && run.cells[key3 - 1]) {
         this.selected = key3 - 1;
         this.spend(key3 - 1);
-      } else if (it.place) this.spend(this.selected);
+      }
+      if (it.placeDown) {
+        this.buildHeld += dt;
+        if (this.buildHeld >= 0.85 && !this.organelleGrown) {
+          this.organelleGrown = true;
+          const result = growMitochondrion(run, this.selected);
+          const messages = {
+            "need-cells": "MITOCHONDRION NEEDS 2 CELLS IN HAND",
+            "need-host": "STAND ON ONE OF YOUR STRUCTURES TO GROW A MITOCHONDRION",
+            "already-grown": "THIS STRUCTURE ALREADY HAS A MITOCHONDRION",
+            "wrong-phase": "NOT NOW",
+            grown: ""
+          };
+          if (messages[result]) this.say(messages[result]);
+        }
+      } else {
+        if (this.buildHeld > 0 && !this.organelleGrown) this.spend(this.selected);
+        this.buildHeld = 0;
+        this.organelleGrown = false;
+      }
+      if (it.call) this.doCall();
       if (it.lift) {
         const r = liftCell(run);
         if (r === "nothing-there") this.say("NOTHING OF YOURS WITHIN REACH");
         if (r === "wrong-phase") this.say("NOT NOW");
       }
       if (it.depth !== 0) this.retune(it.depth);
+      if (run.phase === "reign") {
+        this.crownHeld = 0;
+        this.crowned = false;
+        return;
+      }
       if (it.crownDown) {
         this.crownHeld += dt;
         if (this.crownHeld >= _Game.CROWN_HOLD && !this.crowned) {
@@ -3813,12 +4785,17 @@
       if (r === "wrong-phase") this.say("IT IS ALREADY AWAKE");
     }
     fit() {
-      const s = Math.min(window.innerWidth / (VIEW_W + 40), window.innerHeight / (VIEW_H + 96));
+      const style = getComputedStyle(document.body);
+      const chrome = ["header", ".legend", ".controls"].reduce((height, selector) => height + (document.querySelector(selector)?.getBoundingClientRect().height ?? 0), 0) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.rowGap) * 3 + 4;
+      const s = Math.max(0.2, Math.min((window.innerWidth - 36) / VIEW_W, (window.innerHeight - chrome) / VIEW_H));
       this.canvas.style.width = `${Math.floor(VIEW_W * s)}px`;
       this.canvas.style.height = `${Math.floor(VIEW_H * s)}px`;
     }
     begin() {
       this.paused = false;
+      this.buildHeld = this.crownHeld = 0;
+      this.organelleGrown = this.crowned = false;
+      this.pick = 0;
       this.tally = {};
       this.seed = this.seed * 1664525 + 1013904223 >>> 0;
       this.run = startRun(this.seed, this.ebb);
@@ -3837,9 +4814,31 @@
       if (r === "occupied") this.say("THAT SITE IS TAKEN");
       if (r === "wrong-phase") this.say("NOT NOW");
     }
+    doCall() {
+      const run = this.run;
+      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const r = callAlly(run);
+      const c = companion(run);
+      if (r === "no-companion") {
+        this.say(`NO COMPANION YET  \xB7  WEAKEN A KING AND HOLD ${G.crown} NEAR IT TO BOND`);
+      }
+      if (r === "cooling" && c) this.say(`${CALLS[c.form].name} RETURNS IN ${callWait(run).toFixed(0)} S`);
+      if (r === "no-king") this.say("A SNARE NEEDS A KING AWAKE TO HOLD");
+      if (r === "wrong-phase") this.say("NOT NOW");
+    }
+    /** Take the highlighted card, if there is one, and step into the new world. */
+    enter() {
+      const run = this.run;
+      const t = run.evolution.offer[this.pick];
+      if (t) evolve(run, t);
+      this.drain();
+      enterWorld(run);
+      this.screen = "play";
+      this.pick = 0;
+    }
     doCrown() {
       const r = crown(this.run);
-      if (r === "nothing-fed") this.say("FEED THE THRONE FIRST - STAND ON IT AND PLACE");
+      if (r === "nothing-fed") this.say(`FEED THE THRONE FIRST - TAP ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT`);
     }
     // ── loop ──────────────────────────────────────────────────────────────────
     start() {
@@ -3864,13 +4863,26 @@
       this.t += dt;
       const run = this.run;
       const it = this.pad.read();
-      this.mouse(it);
+      if (this.screen === "play") this.mouse(it);
       this.intent = it;
       if (it.pause && this.screen === "play") {
         this.paused = !this.paused;
         this.sfx.tick();
       }
-      if (this.paused && this.screen === "play") return;
+      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const legend = `${G.move} move \xB7 ${G.grip} grip \xB7 ${G.dash} dash / catch \xB7 ${G.place} build / hold: mitochondrion \xB7 ${G.crown} feed / crown / tame \xB7 ${G.call} call ally \xB7 ${G.pause} pause`;
+      if (legend !== this.controlLegend) {
+        this.controlLegend = legend;
+        const controls = document.getElementById("controls");
+        if (controls) controls.textContent = legend;
+        this.fit();
+      }
+      if (this.paused && this.screen === "play") {
+        if (it.cycle) cycleCompanion(run);
+        this.buildHeld = this.crownHeld = 0;
+        this.organelleGrown = this.crowned = false;
+        return;
+      }
       this.act(it, dt);
       if (this.screen === "title") {
         step2(run, {
@@ -3879,7 +4891,7 @@
           dash: false
         }, dt);
         run.wave.stamina = STAMINA_MAX;
-        run.integrity = MAX_INTEGRITY;
+        run.integrity = maxIntegrity(run);
         run.events.length = 0;
         this.decay(dt);
         return;
@@ -3887,7 +4899,7 @@
       const gripping = it.grip && !run.wave.spent;
       if (gripping && !this.wasGrip) this.sfx.gripOn();
       this.wasGrip = gripping;
-      step2(run, { move: it.move, grip: it.grip, dash: it.dash }, dt);
+      step2(run, { move: it.move, grip: it.grip, dash: it.dash, tame: it.crownDown }, dt);
       this.drain();
       this.decay(dt);
       if (run.phase === "birth" && this.screen !== "birth") {
@@ -3904,6 +4916,7 @@
       this.youTrail.push(run.you.x, run.you.y);
       while (this.youTrail.length > 26) this.youTrail.shift();
       if (run.structures.length > 0) this.teach("build");
+      if (companion(run) && run.phase !== "birth") this.teach("call");
       if (run.wave.tC > AMBIENT_C + 12) this.teach("heat");
       if (run.phase === "reign" && run.throne.awake && run.throne.hp > 0 && run.structures.some((st) => bearsOn(st, run.throne.x, run.throne.y))) {
         this.teach("aim");
@@ -3930,7 +4943,8 @@
             this.hitstop = Math.max(this.hitstop, 0.055);
             this.sfx.hurt();
             this.burst(ev.x, ev.y, 16, "255,77,109");
-            this.say(`INTEGRITY ${run.integrity}`);
+            this.say(ev.cause === "charge" ? `IT RAN YOU DOWN  \xB7  INTEGRITY ${run.integrity}` : ev.cause === "shock" ? `THE FRONT CAUGHT YOU  \xB7  INTEGRITY ${run.integrity}` : `INTEGRITY ${run.integrity}`);
+            if (ev.cause === "volley") this.teach("riposte");
             break;
           case "kill":
             this.burst(ev.x, ev.y, 12, warmth(beastPhi(run, ev.species)));
@@ -3960,7 +4974,7 @@
             this.ring(ev.x, ev.y, 8, 84, 0.7, "255,201,74");
             this.popups.push({ x: ev.x, y: ev.y, text: ev.group, life: 1.6, colour: GOLD, big: true });
             this.sfx.capture(3);
-            this.say(`${ev.group}  \xB7  PRESS ITS NUMBER TO PLACE IT`);
+            this.say(`${ev.group}  \xB7  ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).place} TO PLACE IT`);
             this.teach("crystal");
             break;
           case "place":
@@ -4020,6 +5034,78 @@
             break;
           case "sovereign-hit":
             this.burst(ev.x, ev.y, 10, "255,201,74");
+            break;
+          case "guard":
+            this.ring(ev.x, ev.y, 8, 38, 0.4, "255,201,74");
+            this.burst(ev.x, ev.y, 5, "255,201,74");
+            break;
+          case "riposte":
+            this.teach("riposte");
+            if (ev.thrown) {
+              this.sfx.riposte();
+              this.ring(ev.x, ev.y, 6, 44, 0.35, "255,201,74");
+              this.burst(ev.x, ev.y, 10, "255,230,150");
+              this.hitstop = Math.max(this.hitstop, 0.04);
+              this.popups.push({ x: ev.x, y: ev.y, text: "CAUGHT", life: 0.8, colour: GOLD, big: false });
+            } else {
+              this.ring(ev.x, ev.y, 5, 30, 0.3, JADE);
+              this.popups.push({ x: ev.x, y: ev.y, text: "ABSORBED", life: 0.8, colour: `rgb(${JADE})`, big: false });
+            }
+            break;
+          case "riposte-hit":
+            this.sfx.riposteHit();
+            this.burst(ev.x, ev.y, 14, "255,201,74");
+            this.shake = Math.max(this.shake, 4);
+            this.popups.push({ x: ev.x, y: ev.y, text: `-${ev.damage}`, life: 1, colour: GOLD, big: false });
+            break;
+          case "gambit": {
+            this.sfx.gambit(ev.gambit);
+            this.teach(ev.gambit);
+            const name = ADAPTATIONS[formFor(run.world.aeon)].name;
+            this.say(ev.gambit === "charge" ? `${name} WINDS A CHARGE  \xB7  STEP OFF THE LANE` : ev.gambit === "shock" ? `${name} GATHERS A SHOCK  \xB7  GET OUTSIDE THE RING` : `${name} WINDS AN ECHO  \xB7  TWO SETS OF ARMS`);
+            break;
+          }
+          case "charge":
+            this.shake = Math.max(this.shake, 6);
+            this.sfx.strike();
+            break;
+          case "shock":
+            this.shake = Math.max(this.shake, 7);
+            this.sfx.thump();
+            break;
+          case "ally":
+            this.teach("ally");
+            this.ring(ev.x, ev.y, 6, 40, 0.4, JADE);
+            break;
+          case "call":
+            this.sfx.call();
+            this.ring(ev.x, ev.y, 10, 120, 0.6, ev.form === "warden" ? "255,201,74" : JADE);
+            this.say(`${CALLS[ev.form].name}  \xB7  ${CALLS[ev.form].says}`);
+            break;
+          case "repair":
+            this.teach("repair");
+            this.sfx.mend();
+            this.ring(ev.x, ev.y, 8, 50, 0.6, JADE);
+            this.popups.push({ x: ev.x, y: ev.y, text: "+1", life: 1.2, colour: `rgb(${JADE})`, big: true });
+            this.say(`MENDED  \xB7  INTEGRITY ${run.integrity}/${maxIntegrity(run)}`);
+            break;
+          case "mended":
+            this.sfx.mend();
+            this.popups.push({ x: ev.x, y: ev.y, text: "+1", life: 1.2, colour: `rgb(${JADE})`, big: true });
+            this.say(`PHAGOCYTE  \xB7  INTEGRITY ${run.integrity}/${maxIntegrity(run)}`);
+            break;
+          case "evolved":
+            this.sfx.capture(4);
+            this.say(`EVOLVED  \xB7  ${TRAITS[ev.trait].name} ${ev.rank}/${TRAITS[ev.trait].max}`);
+            break;
+          case "organelle":
+            this.ring(ev.x, ev.y, 8, 60, 0.8, JADE);
+            this.say("MITOCHONDRION GROWN \xB7 CHARGES WHILE YOU EXPLORE \xB7 RETURN FOR STAMINA");
+            this.sfx.capture(3);
+            break;
+          case "tamed":
+            this.burst(ev.x, ev.y, 28, JADE);
+            this.say("BONDED \xB7 A SOVEREIGN WILL TRAVEL WITH YOU");
             break;
           case "birth":
             this.flash = 1;
@@ -4188,14 +5274,17 @@
       this.drawSites();
       this.drawBodies();
       this.drawStructures();
+      this.drawOrganelles();
       this.drawBound();
       this.drawThrone();
       this.drawTrails();
       this.drawEntities();
       this.drawSovereign();
+      this.drawGambits();
       this.drawBolts();
       this.drawSparks();
       this.drawRings();
+      this.drawCompanion();
       this.drawYou();
       this.drawPopups();
       g2.restore();
@@ -4609,7 +5698,32 @@
         g2.lineCap = "butt";
         for (const limb of limbsOf(body, pitch)) {
           const tip = limb.cells[0];
+          if (!this.onCamera(tip.x, tip.y, 100)) continue;
           const tx = px(tip.x), ty = px(tip.y);
+          const role = limbRole(limb);
+          const active = limb.layers.includes(run.layer);
+          const nearTip = active && Math.hypot(tip.x - run.you.x, tip.y - run.you.y) <= SUPPORT_REACH;
+          const ready = (run.bond.limbReadyAt.get(tip.id) ?? 0) <= run.t;
+          g2.strokeStyle = role === "guard" ? `rgba(255,201,74,${ready ? 0.8 : 0.2})` : `rgba(${JADE},0.7)`;
+          g2.lineWidth = 1.5;
+          g2.beginPath();
+          if (role === "guard") g2.arc(tx, ty, px(GUARD_REACH), 0, Math.PI * 2);
+          else if (role === "sail") {
+            g2.moveTo(tx - 9, ty + 7);
+            g2.lineTo(tx, ty - 13);
+            g2.lineTo(tx + 9, ty + 7);
+            g2.closePath();
+          } else {
+            g2.ellipse(tx, ty, 12, 6, this.t * 0.7, 0, Math.PI * 2);
+          }
+          g2.stroke();
+          if (nearTip) {
+            g2.font = `700 8px ${MONO}`;
+            g2.fillStyle = INK;
+            g2.textAlign = "center";
+            g2.fillText(role === "sail" ? "DASH RECOVERY" : role === "guard" ? "VOLLEY GUARD" : "FASTER BONDING", tx, ty - 21);
+            g2.textAlign = "left";
+          }
           if (limb.leg) {
             g2.strokeStyle = "rgba(255,201,74,0.55)";
             g2.lineWidth = 2;
@@ -4632,7 +5746,6 @@
           }
         }
         const sym = symbolOf(body);
-        const run2 = this.run;
         if (sym) {
           g2.textAlign = "center";
           g2.font = `700 11px ${MONO}`;
@@ -4645,7 +5758,7 @@
           const seated = seatedGroup(body.hm);
           const group = seated === body.hm ? body.hm : `${body.hm}\u2192${seated}`;
           g2.fillText(
-            `${group}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? `  \xB7  ${walkSpeed(body, run2.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
+            `${group}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? `  \xB7  ${walkSpeed(body, run.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
             px(body.x),
             px(body.y - body.extent) - 5
           );
@@ -4653,13 +5766,239 @@
         }
       }
     }
+    /** Small procedural silhouettes: shape carries role, colour still carries contrast. */
+    creature(x, y, r, form, rgb, angle, alpha = 1) {
+      const g2 = this.ctx;
+      g2.save();
+      g2.translate(x, y);
+      g2.rotate(angle);
+      g2.globalAlpha *= alpha;
+      g2.strokeStyle = `rgba(${rgb},0.85)`;
+      g2.fillStyle = `rgba(${rgb},0.16)`;
+      g2.lineWidth = 1.4;
+      if (form === "warden" || form === "sentinel" || form === "husk") {
+        for (let i = 0; i < 6; i++) {
+          const a = i * Math.PI / 3;
+          g2.beginPath();
+          g2.moveTo(Math.cos(a - 0.4) * r * 0.65, Math.sin(a - 0.4) * r * 0.65);
+          g2.lineTo(Math.cos(a - 0.28) * r, Math.sin(a - 0.28) * r);
+          g2.lineTo(Math.cos(a + 0.28) * r, Math.sin(a + 0.28) * r);
+          g2.lineTo(Math.cos(a + 0.4) * r * 0.65, Math.sin(a + 0.4) * r * 0.65);
+          g2.closePath();
+          g2.fill();
+          g2.stroke();
+        }
+      } else if (form === "weaver" || form === "ribbon" || form === "splitter") {
+        g2.beginPath();
+        g2.ellipse(0, -r * 0.15, r * 0.8, r * 0.52, 0, Math.PI, Math.PI * 2);
+        g2.quadraticCurveTo(r * 0.4, r * 0.45, -r * 0.8, -r * 0.15);
+        g2.fill();
+        g2.stroke();
+        for (let i = 0; i < 4; i++) {
+          const tx = (i - 1.5) * r * 0.38;
+          const sway = Math.sin(this.t * 3 + i * 1.7 + x * 0.01) * r * 0.3;
+          g2.beginPath();
+          g2.moveTo(tx, 0);
+          g2.bezierCurveTo(tx + sway, r * 0.5, tx - sway, r, tx + sway * 0.5, r * 1.35);
+          g2.stroke();
+        }
+      } else {
+        for (let i = 0; i < 4; i++) {
+          const cy = (i - 1.5) * r * 0.43;
+          const width = r * (0.65 - Math.abs(i - 1.5) * 0.1);
+          g2.beginPath();
+          g2.ellipse(0, cy, width, r * 0.3, 0, 0, Math.PI * 2);
+          g2.fill();
+          g2.stroke();
+          for (const sign of [-1, 1]) {
+            const kick = Math.sin(this.t * 5 + i) * r * 0.13;
+            g2.beginPath();
+            g2.moveTo(sign * width * 0.8, cy);
+            g2.quadraticCurveTo(sign * r, cy + kick, sign * r * 0.9, cy + r * 0.27 + kick);
+            g2.stroke();
+          }
+        }
+      }
+      g2.fillStyle = "rgba(240,255,255,0.9)";
+      for (const sign of [-1, 1]) {
+        g2.beginPath();
+        g2.arc(sign * r * 0.2, -r * 0.38, Math.max(1, r * 0.07), 0, Math.PI * 2);
+        g2.fill();
+      }
+      g2.restore();
+    }
+    drawOrganelles() {
+      const run = this.run, g2 = this.ctx;
+      const hosts = new Map(run.structures.map((s) => [s.id, s]));
+      for (const o of run.organelles) {
+        const host = hosts.get(o.hostId);
+        if (!host || !this.onCamera(host.x, host.y, 100)) continue;
+        const x = px(host.x), y = px(host.y);
+        g2.save();
+        g2.globalAlpha = host.serves.includes(run.layer) ? 1 : 0.25;
+        const near = Math.hypot(host.x - run.you.x, host.y - run.you.y) < MITO_REACH;
+        if (near) {
+          g2.setLineDash([3, 7]);
+          g2.strokeStyle = `rgba(${JADE},0.2)`;
+          g2.beginPath();
+          g2.arc(x, y, px(MITO_REACH), 0, Math.PI * 2);
+          g2.stroke();
+          g2.setLineDash([]);
+        }
+        const cap = mitoCapacity(run);
+        g2.fillStyle = "#0a2628";
+        g2.strokeStyle = `rgba(${JADE},${0.4 + Math.min(1, o.energy / cap) * 0.6})`;
+        g2.lineWidth = 2;
+        g2.beginPath();
+        g2.ellipse(x, y, 21, 12, -0.35, 0, Math.PI * 2);
+        g2.fill();
+        g2.stroke();
+        g2.lineWidth = 1;
+        g2.beginPath();
+        for (let i = 0; i <= 8; i++) {
+          const xx = x - 14 + i * 3.5;
+          const yy = y + Math.sin(i * 2.2 + this.t * 0.6) * 6;
+          if (i === 0) g2.moveTo(xx, yy);
+          else g2.lineTo(xx, yy);
+        }
+        g2.stroke();
+        if (o.supplying) {
+          g2.strokeStyle = o.mending ? "rgba(255,201,74,0.7)" : `rgba(${JADE},0.65)`;
+          g2.setLineDash([2, 5]);
+          g2.lineDashOffset = -this.t * 16;
+          g2.beginPath();
+          g2.moveTo(x, y);
+          g2.lineTo(px(run.you.x), px(run.you.y));
+          g2.stroke();
+          g2.setLineDash([]);
+          g2.lineDashOffset = 0;
+        }
+        g2.font = `700 8px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillStyle = o.mending ? GOLD : `rgb(${JADE})`;
+        g2.fillText(o.mending ? `ATP \u2192 MEND ${Math.round(run.fray.repair)}/${Math.round(repairCost(run))}` : o.supplying ? "ATP \u2192 STAMINA" : `MITO ${Math.round(o.energy)}/${Math.round(cap)}`, x, y + 19);
+        g2.restore();
+      }
+    }
+    drawCompanion() {
+      const run = this.run, c = companion(run);
+      if (!c) return;
+      const g2 = this.ctx;
+      const ally = run.bond.ally;
+      const orbit = this.t * 0.5;
+      const x = ally ? px(ally.x) : px(run.you.x) + Math.cos(orbit) * 36;
+      const y = ally ? px(ally.y) : px(run.you.y) + Math.sin(orbit) * 27;
+      const rgb = warmth(selfContrast(run.you, run.wave));
+      const target = ally && ally.target >= 0 ? run.entities.find((e) => e.id === ally.target) : void 0;
+      let heading = Math.sin(orbit) * 0.2;
+      if (target && ally) {
+        const tx = px(target.x), ty = px(target.y);
+        heading = Math.atan2(ty - y, tx - x) + Math.PI / 2;
+        if (c.form === "weaver") {
+          const dx = tx - x, dy = ty - y, len = Math.hypot(dx, dy) || 1;
+          const nx = -dy / len, ny = dx / len;
+          g2.strokeStyle = `rgba(${JADE},${ally.holding ? 0.8 : 0.3})`;
+          g2.lineWidth = ally.holding ? 1.6 : 1;
+          g2.beginPath();
+          for (let i = 0; i <= 12; i++) {
+            const f = i / 12;
+            const wob = Math.sin(f * Math.PI) * Math.sin(this.t * 9 + f * 8) * (ally.holding ? 2 : 5);
+            const qx = x + dx * f + nx * wob, qy = y + dy * f + ny * wob;
+            if (i === 0) g2.moveTo(qx, qy);
+            else g2.lineTo(qx, qy);
+          }
+          g2.stroke();
+        } else if (!ally.holding) {
+          g2.strokeStyle = `rgba(${JADE},0.4)`;
+          g2.setLineDash([3, 4]);
+          g2.beginPath();
+          g2.moveTo(x, y);
+          g2.lineTo(tx, ty);
+          g2.stroke();
+          g2.setLineDash([]);
+        }
+        if (ally.holding) {
+          const f = Math.min(1, (target.seized ?? 0) / beast(target.species).hold);
+          g2.strokeStyle = `rgb(${JADE})`;
+          g2.lineWidth = 2.2;
+          g2.beginPath();
+          g2.arc(
+            tx,
+            ty,
+            Math.max(2.4, px(particleOf(target).radius)) + 11,
+            -Math.PI / 2,
+            -Math.PI / 2 + f * Math.PI * 2
+          );
+          g2.stroke();
+        }
+      } else {
+        g2.strokeStyle = `rgba(${JADE},0.3)`;
+        g2.setLineDash([2, 4]);
+        g2.beginPath();
+        g2.moveTo(px(run.you.x), px(run.you.y));
+        g2.lineTo(x, y);
+        g2.stroke();
+        g2.setLineDash([]);
+      }
+      this.creature(x, y, 10 + c.rank, c.form, rgb, heading);
+      if (c.form === "warden" && run.t >= run.bond.shieldReadyAt) {
+        g2.strokeStyle = "rgba(255,201,74,0.55)";
+        g2.beginPath();
+        g2.arc(px(run.you.x), px(run.you.y), 28, 0, Math.PI * 2);
+        g2.stroke();
+      }
+    }
+    drawJourney() {
+      const run = this.run, g2 = this.ctx;
+      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const c = companion(run);
+      const x = VIEW_W - 286, y = 122;
+      const tall = c ? 96 : 76;
+      g2.fillStyle = "rgba(6,17,28,0.86)";
+      g2.fillRect(x, y, 230, tall);
+      g2.fillStyle = `rgb(${JADE})`;
+      g2.fillRect(x, y, 2, tall);
+      g2.textAlign = "left";
+      g2.font = `700 9px ${MONO}`;
+      g2.fillText(c ? `${ADAPTATIONS[c.form].name} \xB7 BOND ${c.rank}/3` : "GROW \xB7 EXPLORE \xB7 BOND", x + 10, y + 10);
+      g2.fillStyle = INK;
+      g2.font = `600 8px ${MONO}`;
+      if (run.phase === "reign") {
+        g2.fillText(`${ADAPTATIONS[formFor(run.world.aeon)].name} \xB7 WEAKEN TO ${Math.round(tameHealth(run) * 100)}%`, x + 10, y + 28);
+        g2.fillText(`THEN HOLD ${G.crown} NEARBY TO TAME`, x + 10, y + 43);
+        g2.fillText(`GIFT: ${ADAPTATIONS[formFor(run.world.aeon)].gift}`, x + 10, y + 58);
+      } else {
+        g2.fillText(`${run.organelles.length} MITOCHONDRIA \xB7 ${run.bond.companions.length}/3 COMPANIONS`, x + 10, y + 28);
+        g2.fillText(`HOLD ${G.place} ON A STRUCTURE`, x + 10, y + 43);
+        const costs = run.cells.length >= 2 ? `${run.cells[this.selected]?.group.hm ?? run.cells[0].group.hm} + ${run.cells[(this.selected + 1) % run.cells.length].group.hm}` : "NEEDS 2 CELLS";
+        g2.fillText(`COST: ${costs} \xB7 SELECTED + NEXT`, x + 10, y + 58);
+      }
+      if (this.buildHeld > 0) {
+        bar(g2, x + 10, y + 68, 206, 3, Math.min(1, this.buildHeld / 0.85), `rgb(${JADE})`, "");
+      }
+      const host = organelleHost(run);
+      if (host && !run.organelles.some((o) => o.hostId === host.id)) {
+        g2.fillStyle = DIM;
+        g2.fillText("HOST IN REACH", x + 130, y + 10);
+      }
+      if (c) {
+        const wait = callWait(run);
+        const full = callCooldown(run, c.rank);
+        g2.font = `700 8px ${MONO}`;
+        g2.fillStyle = wait > 0 ? DIM : GOLD;
+        g2.fillText(wait > 0 ? `${G.call} ${CALLS[c.form].name} \xB7 ${wait.toFixed(0)} S` : `${G.call} ${CALLS[c.form].name} READY`, x + 10, y + 78);
+        bar(g2, x + 110, y + 80, 106, 3, 1 - wait / Math.max(1, full), wait > 0 ? DIM : GOLD, "");
+      }
+    }
     drawStructures() {
       const g2 = this.ctx;
       const run = this.run;
       const k = run.throne;
-      const fighting = run.phase === "reign" && k.awake && k.hp > 0;
+      const fighting2 = run.phase === "reign" && k.awake && k.hp > 0;
+      const organelleIds = new Set(run.organelles.map((o) => o.hostId));
       for (const s of run.structures) {
-        const inPlay = fighting && Math.hypot(s.x - k.x, s.y - k.y) < s.reach * LOBE_RANGE;
+        if (organelleIds.has(s.id)) continue;
+        const inPlay = fighting2 && Math.hypot(s.x - k.x, s.y - k.y) < s.reach * LOBE_RANGE;
         const margin = inPlay ? px(s.reach * LOBE_RANGE) + 40 : px(s.reach) * 2 + 40;
         if (!this.onCamera(s.x, s.y, margin)) continue;
         const x = px(s.x), y = px(s.y);
@@ -4744,7 +6083,7 @@
             g2.fillText(`-${worth}  OF ${best}`, x, y - R - 8);
             g2.textAlign = "left";
           }
-          if (loaded && fighting && !bearsOn(s, k.x, k.y)) {
+          if (loaded && fighting2 && !bearsOn(s, k.x, k.y)) {
             g2.fillStyle = "rgba(140,233,255,0.8)";
             g2.font = `700 8px ${MONO}`;
             g2.textAlign = "center";
@@ -4810,7 +6149,9 @@
       const run = this.run;
       const b = run.bound;
       const g2 = this.ctx;
-      const x = 18, y = 62, w = 232, h = 11;
+      const x = 18, y = 150, w = 232, h = 11;
+      g2.fillStyle = "rgba(6,17,28,0.86)";
+      g2.fillRect(x - 8, y - 23, w + 16, 90);
       g2.font = `600 9px ${MONO}`;
       g2.fillStyle = DIM;
       g2.fillText(b.free ? "IT IS OUT" : "HOW FAR APART TO BUILD", x, y - 12);
@@ -4849,10 +6190,13 @@
       }
       g2.font = `700 9px ${MONO}`;
       g2.fillStyle = b.free ? `rgb(${JADE})` : `rgb(${NODE})`;
-      g2.fillText(
+      wrap(
+        g2,
         b.free ? "FREED - IT GOES WITH YOU" : advice(run.crystal, run.gap, b.omega),
         x,
-        y + h + 20
+        y + h + 20,
+        w,
+        11
       );
     }
     bloom() {
@@ -4981,7 +6325,8 @@
       g2.fillText(run.throne.fed.length ? run.throne.hm : "THRONE", x, y - R - 14);
       if (run.throne.fed.length > 0) {
         const need = dischargesToKill(run);
-        const beyond = !Number.isFinite(need) || need > run.structures.length + run.cells.length;
+        const weapons = run.structures.length - run.organelles.length + run.cells.length;
+        const beyond = !Number.isFinite(need) || need > weapons;
         g2.font = `700 9px ${MONO}`;
         g2.fillStyle = beyond ? RED : GOLD;
         g2.fillText(
@@ -4992,7 +6337,7 @@
         if (beyond) {
           g2.fillStyle = RED;
           g2.font = `600 8px ${MONO}`;
-          g2.fillText(`YOU HAVE ${run.structures.length + run.cells.length}`, x, y - R - 37);
+          g2.fillText(`YOU HAVE ${weapons}`, x, y - R - 37);
         }
         const keep = inheritanceOf(run.throne);
         let line = beyond ? 50 : 39;
@@ -5108,9 +6453,10 @@
         if (e.faction === "motif") {
           drawMotif(g2, x, y, r, e.parts[e.parts.length - 1], rgb, e.spin);
         } else {
+          this.creature(x, y, r * 1.8, e.species, rgb, Math.atan2(this.run.you.y - e.y, this.run.you.x - e.x) + Math.PI / 2);
           g2.fillStyle = `rgb(${rgb})`;
           g2.beginPath();
-          g2.arc(x, y, r, 0, Math.PI * 2);
+          g2.arc(x, y, r * 0.6, 0, Math.PI * 2);
           g2.fill();
           g2.fillStyle = "rgba(255,255,255,0.45)";
           g2.beginPath();
@@ -5192,12 +6538,31 @@
     }
     drawSovereign() {
       const k = this.run.throne;
-      if (!k.awake || k.hp <= 0) return;
+      if (!k.awake || k.hp <= 0 || this.run.phase !== "reign") return;
       const g2 = this.ctx;
       const p = sovereignParticle(k);
       const x = px(k.x), y = px(k.y);
       const r = px(p.radius);
-      const rgb = k.anchored ? "210,190,255" : "150,220,255";
+      const form = formFor(this.run.world.aeon);
+      const rgb = warmth(contrastFactor(p, waterAt(this.run, k.y)));
+      this.creature(x, y, r * 1.8, form, rgb, k.spin, 0.65);
+      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      g2.font = `700 10px ${MONO}`;
+      g2.fillStyle = INK;
+      g2.textAlign = "center";
+      g2.fillText(ADAPTATIONS[form].name, x, y - r - 57);
+      if (vulnerable(k, tameHealth(this.run))) {
+        g2.strokeStyle = `rgba(${JADE},0.25)`;
+        g2.setLineDash([4, 6]);
+        g2.beginPath();
+        g2.arc(x, y, px(TAME_REACH), 0, Math.PI * 2);
+        g2.stroke();
+        g2.setLineDash([]);
+        g2.fillStyle = `rgb(${JADE})`;
+        g2.fillText(canBond(this.run) ? `HOLD ${G.crown} TO BOND` : "WEAKENED \xB7 APPROACH TO BOND", x, y + r + 35);
+        bar(g2, x - 55, y + r + 50, 110, 5, this.run.bond.progress / tameTime(this.run), `rgb(${JADE})`, "");
+      }
+      g2.textAlign = "left";
       const glow = g2.createRadialGradient(x, y, 0, x, y, r * 4);
       glow.addColorStop(0, `rgba(${rgb},0.34)`);
       glow.addColorStop(1, "rgba(0,0,0,0)");
@@ -5205,7 +6570,7 @@
       g2.beginPath();
       g2.arc(x, y, r * 4, 0, Math.PI * 2);
       g2.fill();
-      if (wearing(this.run)) {
+      if (wearing(this.run) && !this.intent?.crownDown) {
         const beat = 0.6 + 0.4 * Math.sin(this.t * 22);
         g2.strokeStyle = `rgba(255,255,255,${(0.3 * beat).toFixed(3)})`;
         g2.lineWidth = 3;
@@ -5218,8 +6583,13 @@
         g2.fillText("YOUR HAND IS ON IT", x, y + r + 16);
         g2.textAlign = "left";
       }
+      const fray = this.run.fray;
       const wind = Math.max(0, (VOLLEY_WIND - k.beat) / VOLLEY_WIND);
-      if (wind > 0) {
+      const plain = fray.next !== "charge" && fray.next !== "shock";
+      if (wind > 0 && !plain) this.drawGambitWind(x, y, r, wind);
+      if (wind > 0 && fray.next === "echo") this.drawEcho(x, y, echoArms(this.run), wind, 0.5);
+      if (fray.echo) this.drawEcho(x, y, fray.echo.arms, 1, 0.85);
+      if (wind > 0 && plain) {
         const arms = volley(k);
         g2.lineWidth = 1 + wind * 2.6;
         for (const [dx, dy] of arms) {
@@ -5237,6 +6607,50 @@
         g2.beginPath();
         g2.arc(x, y, r + 6 + (1 - wind) * 26, 0, Math.PI * 2);
         g2.stroke();
+      }
+      if (fray.charge > 0 && fray.lane) {
+        g2.strokeStyle = `rgba(${rgb},0.35)`;
+        g2.lineWidth = r * 1.2;
+        g2.lineCap = "round";
+        g2.beginPath();
+        g2.moveTo(x - fray.lane.dx * 40, y - fray.lane.dy * 40);
+        g2.lineTo(x, y);
+        g2.stroke();
+        g2.lineCap = "butt";
+      }
+      if (fray.daze > 0) {
+        g2.fillStyle = "rgba(255,240,160,0.85)";
+        for (let i = 0; i < 3; i++) {
+          const a2 = this.t * 4 + i * Math.PI * 2 / 3;
+          g2.beginPath();
+          g2.arc(x + Math.cos(a2) * (r + 9), y - r - 4 + Math.sin(a2) * 4, 2, 0, Math.PI * 2);
+          g2.fill();
+        }
+        g2.font = `700 8px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillText("DAZED", x, y + r + 26);
+        g2.textAlign = "left";
+      }
+      if (fray.snare > 0) {
+        g2.strokeStyle = `rgba(${JADE},0.55)`;
+        g2.lineWidth = 1;
+        for (let i = 0; i < 8; i++) {
+          const a2 = i * Math.PI / 4 + 0.2;
+          g2.beginPath();
+          g2.moveTo(x, y);
+          g2.lineTo(x + Math.cos(a2) * (r + 18), y + Math.sin(a2) * (r + 18));
+          g2.stroke();
+        }
+        for (const rr of [r + 7, r + 13, r + 18]) {
+          g2.beginPath();
+          g2.arc(x, y, rr, 0, Math.PI * 2);
+          g2.stroke();
+        }
+        g2.fillStyle = `rgb(${JADE})`;
+        g2.font = `700 8px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillText(`SNARED ${fray.snare.toFixed(1)}S`, x, y + r + 26);
+        g2.textAlign = "left";
       }
       g2.strokeStyle = `rgba(${rgb},0.85)`;
       g2.lineWidth = 2.4;
@@ -5260,20 +6674,24 @@
       g2.fillRect(x - w / 2, y - r - 22, w, 5);
       g2.fillStyle = k.anchored ? "#d2beff" : "#8ce9ff";
       g2.fillRect(x - w / 2, y - r - 22, w * (k.hp / k.maxHp), 5);
+      const share = tameHealth(this.run);
+      g2.fillStyle = `rgb(${JADE})`;
+      g2.fillRect(x - w / 2 + w * share - 1, y - r - 25, 2, 11);
       const need = dischargesToKill(this.run);
-      const bearing = this.run.structures.filter((st) => bearsOn(st, k.x, k.y)).length;
+      const organelleIds = new Set(this.run.organelles.map((o) => o.hostId));
+      const bearing = this.run.structures.filter((st) => !organelleIds.has(st.id) && bearsOn(st, k.x, k.y)).length;
       g2.font = `700 9px ${MONO}`;
       g2.textAlign = "center";
       g2.fillStyle = bearing > 0 ? "#8ce9ff" : "rgba(255,255,255,0.45)";
       g2.fillText(
-        Number.isFinite(need) ? `${need} DISCHARGE${need === 1 ? "" : "S"} TO KILL` : "NOTHING YOU OWN CAN KILL IT",
+        Number.isFinite(need) ? `${need} DISCHARGE${need === 1 ? "" : "S"} TO KILL` : k.anchored ? "BUILD STRUCTURES TO WEAKEN IT" : "GRIP TO WEAKEN \xB7 BUILD TO DISCHARGE",
         x,
         y - r - 30
       );
       g2.fillStyle = bearing > 0 ? "#8ce9ff" : "#ff5a5a";
       g2.font = `700 8px ${MONO}`;
       g2.fillText(
-        bearing > 0 ? `${bearing} OF YOUR BUILDINGS BEAR ON IT  \xB7  ${GLYPH.keys.grip} ONE TO FIRE IT` : "NOTHING YOU OWN IS AIMED AT IT  \xB7  MOVE THE KING INTO AN ARM",
+        bearing > 0 ? `${bearing} OF YOUR BUILDINGS BEAR ON IT  \xB7  ${G.grip} ONE TO FIRE IT` : "NOTHING YOU OWN IS AIMED AT IT  \xB7  MOVE THE KING INTO AN ARM",
         x,
         y - r - 41
       );
@@ -5288,9 +6706,39 @@
     }
     drawBolts() {
       const g2 = this.ctx;
-      for (const b of this.run.bolts) {
+      const run = this.run;
+      const you = run.you;
+      const ready = you.dash <= 0 && you.dashCool <= 0 && !run.wave.spent && run.wave.stamina >= DASH_COST;
+      const cue = 7e-5;
+      for (const b of run.bolts) {
+        if (!this.onCamera(b.x, b.y, 40)) continue;
         const x = px(b.x), y = px(b.y);
         const a = Math.min(1, b.life);
+        if (b.thrown) {
+          g2.strokeStyle = `rgba(255,201,74,${(a * 0.9).toFixed(2)})`;
+          g2.lineWidth = 3;
+          g2.beginPath();
+          g2.moveTo(x - b.vx * PX * 0.05, y - b.vy * PX * 0.05);
+          g2.lineTo(x, y);
+          g2.stroke();
+          g2.fillStyle = `rgba(255,245,200,${a.toFixed(2)})`;
+          g2.beginPath();
+          g2.arc(x, y, 3.2, 0, Math.PI * 2);
+          g2.fill();
+          continue;
+        }
+        if (ready) {
+          const dx = you.x - b.x, dy = you.y - b.y;
+          const d = Math.hypot(dx, dy);
+          if (d < cue && dx * b.vx + dy * b.vy > 0) {
+            const f = 1 - Math.max(0, d - catchReach(run)) / (cue - catchReach(run));
+            g2.strokeStyle = `rgba(255,201,74,${(0.2 + 0.7 * f).toFixed(2)})`;
+            g2.lineWidth = 1.4;
+            g2.beginPath();
+            g2.arc(x, y, 4 + (1 - f) * 9, 0, Math.PI * 2);
+            g2.stroke();
+          }
+        }
         g2.strokeStyle = `rgba(255,140,190,${(a * 0.85).toFixed(2)})`;
         g2.lineWidth = 2;
         g2.beginPath();
@@ -5301,6 +6749,94 @@
         g2.beginPath();
         g2.arc(x, y, 2.4, 0, Math.PI * 2);
         g2.fill();
+      }
+    }
+    /** A charge's lane or a shock's reach, for the whole of the wind-up. */
+    drawGambitWind(x, y, r, wind) {
+      const g2 = this.ctx;
+      const fray = this.run.fray;
+      if (fray.next === "charge" && fray.lane) {
+        const len = px(chargeLength()) + r;
+        const half = px(chargeReach(this.run.throne));
+        g2.save();
+        g2.translate(x, y);
+        g2.rotate(Math.atan2(fray.lane.dy, fray.lane.dx));
+        g2.fillStyle = `rgba(255,120,150,${(0.06 + wind * 0.2).toFixed(3)})`;
+        g2.fillRect(0, -half, len, half * 2);
+        g2.strokeStyle = `rgba(255,120,150,${(0.3 + wind * 0.5).toFixed(3)})`;
+        g2.lineWidth = 1.2;
+        g2.strokeRect(0, -half, len, half * 2);
+        g2.lineWidth = 2;
+        for (let i = 0; i < 4; i++) {
+          const raw = (this.t * 1.6 + i / 4) % 1;
+          const u = (raw < 0 ? raw + 1 : raw) * len;
+          g2.beginPath();
+          g2.moveTo(u - 6, -half * 0.5);
+          g2.lineTo(u, 0);
+          g2.lineTo(u - 6, half * 0.5);
+          g2.stroke();
+        }
+        g2.restore();
+        g2.fillStyle = `rgba(255,150,175,${(0.5 + wind * 0.5).toFixed(2)})`;
+        g2.font = `700 9px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillText("CHARGE  \xB7  STEP OFF THE LANE", x + fray.lane.dx * len * 0.6, y + fray.lane.dy * len * 0.6 - half - 6);
+        g2.textAlign = "left";
+      }
+      if (fray.next === "shock") {
+        const R = px(shockReach(this.run.throne));
+        g2.strokeStyle = `rgba(255,120,150,${(0.3 + wind * 0.55).toFixed(3)})`;
+        g2.lineWidth = 1.5;
+        g2.setLineDash([6, 6]);
+        g2.beginPath();
+        g2.arc(x, y, R, 0, Math.PI * 2);
+        g2.stroke();
+        g2.setLineDash([]);
+        g2.lineWidth = 3;
+        g2.beginPath();
+        g2.arc(x, y, r + 4 + (1 - wind) * 30, 0, Math.PI * 2);
+        g2.stroke();
+        g2.fillStyle = `rgba(255,150,175,${(0.5 + wind * 0.5).toFixed(2)})`;
+        g2.font = `700 9px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillText("SHOCK  \xB7  GET OUTSIDE THE RING", x, y - R - 8);
+        g2.textAlign = "left";
+      }
+    }
+    /** An echo's second set: dashed while it waits, and it waits in plain sight. */
+    drawEcho(x, y, arms, wind, alpha) {
+      const g2 = this.ctx;
+      g2.strokeStyle = `rgba(200,160,255,${(alpha * (0.35 + 0.5 * wind)).toFixed(3)})`;
+      g2.lineWidth = 1.5;
+      g2.setLineDash([5, 5]);
+      for (const [dx, dy] of arms) {
+        g2.beginPath();
+        g2.moveTo(x, y);
+        g2.lineTo(x + dx * 240 * wind, y + dy * 240 * wind);
+        g2.stroke();
+      }
+      g2.setLineDash([]);
+    }
+    /** Shock fronts on their way out, and where they stop. */
+    drawGambits() {
+      const fray = this.run.fray;
+      if (fray.rings.length === 0) return;
+      const g2 = this.ctx;
+      for (const ring2 of fray.rings) {
+        const x = px(ring2.x), y = px(ring2.y);
+        const f = Math.min(1, ring2.r / ring2.max);
+        g2.strokeStyle = `rgba(255,120,150,${(0.9 - f * 0.5).toFixed(3)})`;
+        g2.lineWidth = 4;
+        g2.beginPath();
+        g2.arc(x, y, px(ring2.r), 0, Math.PI * 2);
+        g2.stroke();
+        g2.strokeStyle = "rgba(255,120,150,0.25)";
+        g2.lineWidth = 1;
+        g2.setLineDash([6, 6]);
+        g2.beginPath();
+        g2.arc(x, y, px(ring2.max), 0, Math.PI * 2);
+        g2.stroke();
+        g2.setLineDash([]);
       }
     }
     drawSparks() {
@@ -5387,15 +6923,51 @@
       g2.beginPath();
       g2.arc(x, y, r * 4.5, 0, Math.PI * 2);
       g2.fill();
-      g2.fillStyle = `rgba(${rgb},0.9)`;
+      const form = companion(run)?.form ?? "strider";
+      const heading = Math.atan2(run.aim.y - you.y, run.aim.x - you.x) + Math.PI / 2;
+      this.creature(x, y, r * 1.65, form, rgb, heading);
+      g2.fillStyle = `rgba(${rgb},0.6)`;
       g2.beginPath();
-      g2.arc(x, y, r, 0, Math.PI * 2);
+      g2.arc(x, y, r * 0.65, 0, Math.PI * 2);
       g2.fill();
       g2.strokeStyle = "#eaffff";
       g2.lineWidth = 1.4;
       g2.beginPath();
       g2.arc(x, y, r, 0, Math.PI * 2);
       g2.stroke();
+      if (you.iframe > 0) {
+        g2.strokeStyle = `rgba(255,201,74,${(0.35 + you.iframe * 3).toFixed(3)})`;
+        g2.lineWidth = 1.4;
+        g2.setLineDash([2, 3]);
+        g2.beginPath();
+        g2.arc(x, y, px(catchReach(run)), 0, Math.PI * 2);
+        g2.stroke();
+        g2.setLineDash([]);
+      }
+      if (rushing(run)) {
+        g2.strokeStyle = `rgba(255,201,74,${(0.35 + 0.25 * Math.sin(this.t * 14)).toFixed(3)})`;
+        g2.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const a2 = this.t * 3 + i * Math.PI / 3;
+          g2.beginPath();
+          g2.arc(x, y, r + 11, a2, a2 + 0.5);
+          g2.stroke();
+        }
+      }
+      if (shielded(run)) {
+        g2.strokeStyle = "rgba(255,201,74,0.75)";
+        g2.fillStyle = "rgba(255,201,74,0.08)";
+        g2.lineWidth = 2;
+        g2.beginPath();
+        for (let i = 0; i <= 6; i++) {
+          const a2 = i * Math.PI / 3 + this.t;
+          const hx = x + Math.cos(a2) * (r + 16), hy = y + Math.sin(a2) * (r + 16);
+          if (i === 0) g2.moveTo(hx, hy);
+          else g2.lineTo(hx, hy);
+        }
+        g2.fill();
+        g2.stroke();
+      }
       if (you.dash > 0) {
         g2.strokeStyle = `rgba(255,255,255,${(you.dash / DASH_TIME * 0.8).toFixed(3)})`;
         g2.lineWidth = 2;
@@ -5428,14 +7000,22 @@
       g2.globalAlpha = 1;
       g2.textAlign = "left";
     }
-    // ── hud ───────────────────────────────────────────────────────────────────
-    slotRect(i) {
-      return { x: VIEW_W - 18 - (i + 1) * 46 + 6, y: VIEW_H - 62, w: 40, h: 44 };
+    rackWindow() {
+      const n = this.run.cells.length;
+      const count = Math.min(n, _Game.RACK_SLOTS);
+      const first = Math.max(0, Math.min(n - count, this.selected - Math.floor(count / 2)));
+      return { first, count };
+    }
+    /** The rectangle of the j-th VISIBLE slot, counted from the right. */
+    slotRect(j) {
+      return { x: VIEW_W - 18 - (j + 1) * 46 + 6, y: VIEW_H - 62, w: 40, h: 44 };
     }
     slotAt(sx, sy) {
-      for (let i = 0; i < this.run.cells.length; i++) {
-        const r = this.slotRect(i);
-        if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+      if (this.screen !== "play") return -1;
+      const { first, count } = this.rackWindow();
+      for (let j = 0; j < count; j++) {
+        const r = this.slotRect(j);
+        if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return first + j;
       }
       return -1;
     }
@@ -5444,7 +7024,7 @@
       const run = this.run;
       const w = run.wave;
       g2.textBaseline = "top";
-      for (let i = 0; i < MAX_INTEGRITY; i++) {
+      for (let i = 0; i < maxIntegrity(run); i++) {
         const on = i < run.integrity;
         g2.fillStyle = on ? run.integrity === 1 ? RED : "#5ef0c0" : "rgba(255,255,255,0.09)";
         g2.beginPath();
@@ -5461,9 +7041,9 @@
       bar(
         g2,
         18,
-        66,
+        78,
         176,
-        7,
+        5,
         hot,
         hot > 0.66 ? "#ff5a5a" : hot > 0.33 ? "#ffa24a" : "#6ea8c8",
         `WATER ${w.tC.toFixed(0)}C`
@@ -5471,15 +7051,15 @@
       if (hot > 0.08) {
         g2.font = `700 8px ${MONO}`;
         g2.fillStyle = hot > 0.66 ? "#ff5a5a" : "#8ce9ff";
-        g2.fillText(`THIN - EVERYTHING x${rate.toFixed(2)}`, 200, 72);
+        g2.fillText(`THIN - EVERYTHING x${rate.toFixed(2)}`, 200, 86);
       }
       const af = w.amplitude / w.maxAmplitude;
       bar(
         g2,
         18,
-        76,
+        103,
         176,
-        7,
+        4,
         af,
         w.inverted ? `rgb(${ANTI})` : `rgb(${NODE})`,
         w.inverted ? "GRIP \xB7 ANTINODE \xB7 PUSH" : "GRIP \xB7 NODE \xB7 PULL"
@@ -5487,7 +7067,7 @@
       const world = run.world;
       g2.font = `600 9px ${MONO}`;
       g2.fillStyle = FAINT2;
-      g2.fillText(`${(frequency(w) / 1e6).toFixed(1)} MHZ   ${world.medium.c.toFixed(0)} M/S   ${world.medium.rho.toFixed(0)} KG/M3   PITCH ${(world.pitch * 1e6).toFixed(0)} UM`, 18, 100);
+      g2.fillText(`${(frequency(w) / 1e6).toFixed(1)} MHZ   ${world.medium.c.toFixed(0)} M/S   ${world.medium.rho.toFixed(0)} KG/M3   PITCH ${(world.pitch * 1e6).toFixed(0)} UM`, 18, 222);
       g2.textAlign = "center";
       g2.fillStyle = INK;
       g2.font = `700 13px ${MONO}`;
@@ -5521,6 +7101,7 @@
       g2.fillText("SCORE", VIEW_W - 18, 46);
       g2.textAlign = "left";
       this.drawRack();
+      this.drawJourney();
       this.drawChannel();
       this.drawObjective();
       this.drawReadout();
@@ -5538,7 +7119,7 @@
       g2.font = `600 9px ${MONO}`;
       const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
       const spent = run.delivered >= suspension(run) && run.entities.filter((e) => e.faction === "motif").length < suspension(run) * 0.4;
-      const hint = run.phase === "reign" ? `${G.grip} ON YOUR OWN BUILDINGS TO DISCHARGE THEM   \xB7   ${G.dash} TO BURST CLEAR` : run.throne.fed.length === 0 && spent ? `THIS WATER IS GATHERED OUT   \xB7   ${G.crown} ON THE THRONE FEEDS IT   \xB7   A NEW WORLD IS THE ONLY NEW WATER` : run.cells.length > 0 ? `${G.place} BUILDS ON THE RING   \xB7   ${G.crown} ON THE THRONE FEEDS IT INSTEAD` : run.throne.fed.length > 0 ? `HOLD ${G.crown} TO WAKE IT   \xB7   TAP IT ON THE THRONE TO FEED MORE` : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   \xB7   FOUR MAKES A CELL`;
+      const hint = run.phase === "reign" ? vulnerable(run.throne, tameHealth(run)) ? `HOLD ${G.crown} NEAR THE BOSS TO BOND   \xB7   LET GO TO KEEP FIGHTING` : `${G.grip} ON YOUR BUILDINGS TO FIRE   \xB7   ${G.dash} INTO AN ARM THROWS IT BACK   \xB7   TAME BELOW ${Math.round(tameHealth(run) * 100)}%` : run.throne.fed.length === 0 && spent ? `THIS WATER IS GATHERED OUT   \xB7   ${G.crown} ON THE THRONE FEEDS IT   \xB7   A NEW WORLD IS THE ONLY NEW WATER` : run.cells.length > 0 ? `${G.place} BUILDS ON THE RING   \xB7   ${G.crown} ON THE THRONE FEEDS IT INSTEAD` : run.throne.fed.length > 0 ? `HOLD ${G.crown} TO WAKE IT   \xB7   TAP IT ON THE THRONE TO FEED MORE` : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   \xB7   FOUR MAKES A CELL`;
       g2.fillText(hint, VIEW_W / 2, VIEW_H - 16);
       g2.textAlign = "left";
     }
@@ -5603,8 +7184,33 @@
         g2.textAlign = "left";
         return;
       }
-      run.cells.forEach((c, i) => {
-        const r = this.slotRect(i);
+      const selected = run.cells[this.selected] ?? run.cells[0];
+      const role = selected.ability === "anchor" ? "VOLLEY GUARD" : selected.ability === "thrust" ? "DASH RECOVERY" : "FASTER BONDING";
+      const { first, count } = this.rackWindow();
+      let summary = "";
+      if (run.cells.length > count) {
+        const tally = /* @__PURE__ */ new Map();
+        for (const c of run.cells) tally.set(c.group.hm, (tally.get(c.group.hm) ?? 0) + 1);
+        summary = `  \xB7  RACK ${run.cells.length}: ` + [...tally].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([hm, n]) => `${hm}x${n}`).join(" ");
+      }
+      g2.font = `600 9px ${MONO}`;
+      g2.textAlign = "right";
+      g2.fillStyle = INK;
+      g2.fillText(`LIMB TIP: ${role}${summary}`, VIEW_W - 18, VIEW_H - 98);
+      if (first + count < run.cells.length) {
+        g2.fillStyle = DIM;
+        g2.textAlign = "left";
+        g2.fillText(`< +${run.cells.length - first - count}`, this.slotRect(count - 1).x, VIEW_H - 78);
+      }
+      if (first > 0) {
+        g2.fillStyle = DIM;
+        g2.textAlign = "right";
+        g2.fillText(`+${first} >`, VIEW_W - 18, VIEW_H - 78);
+      }
+      g2.textAlign = "left";
+      run.cells.slice(first, first + count).forEach((c, j) => {
+        const i = first + j;
+        const r = this.slotRect(j);
         const tint = c.ability === "thrust" ? NODE : c.ability === "weave" ? JADE : "255,201,74";
         const picked = i === this.selected;
         g2.fillStyle = picked ? "rgba(26,44,62,0.92)" : "rgba(10,18,28,0.8)";
@@ -5620,7 +7226,7 @@
         g2.font = `600 8px ${MONO}`;
         g2.fillText(`${c.structure}\xB7${c.freedom}`, r.x + r.w / 2, r.y + 21);
         g2.fillStyle = FAINT2;
-        g2.fillText(`${lobes(c.group.hm).length} ARM`, r.x + r.w / 2, r.y + 32);
+        g2.fillText(`${lobes(c.group.hm).length} SHOT`, r.x + r.w / 2, r.y + 32);
         g2.textAlign = "left";
         g2.fillStyle = FAINT2;
         g2.font = `600 8px ${MONO}`;
@@ -5685,13 +7291,15 @@
       g2.textAlign = "center";
       g2.fillStyle = GOLD;
       g2.font = `700 13px ${MONO}`;
-      g2.fillText("OUT OF THE BODY", VIEW_W / 2, 118);
+      g2.fillText(run.bond.tamed ? "A SOVEREIGN BECOMES A COMPANION" : "OUT OF THE BODY", VIEW_W / 2, 118);
       g2.fillStyle = INK;
       g2.font = `700 38px ${MONO}`;
       g2.fillText(run.world.name, VIEW_W / 2, 150);
       const e = epitaphFor(run.throne, run.world);
+      const offer = run.evolution.offer;
+      const top = offer.length ? 214 : 236, rowH = offer.length ? 19 : 30;
       e.lines.forEach(([k, v], i) => {
-        const y = 236 + i * 30;
+        const y = top + i * rowH;
         g2.textAlign = "right";
         g2.fillStyle = DIM;
         g2.font = `600 10px ${MONO}`;
@@ -5701,14 +7309,81 @@
         g2.font = `600 12px ${MONO}`;
         g2.fillText(v, VIEW_W / 2 + 18, y);
       });
+      if (offer.length) this.drawOffer();
       g2.textAlign = "center";
       const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
       g2.font = `700 14px ${MONO}`;
-      g2.fillText("ENTER IT", VIEW_W / 2, VIEW_H - 84);
+      g2.fillText(offer.length ? `${run.bond.tamed ? "EVOLVE AND ENTER TOGETHER" : "EVOLVE AND ENTER"}` : run.bond.tamed ? "ENTER TOGETHER" : "ENTER IT", VIEW_W / 2, VIEW_H - 84);
+      const ally = companion(run);
+      if (run.bond.tamed && ally) {
+        g2.fillStyle = `rgb(${JADE})`;
+        g2.font = `700 12px ${MONO}`;
+        g2.fillText(`${ADAPTATIONS[ally.form].name} \xB7 ${ADAPTATIONS[ally.form].gift} \xB7 BOND ${ally.rank}/3`, VIEW_W / 2, 192);
+      }
       g2.fillStyle = FAINT2;
       g2.font = `600 9px ${MONO}`;
-      g2.fillText("EVERYTHING ABOVE IS COMPUTED FROM WHAT YOU FED THE THRONE", VIEW_W / 2, VIEW_H - 58);
+      g2.fillText(offer.length ? "THE WORLD ABOVE IS COMPUTED FROM WHAT YOU FED THE THRONE  \xB7  THE CARDS ARE GAME RULES" : "EVERYTHING ABOVE IS COMPUTED FROM WHAT YOU FED THE THRONE", VIEW_W / 2, VIEW_H - 58);
+      g2.textAlign = "left";
+    }
+    /** Where the i-th of n evolution cards sits on the birth screen. */
+    cardRect(i, n) {
+      const w = 262, h = 92, gap = 14;
+      const total = n * w + (n - 1) * gap;
+      return { x: VIEW_W / 2 - total / 2 + i * (w + gap), y: 420, w, h };
+    }
+    cardAt(sx, sy) {
+      const n = this.run.evolution.offer.length;
+      for (let i = 0; i < n; i++) {
+        const r = this.cardRect(i, n);
+        if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+      }
+      return -1;
+    }
+    /** Three ways to change, one to take. */
+    drawOffer() {
+      const g2 = this.ctx;
+      const run = this.run;
+      const offer = run.evolution.offer;
+      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      g2.textAlign = "center";
+      g2.font = `700 10px ${MONO}`;
+      g2.fillStyle = `rgb(${JADE})`;
+      g2.fillText("THE ORGANISM CHANGES  \xB7  CHOOSE ONE", VIEW_W / 2, 402);
+      offer.forEach((t, i) => {
+        const r = this.cardRect(i, offer.length);
+        const on = i === this.pick;
+        const info = TRAITS[t];
+        const rank = rankOf(run, t);
+        g2.fillStyle = on ? "rgba(20,48,52,0.96)" : "rgba(8,18,28,0.9)";
+        g2.fillRect(r.x, r.y, r.w, r.h);
+        g2.strokeStyle = on ? `rgb(${JADE})` : "rgba(160,255,214,0.25)";
+        g2.lineWidth = on ? 2 : 1;
+        g2.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+        g2.textAlign = "left";
+        g2.fillStyle = on ? `rgb(${JADE})` : INK;
+        g2.font = `700 12px ${MONO}`;
+        g2.fillText(info.name, r.x + 12, r.y + 10);
+        g2.textAlign = "right";
+        g2.fillStyle = DIM;
+        g2.font = `600 9px ${MONO}`;
+        g2.fillText(
+          rank > 0 ? `RANK ${rank} \u2192 ${rank + 1} OF ${info.max}` : `NEW \xB7 ${info.max} RANKS`,
+          r.x + r.w - 10,
+          r.y + 12
+        );
+        g2.textAlign = "left";
+        g2.fillStyle = "#9fbdd0";
+        g2.font = `600 9px ${MONO}`;
+        wrap(g2, info.says(rank), r.x + 12, r.y + 34, r.w - 24, 13);
+        g2.fillStyle = FAINT2;
+        g2.font = `600 8px ${MONO}`;
+        g2.fillText(String(i + 1), r.x + 4, r.y + r.h - 12);
+      });
+      g2.textAlign = "center";
+      g2.fillStyle = FAINT2;
+      g2.font = `600 9px ${MONO}`;
+      g2.fillText(`${this.pad.connected ? `${G.cycle} / D-PAD / STICK` : "Q / A-D / 1-3 / CLICK"} TO CHOOSE  \xB7  ${G.confirm} TO TAKE IT`, VIEW_W / 2, 522);
       g2.textAlign = "left";
     }
     drawDead() {
@@ -5733,11 +7408,14 @@
           return `${b.cells.length} CELLS${sym ? `  \xB7  ${sym.symbol}` : ""}${autonomous(b) ? "  \xB7  IT WORKED ALONE" : ""}`;
         })()],
         ["THE BOUND FIELD", run.bound.free ? "FREED" : n("tuned") > 0 ? "CAUGHT, THEN LOST" : "NEVER CAUGHT"],
-        ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, ${n("hit:touched")} DRIFTED INTO`],
+        ["KILLED YOU", `${n("hit:struck")} STRIKES, ${n("hit:volley")} ARMS, ${n("hit:charge") + n("hit:shock")} GAMBITS, ${n("hit:touched")} DRIFTED INTO`],
+        // Short enough to stay on screen with every clause in it: it starts at the
+        // centre line, so it has 430 pixels, which is about sixty characters.
+        ["FOUGHT BACK", `${run.fray.stats.caught} CAUGHT, ${run.fray.stats.landed} THROWN HOME${run.fray.stats.held ? `  \xB7  ALLY HELD ${run.fray.stats.held}` : ""}${run.fray.stats.repairs ? `  \xB7  MENDED ${run.fray.stats.repairs}` : ""}`],
         ["SCORE", String(run.score)]
       ];
       rows.forEach(([k, v], i) => {
-        const y = 244 + i * 26;
+        const y = 236 + i * 24;
         g2.textAlign = "right";
         g2.fillStyle = DIM;
         g2.font = `600 10px ${MONO}`;
@@ -5751,14 +7429,14 @@
       g2.font = `700 11px ${MONO}`;
       g2.fillStyle = `rgb(${NODE})`;
       this.verdict ?? (this.verdict = this.diagnosis());
-      g2.fillText(this.verdict, VIEW_W / 2, 412);
+      wrap(g2, this.verdict, VIEW_W / 2, 430, 820, 14, true);
       g2.fillStyle = DIM;
       g2.font = `600 10px ${MONO}`;
-      g2.fillText(`BEST ${this.best}   \xB7   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 436);
+      g2.fillText(`BEST ${this.best}   \xB7   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 470);
       const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
       g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
       g2.font = `700 14px ${MONO}`;
-      g2.fillText("BEGIN AGAIN", VIEW_W / 2, 470);
+      g2.fillText("BEGIN AGAIN", VIEW_W / 2, 500);
       g2.textAlign = "left";
     }
     drawCard() {
@@ -5798,6 +7476,12 @@
       g2.font = `700 34px ${MONO}`;
       g2.fillStyle = INK;
       g2.fillText("STOPPED", VIEW_W / 2, 118);
+      const ally = companion(run);
+      if (ally) {
+        g2.font = `600 10px ${MONO}`;
+        g2.fillStyle = `rgb(${JADE})`;
+        g2.fillText(`${ADAPTATIONS[ally.form].name} ${ally.rank}/3 \xB7 ${ADAPTATIONS[ally.form].gift}  \xB7  ${G.call} ${CALLS[ally.form].name}`, VIEW_W / 2, 92);
+      }
       g2.font = `600 10px ${MONO}`;
       g2.fillStyle = `rgb(${NODE})`;
       g2.fillText(
@@ -5811,26 +7495,32 @@
       const lines = [
         `${pad(G.move)}POINT WHERE TO GO. THE NODE LEADS YOU, AND YOU FALL INTO IT.`,
         `${pad(G.grip)}ONE TRAP UNDER YOUR HAND. HOLDS, KILLS, AND TRIPLES YOUR SPEED.`,
-        `${pad(G.dash)}BURST - FOUR TIMES THE FORCE. IT IS HOW YOU GATHER, AND HOW YOU DODGE.`,
-        `${pad(G.place)}BUILD HERE. IT NEVER FEEDS THE THRONE - THAT IS ITS OWN VERB.`,
+        `${pad(G.dash)}BURST - HOW YOU GATHER AND DODGE. AN ARM THAT REACHES YOU IN ONE GOES BACK.`,
+        `${pad(G.place)}TAP: BUILD. HOLD: GROW MITOCHONDRION ON A STRUCTURE (2 CELLS).`,
         `${pad(G.lift)}TAKE THE BUILDING YOU ARE STANDING ON BACK INTO YOUR HAND.`,
         `${pad(G.cycle)}CHOOSE WHICH CELL.`,
-        `${pad(G.crown)}TAP ON THE THRONE TO FEED IT. HOLD IT TO CROWN WHAT YOU FED.`,
+        `${pad(G.crown)}FEED / CROWN. IN COMBAT: HOLD NEAR A WEAKENED BOSS TO BOND.`,
         `${pad(G.depth)}RETUNE THE CHANNEL. THE ONLY WAY ANYTHING MOVES IN DEPTH.`,
+        `${pad(G.call)}CALL YOUR COMPANION: RUSH, AEGIS OR SNARE, ON A COOLDOWN.`,
         `${pad(G.mute)}SOUND.`,
         "",
-        "HARD WALLS ARE PRESSURE ANTINODES, SO A RESONANCE NEEDS A WHOLE NUMBER",
-        "OF HALF WAVELENGTHS ACROSS THE CHANNEL: MODE N PUTS N PLANES IN THE",
-        "WATER. NOTHING SWIMS UP. YOU MOVE EVERY PLANE, OR YOU MOVE NOTHING.",
+        "LIMB TIPS: POLAR = DASH RECOVERY, PIEZOELECTRIC = FASTER BONDING,",
+        "ANCHOR = VOLLEY SHIELD. STAND NEAR A TIP TO USE ITS SUPPORT.",
+        `MITOCHONDRIA STORE ENERGY. RETURN FOR STAMINA - AND IN A LULL, ${Math.round(repairCost(run))} OF IT MENDS ONE INTEGRITY.`,
         "",
-        "THE OTHER FIELD IS A MODE THIS WATER WILL NOT CARRY. BUILD A CRYSTAL",
-        "WHOSE BAND GAP CATCHES IT: HOW MUCH YOU BUILD DECIDES WHETHER THERE IS",
-        "A GAP, AND HOW FAR APART DECIDES WHERE IT SITS.",
+        `BOND: BELOW ${Math.round(tameHealth(run) * 100)}% HEALTH, HOLD ${G.crown} NEAR THE BOSS FOR ${tameTime(run)} SECONDS.`,
+        "HITS INTERRUPT YOU. YOUR WEAPONS REST WHILE YOU OFFER A BOND.",
+        `${G.cycle}: SWITCH COMPANION WHILE PAUSED. REPEATED BONDS GROW TO RANK 3.`,
+        "FROM THE SECOND WORLD, EVERY SEVEN SECONDS OR SO THE KING PLAYS ITS GAMBIT. IT IS DRAWN FIRST.",
         "",
         "WHAT SHARES YOUR CONTRAST COMES TO YOUR FEET. THE REST IS HELD OFF.",
         "A HUNTER STOPS AND GATHERS BEFORE IT STRIKES, AND GOES WHERE IT POINTED."
       ];
-      lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 196 + i * 17));
+      const traits = held(run);
+      if (traits.length) {
+        lines.push("", `EVOLVED: ${traits.map(([t, r]) => `${TRAITS[t].name} ${r}`).join("  \xB7  ")}`);
+      }
+      lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 186 + i * 15));
       const it = this.intent;
       g2.font = `600 9px ${MONO}`;
       g2.fillStyle = this.pad.connected ? `rgb(${JADE})` : GOLD;
@@ -5901,14 +7591,22 @@
       const causes = [
         ["struck", n("hit:struck")],
         ["volley", n("hit:volley")],
-        ["touched", n("hit:touched")]
+        ["touched", n("hit:touched")],
+        ["charge", n("hit:charge")],
+        ["shock", n("hit:shock")]
       ];
       const worst = causes.sort((a, b) => b[1] - a[1])[0];
       if (worst[1] > 0) {
         if (worst[0] === "struck") {
           return n("dash") < n("strike") / 4 ? "THEY TELEGRAPH. WHEN ONE STOPS AND GATHERS, BURST OFF THE LINE IT SHOWS" : "CLOSE YOUR HAND ON ONE AND IT CANNOT STRIKE AT ALL";
         }
-        if (worst[0] === "volley") return "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
+        if (worst[0] === "volley") {
+          return run.fray.stats.caught === 0 ? "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS - OR BURST INTO ONE AS IT ARRIVES AND IT GOES BACK AT THE KING" : "ITS ARMS ARE DRAWN BEFORE THEY ARE THROWN. STAND IN THE GAPS";
+        }
+        if (worst[0] === "charge") return "A CHARGE'S LANE IS LOCKED WHEN IT STARTS TO WIND. STEP OFF IT";
+        if (worst[0] === "shock") {
+          return "A SHOCK FRONT STOPS AT ITS DASHED RING. BE OUTSIDE IT, OR BURST AS IT PASSES";
+        }
         return "WHAT SHARES YOUR CONTRAST IS DRAWN INTO YOUR NODE. HOLD IT OR LEAVE";
       }
       if (n("spent") >= 3) return "YOU RAN THE DRIVE DRY. THE LATTICE IS YOUR COVER - LET IT BACK UP";
@@ -5926,7 +7624,13 @@
       const keys = Object.keys(t).sort();
       return [
         `SONIC DRIFTER  ${run.t.toFixed(0)}s  aeon ${run.world.aeon} (${run.world.name})  phase ${run.phase}`,
-        `you: integrity ${run.integrity}/${MAX_INTEGRITY} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
+        `you: integrity ${run.integrity}/${maxIntegrity(run)} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
+        `companions: ${run.bond.companions.map((c, i) => `${i === run.bond.active ? "*" : ""}${c.form}:${c.rank}`).join(" ") || "none"}; bond ${run.bond.progress.toFixed(2)}s${companion(run) ? `; call ${callWait(run) > 0 ? `in ${callWait(run).toFixed(0)}s` : "ready"}` : ""}`,
+        `mitochondria: ${run.organelles.length}; stored energy ${run.organelles.reduce((n, o) => n + o.energy, 0).toFixed(0)}; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
+        // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather
+        // than inferred from events, so damage is in it and not just a count.
+        `battle: arms caught ${run.fray.stats.caught}, thrown home ${run.fray.stats.landed} for ${run.fray.stats.damage} (${run.throne.hm ? `${riposteDamage(run)} each now` : "no king"}); gambits ${run.fray.stats.gambits}; companion held ${run.fray.stats.held}; calls ${run.fray.stats.calls}; mended ${run.fray.stats.repairs}`,
+        `evolution: ${held(run).map(([t2, r]) => `${t2}:${r}`).join(" ") || "none"}${run.evolution.offer.length ? `; offered [${run.evolution.offer.join(" ")}]` : ""}`,
         `built ${run.built} cells; ${run.structures.length} standing; rack [${run.cells.map((c) => c.group.hm).join(" ")}]`,
         `throne: ${run.throne.fed.length ? `fed [${run.throne.fed.join(" ")}] -> ${run.throne.hm}` : "empty"}${run.throne.awake ? ` awake ${run.throne.hp.toFixed(0)}/${run.throne.maxHp}` : ""}${run.throne.fed.length ? (() => {
           const led = throneLedger(run.throne, run.world.aeon);
@@ -6026,6 +7730,16 @@
     }
   };
   __publicField(_Game, "CROWN_HOLD", 0.9);
+  // ── hud ───────────────────────────────────────────────────────────────────
+  /**
+   * How many rack slots fit between the readout panel and the right edge.
+   *
+   * THE RACK HAD NO WINDOW. It drew every cell in a row leftwards from the
+   * corner, so the aeon-6 report's hundred cells ran four and a half thousand
+   * pixels off the left of the screen, and the selected cell was usually one of
+   * them. It now shows a window around the selection.
+   */
+  __publicField(_Game, "RACK_SLOTS", 13);
   var Game = _Game;
   function warmth(phi) {
     if (Math.abs(phi) < 0.015) return "190,200,215";
@@ -6101,7 +7815,9 @@
     g2.fill();
     g2.stroke();
   }
-  function wrap(g2, text, x, y, maxW, lh) {
+  function wrap(g2, text, x, y, maxW, lh, centred = false) {
+    const was = g2.textAlign;
+    if (centred) g2.textAlign = "center";
     let line = "";
     let row = 0;
     for (const word of text.split(" ")) {
@@ -6115,6 +7831,7 @@
       }
     }
     if (line) g2.fillText(line, x, y + row * lh);
+    g2.textAlign = was;
   }
   var canvas = document.getElementById("game");
   if (canvas) {

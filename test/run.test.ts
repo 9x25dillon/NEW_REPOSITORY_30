@@ -89,7 +89,7 @@ test("each beast differs by its contrast factor, not by a stat block", () => {
   assert.ok(phi("splitter") < 0);
   assert.ok(phi("husk") > 0, "denser than water: your node REELS IT IN");
   assert.ok(beast("mote").particle.radius < CROSSOVER_RADIUS_ORDER, "under the crossover");
-  assert.equal(Object.keys(BEASTS).length, 4);
+  assert.equal(Object.keys(BEASTS).length, 6);
 });
 
 test("only a strike hurts you, and a body in your hand cannot strike", () => {

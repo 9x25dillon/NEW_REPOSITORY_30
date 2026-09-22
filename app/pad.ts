@@ -32,6 +32,8 @@ export interface Intent {
   /** One-shot: true only on the frame the button went down. */
   dash: boolean;
   place: boolean;
+  /** Hold to grow an organelle; release a short press to place a cell. */
+  placeDown: boolean;
   /** Take the building you are standing on back into your hand. One-shot. */
   lift: boolean;
   crown: boolean;
@@ -47,28 +49,35 @@ export interface Intent {
   pause: boolean;
   /** -1, 0 or +1: step the channel's harmonic. One-shot. The third dimension. */
   depth: number;
+  /** Call on your companion: its one active, on a cooldown. One-shot. */
+  call: boolean;
   mute: boolean;
 }
 
 const NOTHING: Intent = {
-  move: { x: 0, y: 0 }, grip: false, dash: false, place: false, lift: false,
+  move: { x: 0, y: 0 }, grip: false, dash: false, place: false, placeDown: false, lift: false,
   crown: false, crownDown: false, cycle: 0, confirm: false, pause: false,
-  depth: 0, mute: false,
+  depth: 0, call: false, mute: false,
 };
 
 /** Buttons in the standard mapping, by the name written on an Xbox pad. */
 const A = 0, B = 1, X = 2, Y = 3, LB = 4, RB = 5, LT = 6, RT = 7, BACK = 8, START = 9;
+/** The right stick pressed in, and the d-pad's sideways pair. */
+const R3 = 11, LEFT = 14, RIGHT = 15;
 
 interface Layout {
   grip: number[]; dash: number[]; place: number[]; lift: number[]; crown: number[];
   prev: number[]; next: number[]; confirm: number[]; pause: number[];
-  up: number[]; down: number[]; mute: number[];
+  up: number[]; down: number[]; call: number[]; mute: number[];
 }
 
+// NOTHING THAT WAS ALREADY BOUND MOVED. The call went on the right stick's
+// click, which nothing used, and the d-pad's sideways pair steps the rack both
+// ways — a rack that reaches a hundred cells cannot be walked one way only.
 const STANDARD: Layout = {
   grip: [RT, RB], dash: [A, LT], place: [X], lift: [LB], crown: [Y],
-  prev: [], next: [B], confirm: [START, A], pause: [START],
-  up: [12], down: [13], mute: [BACK],
+  prev: [LEFT], next: [B, RIGHT], confirm: [START, A], pause: [START],
+  up: [12], down: [13], call: [R3], mute: [BACK],
 };
 
 /**
@@ -88,8 +97,8 @@ const STANDARD: Layout = {
  */
 const LOOSE: Layout = {
   grip: [4, 5, 6, 7], dash: [0, 1], place: [2], lift: [4], crown: [3],
-  prev: [], next: [5], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8],
-  up: [12], down: [13], mute: [8],
+  prev: [14], next: [5, 15], confirm: [0, 1, 2, 3, 8, 9], pause: [9, 8],
+  up: [12], down: [13], call: [10, 11], mute: [8],
 };
 
 export class Pad {
@@ -184,6 +193,7 @@ export class Pad {
       out.grip = anyDown(m.grip);
       out.dash = anyHit(m.dash);
       out.place = anyHit(m.place);
+      out.placeDown = anyDown(m.place);
       out.lift = anyHit(m.lift);
       out.crown = anyHit(m.crown);
       out.crownDown = anyDown(m.crown);
@@ -191,6 +201,7 @@ export class Pad {
       out.confirm = anyHit(m.confirm);
       out.pause = anyHit(m.pause);
       out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
+      out.call = anyHit(m.call);
       out.mute = anyHit(m.mute);
 
       this.prev = [...gp.buttons].map((_, i) => down(i));
@@ -223,10 +234,12 @@ export class Pad {
     if (k("Space") || k("ShiftLeft") || k("ShiftRight")) out.grip = true;
     if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
     if (tap("KeyE") || tap("Enter")) out.place = true;
+    if (k("KeyE") || k("Enter")) out.placeDown = true;
     if (tap("KeyF")) out.lift = true;
     if (tap("KeyC")) out.crown = true;
     if (k("KeyC")) out.crownDown = true;
     if (tap("KeyQ")) out.cycle = -1;
+    if (tap("KeyR")) out.call = true;
     // NO RESTART KEY. It threw away a good long run on a single unconfirmed
     // keypress, in a game whose runs are ten minutes. Beginning again lives on
     // the screen you reach by dying, where it cannot be reached by accident.
@@ -317,13 +330,15 @@ export class Pad {
 export const GLYPH = {
   pad: {
     move: "L STICK", grip: "RT", dash: "A", place: "X", crown: "Y",
-    lift: "LB", cycle: "B", confirm: "START", pause: "START", depth: "D-PAD", mute: "BACK",
+    lift: "LB", cycle: "B", confirm: "START", pause: "START", depth: "D-PAD", call: "R3",
+    mute: "BACK",
   },
   // Mouse first, because the movement this game wants is a direction WITH a
   // magnitude and a pointer gives both continuously, where WASD gives eight
   // directions at full deflection.
   keys: {
     move: "MOUSE", grip: "L-CLICK", dash: "R-CLICK", place: "E / 1-9", crown: "C",
-    lift: "F", cycle: "Q", confirm: "SPACE", pause: "ESC / P", depth: "WHEEL", mute: "M",
+    lift: "F", cycle: "Q", confirm: "SPACE", pause: "ESC / P", depth: "WHEEL", call: "R",
+    mute: "M",
   },
 } as const;

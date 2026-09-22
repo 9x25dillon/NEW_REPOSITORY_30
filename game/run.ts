@@ -26,6 +26,19 @@
 
 import { beast } from "./beasts.js";
 import {
+  type Bond, type Form, ADAPTATIONS, canBond, formFor, newBond, recruit, support, supported,
+  tameTime,
+} from "./ecology.js";
+import { type Mitochondrion, metabolise } from "./organelles.js";
+import {
+  type Fray, type Gambit, beginWind, charging, frayStep, gambitContact, newFray, resetFray,
+  riposte, sovereignDrive, unleash,
+} from "./combat.js";
+import { allies, rushing, shielded } from "./allies.js";
+import {
+  type Evolution, type Trait, newEvolution, offerFor, phagocyteEvery, rankOf,
+} from "./evolution.js";
+import {
   type Body, autonomous, bodiesOf, gaitDirection, reaches, snap, walkSpeed,
 } from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
@@ -43,7 +56,7 @@ import {
   streamingSpeed,
 } from "./wave.js";
 import {
-  type Pilot, CRUISE_AMPLITUDE, aimFor, beginDash, carry, concentrate, handed,
+  type Pilot, CRUISE_AMPLITUDE, DASH_COST, aimFor, beginDash, carry, concentrate, handed,
   newPilot,
 } from "./pilot.js";
 import {
@@ -281,6 +294,10 @@ export const BIND_DWELL = 0.26;
  * with the same body still standing on you.
  */
 export const MAX_INTEGRITY = 6;
+/** The integrity this run can hold: MAX_INTEGRITY, and one more per MEMBRANE. */
+export function maxIntegrity(run: Run): number {
+  return MAX_INTEGRITY + rankOf(run, "membrane");
+}
 export const IFRAME = 1.8;
 /** How far a touch throws everything off you, m. */
 export const KNOCKBACK = 150e-6;
@@ -327,11 +344,16 @@ export interface Entity {
   cool: number;
   /** Which node plane is holding it up. The third dimension is an integer. */
   layer: number;
+  /** Seconds of hold a companion has put on it. Like `held`, it takes the
+   *  strike away; unlike `held`, it is not reset by your own field. */
+  seized?: number;
 }
 
 /** A volley arm in flight. */
 export interface Bolt {
   x: number; y: number; vx: number; vy: number; life: number; born: number;
+  /** Caught in a burst and going back at the king. It no longer hurts you. */
+  thrown?: boolean;
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
@@ -341,7 +363,7 @@ export type Phase = "settle" | "reign" | "birth" | "dead";
 export type Ev =
   /** What reached you. A post-mortem that cannot say WHY you died teaches
    *  nothing, and "you were hit six times" is not a reason. */
-  | { kind: "hit"; x: number; y: number; cause: "struck" | "touched" | "volley" }
+  | { kind: "hit"; x: number; y: number; cause: "struck" | "touched" | "volley" | Gambit }
   | { kind: "kill"; x: number; y: number; species: string; score: number }
   | { kind: "merge"; x: number; y: number }
   | { kind: "refuse"; x: number; y: number; text: string }
@@ -365,9 +387,30 @@ export type Ev =
   | { kind: "strike"; x: number; y: number; species: string }
   | { kind: "aiming"; x: number; y: number; arms: number }
   | { kind: "spent" }
+  | { kind: "guard"; x: number; y: number }
+  | { kind: "tamed"; x: number; y: number }
+  | { kind: "organelle"; x: number; y: number }
+  /** An arm caught in a burst: thrown back, or absorbed while you offer a bond. */
+  | { kind: "riposte"; x: number; y: number; thrown: boolean }
+  | { kind: "riposte-hit"; x: number; y: number; damage: number }
+  /** A king began a signature move. The wind-up is the telegraph. */
+  | { kind: "gambit"; x: number; y: number; gambit: Gambit }
+  | { kind: "charge"; x: number; y: number }
+  | { kind: "shock"; x: number; y: number }
+  | { kind: "ally"; x: number; y: number; species: string; form: Form }
+  | { kind: "call"; form: Form; x: number; y: number }
+  | { kind: "repair"; x: number; y: number }
+  | { kind: "mended"; x: number; y: number }
+  | { kind: "evolved"; trait: Trait; rank: number }
   | { kind: "death" };
 
 export interface Run {
+  bond: Bond;
+  organelles: Mitochondrion[];
+  /** The fight's own state: riposte tallies, gambits, snare, repair. */
+  fray: Fray;
+  /** What the organism has become between worlds. */
+  evolution: Evolution;
   world: World;
   wave: Wave;
   /** You. A particle in the water, moved by nothing but the field. */
@@ -481,6 +524,10 @@ export interface Run {
 export function startRun(seed = 1, ebb = false): Run {
   const world = firstWorld();
   const run: Run = {
+    bond: newBond(),
+    organelles: [],
+    fray: newFray(),
+    evolution: newEvolution(),
     world,
     wave: newWave(world.pitch, MAX_AMPLITUDE, focusFor(world.pitch), world.medium),
     you: newPilot(START.x + ARENA_W * 0.3, START.y + ARENA_H * 0.3),
@@ -644,9 +691,12 @@ export interface Input {
   grip: boolean;
   /** Edge-triggered: true on the frame the burst was asked for. */
   dash: boolean;
+  /** Held throne button during combat: offer a bond instead of dealing damage. */
+  tame?: boolean;
 }
 
 export function step(run: Run, input: Input, dt: number): void {
+  if (!Number.isFinite(dt) || dt <= 0) return;
   run.t += dt;
   const w = run.wave;
   const you = run.you;
@@ -669,6 +719,11 @@ export function step(run: Run, input: Input, dt: number): void {
   if (w.spent && !wasSpent) run.events.push({ kind: "spent" });
 
   if (alive && input.dash && beginDash(you, w, input.move.x, input.move.y)) {
+    // What a burst costs is the pilot's rule; what this run gives back of it is
+    // SURGE and a Strider's RUSH, paid straight back so the pilot is untouched.
+    const refund = rushing(run) ? DASH_COST : DASH_COST * 0.3 * rankOf(run, "surge");
+    if (refund > 0) w.stamina = Math.min(100, w.stamina + refund);
+    run.fray.burstCaught = false;
     run.events.push({ kind: "dash", x: you.x, y: you.y });
   }
   concentrate(you, w, input.grip && alive && !w.spent, dt);
@@ -684,6 +739,9 @@ export function step(run: Run, input: Input, dt: number): void {
   // to be computed twice, differently, in two modules.
   const cur = currentAt(run, you.x, you.y);
   const glass = chipFlow(run, you.x, you.y);
+  // Where this frame started, for the one test that must not be sampled: a
+  // burst crosses more water in a frame than the reach of a catch.
+  const from = { x: you.x, y: you.y };
   carry(you, w, dt, run.bounds, { x: cur.x + glass.x, y: cur.y + glass.y });
 
   if (run.iframe > 0) run.iframe -= dt;
@@ -725,9 +783,21 @@ export function step(run: Run, input: Input, dt: number): void {
   mergePass(run, dt);
   washOut(run, dt);
   crystallise(run);
-  driveStructures(run, dt);
-  if (run.phase === "reign") reign(run, dt);
+  // Holding the bond button is an explicit ceasefire for your own weapons.
+  if (!input.tame) driveStructures(run, dt);
+  if (run.phase === "reign") reign(run, dt, !!input.tame);
+  if (run.phase !== "reign" && run.phase !== "settle") return;
+  support(run, dt);
+  allies(run, dt);
+  metabolise(run, dt);
+  // Before contact, so an arm that reaches you inside a burst is caught rather
+  // than merely survived. A thrown arm can end the reign, and then nothing
+  // after it has a fight to run in.
+  riposte(run, !!input.tame, dt, from);
+  if (run.phase !== "reign" && run.phase !== "settle") return;
   contact(run, dt);
+  if (input.tame) bondWithSovereign(run, dt);
+  else run.bond.progress = 0;
 }
 
 /**
@@ -748,7 +818,7 @@ function release(run: Run, dt: number): void {
     if (b.held >= RELEASE_TIME) {
       b.free = true;
       run.score += 80;
-      run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 1);
+      run.integrity = Math.min(maxIntegrity(run), run.integrity + 1);
       run.events.push({ kind: "freed", x: b.x, y: b.y });
     }
   } else if (b.held > 0) {
@@ -856,7 +926,7 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
   const b = beast(e.species);
   if (b.behaviour === "drift") return { x: 0, y: 0 };
 
-  if (e.held > 0) {
+  if (e.held > 0 || (e.seized ?? 0) > 0) {
     e.wind = 0;
     e.strike = 0;
     return { x: 0, y: 0 };
@@ -889,6 +959,13 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
     return { x: 0, y: 0 };
   }
 
+  if (b.behaviour === "orbit") {
+    const turn = e.id % 2 ? 1 : -1;
+    const inward = r > STRIKE_RANGE * 0.9 ? 0.8 : 0.25;
+    return { x: (hx * inward - hy * turn) / r * b.speed,
+      y: (hy * inward + hx * turn) / r * b.speed };
+  }
+  if (b.behaviour === "ambush" && r > STRIKE_RANGE * 1.6) return { x: 0, y: 0 };
   return { x: (hx / r) * b.speed, y: (hy / r) * b.speed };
 }
 
@@ -937,6 +1014,19 @@ export function kill(run: Run, e: Entity): void {
   run.wave.stamina = Math.min(100, run.wave.stamina + KILL_REFUND);
   if (run.wave.stamina > 25) run.wave.spent = false;
   run.events.push({ kind: "kill", x: e.x, y: e.y, species: e.species, score: b.score });
+
+  // PHAGOCYTE, if this run evolved it: what you take apart mends you, now and then.
+  const every = phagocyteEvery(rankOf(run, "phagocyte"));
+  if (Number.isFinite(every) && b.behaviour !== "drift") {
+    run.evolution.kills++;
+    if (run.evolution.kills >= every) {
+      run.evolution.kills = 0;
+      if (run.integrity < maxIntegrity(run)) {
+        run.integrity++;
+        run.events.push({ kind: "mended", x: e.x, y: e.y });
+      }
+    }
+  }
 
   if (b.behaviour === "split") {
     for (let i = 0; i < 2; i++) {
@@ -1283,6 +1373,9 @@ export function latticePitch(run: Run): number {
  * change of shape needs the full retune.
  */
 export function reshape(run: Run): void {
+  const liveIds = new Set(run.structures.map((s) => s.id));
+  for (const id of run.bond.limbReadyAt.keys()) if (!liveIds.has(id)) run.bond.limbReadyAt.delete(id);
+  run.organelles = run.organelles.filter((o) => liveIds.has(o.hostId));
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
   run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
@@ -1555,8 +1648,9 @@ export function dischargesToKill(run: Run): number {
   // the 23 in that report, 124 against 192 — so this was optimistic by half
   // even before any aiming error.
   let best = 0;
+  const organelleIds = new Set(run.organelles.map((o) => o.hostId));
   const hms = [
-    ...run.structures.map((s) => s.hm),
+    ...run.structures.filter((s) => !organelleIds.has(s.id)).map((s) => s.hm),
     ...run.cells.map((c) => c.group.hm),
   ];
   for (const hm of hms) {
@@ -1647,6 +1741,7 @@ export function crown(run: Run): CrownResult {
   run.throne.awake = true;
   run.phase = "reign";
   run.spawnIn = 2;
+  resetFray(run);
   run.events.push({ kind: "crown", group: run.throne.hm, mass: run.throne.mass });
   return "crowned";
 }
@@ -1680,14 +1775,17 @@ function driveStructures(run: Run, dt: number): void {
   }
   const driving = handed(run.you);
   const spent: Structure[] = [];
+  const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+  const quicker = 1 - 0.25 * rankOf(run, "capacitor");
 
   const k = run.throne;
   const hunting = k.awake && k.hp > 0;
 
   for (const s of run.structures) {
+    if (organelleIds.has(s.id)) { s.charge = 0; continue; }
     const near = Math.hypot(s.x - run.you.x, s.y - run.you.y) < DRIVE_RADIUS;
     if (driving && near) {
-      s.charge = Math.min(1, s.charge + dt / chargeTime(s));
+      s.charge = Math.min(1, s.charge + dt / (chargeTime(s) * quicker));
       // IT WAITS FOR A TARGET. This used to fire the instant the charge filled,
       // bearing or nothing — so a building you had held for a second and a half
       // was spent into empty water if the king stepped out of the arm while it
@@ -1863,8 +1961,8 @@ export function discharge(run: Run, s: Structure): number {
 
 // ── the reign ───────────────────────────────────────────────────────────────
 
-const BOLT_SPEED = 2.4e-4;
-const BOLT_LIFE = 3.4;
+export const BOLT_SPEED = 2.4e-4;
+export const BOLT_LIFE = 3.4;
 
 /** How long the king's arms are visible before they are thrown. */
 export const VOLLEY_WIND = 0.55;
@@ -1949,21 +2047,38 @@ export function wearing(run: Run): boolean {
     && localAmplitude(run.wave, k.x, k.y) >= HOLD_PRESSURE;
 }
 
-function reign(run: Run, dt: number): void {
+function reign(run: Run, dt: number, taming = false): void {
   const k = run.throne;
+  const form = formFor(run.world.aeon);
+  const adaptation = ADAPTATIONS[form];
 
   // Its volleys turn, so the gaps cannot be camped — but the spin STOPS while
   // it is winding up. A telegraph that is still rotating is not a telegraph, it
   // is a rumour: the arms you were shown have to be the arms it throws.
   const winding = k.beat <= VOLLEY_WIND;
-  if (!winding) k.spin += dt * 0.55;
+  // A snared king is held whole: no drag, no spin, no volley clock.
+  const snared = run.fray.snare > 0;
+  if (!winding && !snared) k.spin += dt * 0.55;
 
-  // it drags itself toward you, and plants itself to throw
-  const hx = run.you.x - k.x, hy = run.you.y - k.y;
-  const r = Math.hypot(hx, hy) || 1e-12;
-  const sp = sovereignSpeed(k) * (winding ? 0.2 : 1);
-  let dx = (hx / r) * sp;
-  let dy = (hy / r) * sp;
+  // it drags itself toward you, and plants itself to throw — unless a charge,
+  // the daze after one, or a snare is deciding where it goes
+  let dx: number, dy: number;
+  const override = sovereignDrive(run);
+  if (override) {
+    dx = override.x;
+    dy = override.y;
+  } else {
+    const hx = run.you.x - k.x, hy = run.you.y - k.y;
+    const r = Math.hypot(hx, hy) || 1e-12;
+    const sp = sovereignSpeed(k) * adaptation.speed * (winding ? 0.2 : 1);
+    dx = (hx / r) * sp;
+    dy = (hy / r) * sp;
+    if (form === "weaver" && !winding) {
+      // Circle the player between casts; every cast still freezes its shown arms.
+      dx = ((hx - hy * 1.4) / r) * sp;
+      dy = ((hy + hx * 1.4) / r) * sp;
+    }
+  }
 
   // And the field acts on it, because it is a body in water like anything else
   // — unless you fed it something with no handle on it.
@@ -1973,7 +2088,7 @@ function reign(run: Run, dt: number): void {
   // its drift is stiff enough to ring at sixty frames a second, so it has to go
   // through the same substepping every other body does or it vibrates in place
   // instead of being drawn in.
-  if (!k.anchored) {
+  if (!k.anchored && !charging(run)) {
     const moved = advance(run.wave, k.x, k.y, sovereignParticle(k), dt / sovereignInertia(k));
     dx += (moved.x - k.x) / dt;
     dy += (moved.y - k.y) / dt;
@@ -1985,7 +2100,7 @@ function reign(run: Run, dt: number): void {
   // YOUR HAND, WHICH IS THE LAST THING YOU HAVE. Worked on by the drive like
   // anything else in the water, it comes apart — slowly, and only if you gave
   // it a handle to be held by.
-  if (wearing(run)) {
+  if (!taming && wearing(run)) {
     k.hp = Math.max(0, k.hp - wearRate(k) * dt);
     if (run.rand() < dt * WEAR_TICKS_PER_SECOND) {
       run.events.push({ kind: "wearing", x: k.x, y: k.y });
@@ -1994,7 +2109,7 @@ function reign(run: Run, dt: number): void {
   }
 
   // it eats what you built
-  if (run.structures.length > 0 && run.rand() < dt * 0.075) {
+  if (!snared && run.structures.length > 0 && run.rand() < dt * 0.075) {
     let victim = run.structures[0];
     let vr = Infinity;
     for (const s of run.structures) {
@@ -2014,22 +2129,34 @@ function reign(run: Run, dt: number): void {
     }
   }
 
-  // volleys, in the shape of its own group
-  if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
-    run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
-  }
-  k.beat -= dt;
-  if (k.beat <= 0) {
-    k.beat = cadence(k);
-    const arms = volley(k);
-    for (const [dx, dy] of arms) {
-      run.bolts.push({
-        x: k.x, y: k.y, vx: dx * BOLT_SPEED, vy: dy * BOLT_SPEED,
-        life: BOLT_LIFE, born: run.t,
-      });
+  // volleys, in the shape of its own group — or, from the second world on and
+  // no more than once every GAMBIT_GAP seconds, the king's own gambit (see
+  // combat.ts). Which one it is is decided when the wind-up BEGINS, because
+  // that is when the telegraph starts and what is drawn has to be what is thrown.
+  const boltSpeed = BOLT_SPEED * adaptation.boltSpeed;
+  if (!snared) {
+    if (k.beat > VOLLEY_WIND && k.beat - dt <= VOLLEY_WIND) {
+      const g = beginWind(run);
+      if (g !== "charge" && g !== "shock") {
+        run.events.push({ kind: "aiming", x: k.x, y: k.y, arms: volley(k).length });
+      }
     }
-    run.events.push({ kind: "volley", x: k.x, y: k.y, arms: arms.length });
+    k.beat -= dt;
+    if (k.beat <= 0) {
+      k.beat = cadence(k) * adaptation.cadence;
+      if (!unleash(run, boltSpeed)) {
+        const arms = volley(k);
+        for (const [dx, dy] of arms) {
+          run.bolts.push({
+            x: k.x, y: k.y, vx: dx * boltSpeed, vy: dy * boltSpeed,
+            life: BOLT_LIFE, born: run.t,
+          });
+        }
+        run.events.push({ kind: "volley", x: k.x, y: k.y, arms: arms.length });
+      }
+    }
   }
+  frayStep(run, dt);
 
   for (const b of run.bolts) {
     b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
@@ -2037,6 +2164,21 @@ function reign(run: Run, dt: number): void {
   run.bolts = run.bolts.filter(
     (bo) => bo.life > 0 && bo.x > run.bounds.x - 20e-6 && bo.x < run.bounds.x + run.bounds.w + 20e-6
       && bo.y > run.bounds.y - 20e-6 && bo.y < run.bounds.y + run.bounds.h + 20e-6);
+}
+
+/** Holding the bond through the whole interval is required; damage interrupts it. */
+export function bondWithSovereign(run: Run, dt: number): boolean {
+  if (!canBond(run) || run.iframe > 0) {
+    run.bond.progress = 0;
+    return false;
+  }
+  run.bond.progress += dt * (supported(run, "resonator") ? 1.75 : 1);
+  if (run.bond.progress < tameTime(run)) return false;
+  recruit(run);
+  run.events.push({ kind: "tamed", x: run.throne.x, y: run.throne.y });
+  run.bolts = [];
+  birth(run);
+  return true;
 }
 
 // ── being hit ───────────────────────────────────────────────────────────────
@@ -2060,6 +2202,7 @@ function contact(run: Run, dt: number): void {
   for (const e of run.entities) {
     if (e.faction !== "beast") continue;
     if (e.held > 0) continue;   // a body you have hold of is not free to reach you
+    if ((e.seized ?? 0) > 0) continue;   // nor is one your companion has
     const b = beast(e.species);
     if (!together(e.layer, run.layer)) continue;   // tens of microns apart in z
     if (Math.hypot(e.x - run.you.x, e.y - run.you.y) < TOUCH + particleOf(e).radius) {
@@ -2080,11 +2223,16 @@ function contact(run: Run, dt: number): void {
   }
 
   for (const b of run.bolts) {
+    if (b.thrown || b.life <= 0) continue;   // yours now, going the other way
     if (Math.hypot(b.x - run.you.x, b.y - run.you.y) < BOLT_TOUCH) {
       bite += 1; b.life = 0; volleyed = true;
     }
   }
   run.bolts = run.bolts.filter((b) => b.life > 0);
+
+  // The king's own gambits: a charge down its lane, a shock front crossing you.
+  const gambit = run.phase === "reign" ? gambitContact(run) : null;
+  if (gambit) bite += 1;
 
   if (drain > 0) {
     w.stamina = Math.max(0, w.stamina - drain * dt);
@@ -2093,12 +2241,19 @@ function contact(run: Run, dt: number): void {
 
   // The burst really is untouchable: you are crossing at four times cruise
   // speed and the thing reaching for you is not.
+  // A Warden's AEGIS turns whatever reaches you while it lasts.
+  if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0 && shielded(run)) {
+    if (run.t - run.fray.turned > 0.3) run.events.push({ kind: "guard", x: run.you.x, y: run.you.y });
+    run.fray.turned = run.t;
+    bite = 0;
+  }
   if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0) {
     run.integrity -= 1;
-    run.iframe = IFRAME;
+    run.iframe = IFRAME + 0.6 * rankOf(run, "chitin");
+    run.fray.lastHit = run.t;
     run.events.push({
       kind: "hit", x: run.you.x, y: run.you.y,
-      cause: volleyed ? "volley" : struck ? "struck" : "touched",
+      cause: gambit ?? (volleyed ? "volley" : struck ? "struck" : "touched"),
     });
     for (const e of run.entities) {
       if (e.faction !== "beast") continue;
@@ -2127,12 +2282,16 @@ function contact(run: Run, dt: number): void {
  */
 export function birth(run: Run): void {
   const k = run.throne;
+  if (run.phase !== "reign") return;
   const next = worldFrom(k, run.world.aeon + 1);
   run.phase = "birth";
   run.aeonsSurvived++;
   run.score += 40 + k.mass * 8;
   run.events.push({ kind: "birth", aeon: next.aeon, name: next.name });
   run.world = next;
+  // Every king you end, by killing it or by bonding with it, is a chance for
+  // the organism to change. The cards are dealt here and taken in `evolve`.
+  run.evolution.offer = offerFor(run);
 }
 
 /** Step into the world that was just born. */
@@ -2175,8 +2334,14 @@ export function enterWorld(run: Run): void {
   run.delivered = suspension(run);
   run.arriving = 0;
   run.bornAt = run.t;
-  run.integrity = Math.min(MAX_INTEGRITY, run.integrity + 2);
+  run.integrity = Math.min(maxIntegrity(run), run.integrity + 2);
   run.spawnIn = 4;
+  run.bond.progress = 0;
+  run.bond.tamed = false;
+  run.bond.ally = null;
+  run.bond.rushUntil = run.bond.aegisUntil = 0;
+  run.evolution.offer = [];
+  resetFray(run);
   run.phase = "settle";
 }
 

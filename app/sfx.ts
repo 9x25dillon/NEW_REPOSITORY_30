@@ -122,6 +122,42 @@ export class Sfx {
 
   hurt(): void { this.noise(0.09, 0.05); this.tone(120, 0.1, "sawtooth", 0.035, 60); }
 
+  /** An arm caught in a burst: a bright rising pair, the opposite of `aiming`. */
+  riposte(): void {
+    this.tone(660, 0.06, "square", 0.035, 990);
+    this.tone(1320, 0.1, "triangle", 0.025, undefined, 0.05);
+  }
+
+  /** And it landing: the king's own low note, answered an octave up. */
+  riposteHit(): void {
+    this.tone(196, 0.12, "sawtooth", 0.035, 392);
+    this.noise(0.06, 0.025);
+  }
+
+  /** A gambit winding. Each form has its own figure so it can be heard coming. */
+  gambit(kind: "charge" | "shock" | "echo"): void {
+    if (kind === "charge") { this.tone(82, 0.5, "sawtooth", 0.04, 165); return; }
+    if (kind === "shock") { this.tone(60, 0.55, "sine", 0.06, 45); this.noise(0.2, 0.02); return; }
+    this.tone(330, 0.12, "triangle", 0.03, undefined, 0);
+    this.tone(330, 0.12, "triangle", 0.03, undefined, 0.2);
+  }
+
+  /** The front going out. */
+  thump(): void { this.tone(55, 0.3, "sine", 0.07, 35); this.noise(0.12, 0.03); }
+
+  /** A companion answering its call. */
+  call(): void {
+    this.tone(392, 0.09, "triangle", 0.035, undefined, 0);
+    this.tone(523, 0.09, "triangle", 0.035, undefined, 0.07);
+    this.tone(784, 0.16, "sine", 0.03, undefined, 0.14);
+  }
+
+  /** Integrity coming back. Soft, because it happens while you are resting. */
+  mend(): void {
+    this.tone(440, 0.18, "sine", 0.025, undefined, 0);
+    this.tone(554, 0.22, "sine", 0.02, undefined, 0.09);
+  }
+
   spent(): void { this.tone(300, 0.5, "sawtooth", 0.05, 55); this.noise(0.3, 0.035); }
 
   lesson(): void { this.tone(660, 0.08, "sine", 0.028); }

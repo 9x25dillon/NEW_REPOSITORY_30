@@ -280,3 +280,52 @@ test("a page without focus is named as the reason, unless the pad has answered",
   unfocused(false);
   assert.doesNotMatch(p.describe(), /CLICK THE GAME/);
 });
+
+test("Xbox X distinguishes a tap from holding to grow an organelle", () => {
+  const p = new Pad();
+  const gp = pad();
+  pads = [gp];
+  press(gp, X);
+  const first = p.read();
+  assert.equal(first.place, true);
+  assert.equal(first.placeDown, true);
+  const held = p.read();
+  assert.equal(held.place, false);
+  assert.equal(held.placeDown, true);
+  press(gp, X, false);
+  assert.equal(p.read().placeDown, false);
+  pads = [];
+  key("KeyE");
+  assert.equal(p.read().placeDown, true);
+  key("KeyE", true);
+  assert.equal(p.read().placeDown, false);
+});
+
+test("R3 calls the companion, and the d-pad's sideways pair steps the rack both ways", () => {
+  // Nothing already bound moved: the call went on a button nothing used, and
+  // B still steps forward. A rack that reaches a hundred cells needs a way back.
+  const R3 = 11, LEFT = 14, RIGHT = 15;
+  const p = new Pad();
+  const gp = pad();
+  pads = [gp];
+  p.read();
+  press(gp, R3);
+  assert.equal(p.read().call, true);
+  assert.equal(p.read().call, false, "once per press");
+  press(gp, R3, false);
+  press(gp, RIGHT);
+  assert.equal(p.read().cycle, 1);
+  press(gp, RIGHT, false);
+  press(gp, LEFT);
+  assert.equal(p.read().cycle, -1);
+  press(gp, LEFT, false);
+  press(gp, RT);
+  assert.ok(p.read().grip && !p.read().call, "and the trigger still only grips");
+  press(gp, RT, false);
+  pads = [];
+  key("KeyR");
+  assert.equal(p.read().call, true, "R calls from the keyboard");
+  key("KeyR", true);
+  assert.equal(GLYPH.pad.call, "R3");
+  assert.equal(GLYPH.keys.call, "R");
+});
