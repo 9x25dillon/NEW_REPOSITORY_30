@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Resonarium Biosentinel Experiment v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "seed",
+    "seedAlgorithm",
+    "engine",
+    "config",
+    "symbols",
+    "trajectory"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ResonariumBiosentinelExperiment"
+    },
+    "version": {
+      "const": 1
+    },
+    "seed": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$",
+      "description": "Unsigned uint64 decimal; runtime additionally checks <= 18446744073709551615."
+    },
+    "seedAlgorithm": {
+      "enum": [
+        "blake2b-64-be",
+        "provided-uint64"
+      ]
+    },
+    "engine": {
+      "const": "portable-mulberry32-boxmuller-v1"
+    },
+    "config": {
+      "type": "object",
+      "required": [
+        "N",
+        "depth",
+        "J0",
+        "ratio",
+        "intensity_mw",
+        "kappa",
+        "K_max",
+        "dt",
+        "n",
+        "k",
+        "omega_std"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "N": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 256
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "J0": {
+          "type": "number",
+          "minimum": 0.0001,
+          "maximum": 10
+        },
+        "ratio": {
+          "type": "number",
+          "minimum": 1.000001,
+          "maximum": 5
+        },
+        "intensity_mw": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 10000
+        },
+        "kappa": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "K_max": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 12
+        },
+        "dt": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 0.05
+        },
+        "n": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "k": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "omega_std": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3
+        }
+      }
+    },
+    "symbols": {
+      "type": "string",
+      "pattern": "^[LS]+$",
+      "maxLength": 377
+    },
+    "trajectory": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 377,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "symbol",
+          "intensity",
+          "duration_ms",
+          "fluence",
+          "K",
+          "R_mean",
+          "psi",
+          "t"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "symbol": {
+            "enum": [
+              "L",
+              "S"
+            ]
+          },
+          "intensity": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": "number",
+            "minimum": 0
+          },
+          "fluence": {
+            "type": "number",
+            "minimum": 0
+          },
+          "K": {
+            "type": "number",
+            "minimum": 0
+          },
+          "t": {
+            "type": "number",
+            "minimum": 0
+          },
+          "R_mean": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1.000000000001
+          },
+          "psi": {
+            "type": "number",
+            "minimum": -3.141592653590793,
+            "maximum": 3.141592653590793
+          }
+        }
+      }
+    },
+    "modes": {
+      "type": "array",
+      "maxItems": 12
+    },
+    "falsification": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "units": {
+      "type": "object"
+    }
+  }
+}

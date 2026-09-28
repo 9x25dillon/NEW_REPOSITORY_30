@@ -1,140 +1,143 @@
-# Next-session handoff — written 2026-09-22
+# Next-session handoff — 2026-09-27
 
-Start here. Then read, in this order and only as far as you need:
+Read this first. It supersedes the previous dated entry point; prior versions
+remain in git history. Preserve the standing rules in `HANDOFF.md` and the battle
+rules in `docs/BATTLE.md`. When prose and code disagree, investigate the code and
+update the stale claim rather than silently trusting either.
 
-| File | What it is |
-| --- | --- |
-| `docs/BATTLE.md` | every mechanic added on 2026-09-22, with the play evidence and the measurement each number came from |
-| `docs/LIVING_WORLDS.md` | the 2026-09-21 pass: mitochondria, limb roles, tameable bosses, companions |
-| `SESSION-2026-09-22.md` | today's review: decisions, open assumptions, process lessons |
-| `SESSION-2026-09-21.md` | the previous session's review |
-| `HANDOFF.md` | the standing architecture, and the design rules that are load-bearing. **Read its numbered rules before changing anything in `game/`** |
-| `drifter.report()/` | seven play reports. Every number in BATTLE.md traces back to one |
+## Read only what the task needs
 
-The previous version of this file described the same work in progress; it is
-superseded by the four files above and remains in git history. If a claim in
-any of these disagrees with the code, the code is right and the file is stale.
+1. `SESSION-2026-09-27.md`: decisions, open assumptions, process review and prompt examples.
+2. `docs/RESONANT_EXPEDITION.md`: game mechanics, controls, data boundary and limits.
+3. `docs/RESONARIUM_EMERGENCE.md`: simulation, anchoring, replay and validation.
+4. `HANDOFF.md`, especially numbered architecture/design rules before game edits.
+5. `docs/BATTLE.md` and `docs/LIVING_WORLDS.md` for existing combat and world behavior.
 
-## Who you are working for
+## User context and intent
 
-The user plays on an **Xbox Elite Series 2**, in sessions that now run 25–50
-minutes and reach aeon 10–29. They are a player of their own game, not a reader
-of it: they will paste `drifter.report()` and expect the next change to come
-from what it says.
+The user wants a usable system and plays on an Xbox Elite Series 2. They asked
+for the actual Resonarium from `/home/kill/astro-aae`, usable natal/chart anchoring,
+and integration into Sonic Drifter with survival crafting, geometry, stages and
+enemies. Those explicit requests authorized the new mode despite older handoff
+advice to defer additional systems. They subsequently authorized commit, push
+and merge. That is authorization for this delivery, not every future publication.
 
-Asked for, across two sessions: later worlds that stay interesting, useful
-limbs, more creature and boss variety, bosses that can be tamed and used,
-battle mechanics, allies, and more to do. Corrected me on one thing, and it
-matters: **do not gate the throne — reward it.** They overfeed deliberately,
-because nothing else is left to do, and the answer was prime helpings rather
-than a warning. They steer mid-session and they mean it. Take the steer.
+Treat new messages as steering or additions unless clearly replacing the task.
+Act on routine reversible work; avoid repeated permission questions. Explain any
+real environment approval requirement. Open the usable result when asked, and
+verify the input path the user will actually follow.
 
-## The state of the game
+## Where the implementation lives
 
-Four rounds shipped on 2026-09-22, on top of the 2026-09-21 pass:
+- `app/resonarium/index.html`: integrated real Resonarium UI. Its `natal_seed.js`
+  comes from the sibling source; attribution/license in `docs/resonarium/`.
+- `app/resonarium/photometabolic.js`: portable seed/model, experiment validation,
+  legacy tonal-state parsing, replay, surrogate comparison and projection.
+- `photometabolic_biosentinel_v3_unified.py`: Python reference/CLI, exact pulse
+  timing, physical units, portable RNG, seeded AAFT, audio/JSON exports.
+- `game/resonance.ts`: seed/trajectory import boundary, lightweight oscillator,
+  encounter stages, blueprints, charge/ward/loom economy.
+- `game/run.ts`, `game/beasts.ts`: integration with existing movement, combat,
+  birth, destruction and wildlife. Instrument library `src/` was not modified.
+- `app/drifter.ts`, `app/pad.ts`, `app/build-drifter.mjs`: UI, forge/controller,
+  import/launch controls and generated standalone game pages.
 
-- **The riposte.** A burst into a volley arm (±60° of head-on) catches it and
-  throws it back for ⅔ of the king's mass per arm. One per burst, one throw
-  every 2.5 s; inside the recovery a burst still eats the arm. A landed arm
-  knocks the next volley back 0.33 s, never one already drawn.
-- **Gambits.** From world 2, at most one per 7 s, drawn for 0.9 s: a Strider's
-  charge lane (36 µm core), a Warden's shock front (175 µm/s, stopping 220 µm
-  past its edge), a Weaver's echo volley.
-- **The falter.** The first time a king reaches its bond line it stops for
-  2.5 s and cannot be taken below 1 hp. It is the only reason bonding,
-  companions, calls and PACK are reachable at all: before it, four runs across
-  fourteen aeons tamed nothing.
-- **And:** companions that hold hunters, R3 calls (rush/aegis/snare),
-  mitochondrial repair, fourteen evolution traits plus uncapped REFINE, cards
-  bought with surplus cells, prime helpings, the lure, tenders and leeches.
-  All of it is in `docs/BATTLE.md`.
+## Open and use
 
-`npm test` is 385 tests, about two minutes. `npm run typecheck` runs both
-configs. `node app/build-drifter.mjs --body` regenerates both standalone pages
-and **must be run before any play session** — the published page is built from
-the TypeScript, never edited.
+Open `app/resonarium/index.html`. Demo chart or pasted/imported legacy
+`resonarium.state.v2` can be anchored with **Anchor chart or tones**. Legacy seeds
+are supplied identifiers, not recomputed hashes. New derived seeds use BLAKE2b
+with digest_size=8, unsigned big-endian. Preserve uint64 as decimal strings;
+accept numeric seeds only when safe integers. An experiment export adds K/R/ψ
+observations; a tonal export alone supplies the game's seed.
 
-## Rules added this session, which are load-bearing
+Open `app/sonic-drifter.html`, choose **Import Resonarium JSON**, then **Start
+Resonant Expedition**. V/L3 opens the forge; Q/B/D-pad or 1–4 selects; C/Y rotates;
+Enter/Space/X/A assembles; V/L3/LB/Escape closes. Forge pauses the simulation.
+Starter materials are explicit; ordinary title-screen start remains normal mode.
 
-These join the numbered rules in `HANDOFF.md`. Each exists because breaking it
-already cost something measurable:
+The user's local raw JSON is `resonarium-state-a52ef6dcd1e7fe2c.json`. It is not
+part of the publication set: do not stage it by accident. Their ignored private
+launch page is `artifacts/resonarium/your-chart.html`; it prefills their tones and
+anchors on entry. Recreate/update that generated page if needed after changing
+Resonarium; it is a copy, not the canonical source. Do not publish personal chart
+payloads unless explicitly asked. Source sibling repo was not edited.
 
-1. **Every wound a king takes goes through `hurtSovereign`.** The falter's
-   floor and the bond-line crossing cannot be true of a discharge and false of
-   your hand or a thrown arm.
-2. **Everything asking what the water is coming for goes through `prey`.** A
-   lure half the callers believed in would pull a hunter off you and walk a
-   king onto you at the same time.
-3. **`held` is checked before the tend/graze dispatch in `hunt`.** A tender
-   that kept mending inside a closed hand is the one body outside the rule the
-   whole bestiary runs on.
-4. **The prime term is added past the mass ceiling, not into it.** Folded in it
-   buys nothing — a sixfold throne is at that ceiling by its fourth helping,
-   which is the whole reason the boon exists.
-5. **`throneLedger` counts, it does not index.** Primes buy wherever they fall,
-   so "the helpings that bought something" is no longer a prefix, and any text
-   saying "the first N bought all there was" is now false.
-6. **A gambit's wind is `windLength(run)`, not `VOLLEY_WIND`.** The renderer
-   and the reign must agree or the telegraph stops being the truth.
-7. **Tuning numbers get checked at both ends:** the rate a bot can reach *and*
-   the rate the reports say a person plays at. Ignoring the second shipped a
-   riposte the user called "nerfed".
-8. **A measurement harness must reproduce a number from a real report before
-   its output is believed.** Three fixtures lied this session.
+## Invariants and traps
 
-`combat.ts`, `allies.ts`, `evolution.ts` and `organelles.ts` import functions
-back from `run.ts` — the same module cycle `ecology.ts` already had. It is safe
-only because those imports are used inside functions. Top-level code in those
-modules must not read a `run.ts` binding.
+- Bedrock → optional overlay → observable trajectory → projection; overlay OFF
+  must preserve bedrock. A visual pattern is not a biological measurement.
+- Fluence J/cm² = intensity mW/cm² × duration ms / 1,000,000. Do not reintroduce
+  the original factor-of-1000 mistake or floor away pulse residual time.
+- Keep phase circular; unwrap for audio interpolation. Never swap a hash
+  algorithm while claiming identical seeds. Preserve algorithm/version provenance.
+- The game folds uint64 to uint32 and uses a separate 24-oscillator driver unless
+  observations are imported. Do not claim full experiment parity for that model.
+- Player movement remains field-driven. Damage remains telegraphed. Check held
+  before enemy special behavior; all king wounds go through `hurtSovereign`.
+- Never gate the throne. Stage completion rewards progression at the next birth.
+- Crafting uses actual snapped sites and seated symmetry. A square net seats 622
+  as 222. Wards require seated 4/422; looms copy seated host group.
+- Charge/transfer have shared budgets. Invalid placement spends nothing. Broken
+  constructions lose benefits; mixed-plane assemblies are inactive. Utility
+  structures stay excluded from ordinary gun discharge and damage estimates.
+- Use `retune`/`reshape` when construction topology/planes change. Existing
+  module cycles may call imported run functions only inside functions, never at
+  module initialization. Preserve culling and avoid entity×structure hot loops.
+- Legacy combat rules still apply: prey centralizes lure targeting; prime rewards
+  sit beyond the mass ceiling; throneLedger counts rather than indexes; gambit
+  rendering uses windLength. See the prior handoff in history for rationale.
+- Generated HTML is a build artifact. Edit TypeScript/build template, then rebuild
+  both pages. Serve changing builds with Cache-Control: no-store if using HTTP.
 
-## What to do next
+## Verified baseline and commands
 
-**Get a report first.** Four changes are unverified by play: the riposte
-retune, the 0.9 s gambit wind, the birth-screen nudge, and the lure, which no
-report predates. Ask for one run and four answers:
+At delivery: 404 TypeScript tests pass, six Python tests pass, typecheck/build
+pass. Browser tests cover Resonarium import/replay/audio/OFF and game interaction
+fixtures (14 upgrade + 22 battle + 14 expedition checks). These establish working
+mechanics, not long-session balance or physiological validity.
 
-1. Does a catch feel worth making now?
-2. Are the charge lane and shock ring readable mid-fight?
-3. Did you buy a second card — and did you notice you could?
-4. Did you use the lure? If not: the button, the cost, or forgetting?
+```sh
+npm test
+npm run typecheck
+npm run build
+npm run test:biosentinel
+node app/build-drifter.mjs --body
+PLAYWRIGHT_MODULE=/home/kill/astro-aae/frontend/node_modules/playwright/index.mjs CHROMIUM_PATH=/usr/bin/chromium node test/resonarium.browser.mjs
+PLAYWRIGHT_MODULE=/home/kill/astro-aae/frontend/node_modules/playwright/index.mjs CHROMIUM_PATH=/usr/bin/chromium node test/drifter-resonance.browser.mjs
+```
 
-Then, in the order I would take them:
+The Playwright path is this machine's existing installation; discover a local
+installation if it moves. Full npm tests take about 2–3 minutes. Restricted
+sandboxes may require escalation for test-runner IPC, Chromium, git metadata
+writes/network and xdg-open. Do not bypass approval controls.
 
-- **The mitochondria bearing.** Eight stations and 480 stored energy, and
-  mending happens only when the player is already near one. A HUD bearing to
-  the nearest charged station when integrity is down is cheap, and it is the
-  last obvious gap in a system they now use (14 mends last run, up from 1).
-- **Whether companions trivialise hunters.** One landed strike in 32 minutes
-  with a rank-3 Strider. That may have removed a threat rather than answered
-  it. Measure before adding more hunters.
-- **Cross-session save.** Runs are 25–50 minutes and a reload loses companions,
-  traits, everything. It is the largest remaining structural gap.
-- **Do not add another system until those are answered.** This project's
-  failure mode is breadth: the aeon-29 report had every trait capped and still
-  nothing to do at the throne.
+Search registry users/count assertions when adding a species. The prior eight-
+species assertion was updated to eleven with new contrast-sign coverage. Reset
+camera/scene explicitly in visual fixtures; previous interaction fixtures can
+leave off-center screenshot state. Run targeted checks first, then the full suite
+for run-loop/combat changes. Repeat broad checks only for a new change or concern.
 
-## Working rules that keep paying
+## Next useful work
 
-- Gameplay adaptations live in `game/`, never in `src/`; `test/boundary.test.ts`
-  enforces it by reading imports.
-- Movement stays field-driven. Damage to the player stays telegraphed. What is
-  drawn is what happens.
-- Cull and grid anything looping over bodies, cells, structures or entities in
-  `app/`: a real run carries 700 buildings and 800 motifs.
-- Run the full suite before trusting a change to `hunt` or `settle`. It caught
-  a `beast()` call on a motif's species this session that broke every bot run.
-- **Serve the game with no-store headers.** A plain `python3 -m http.server`
-  will hand the browser a cached build and cost a play session. Five lines of
-  `http.server` with `Cache-Control: no-store` over `app/` is enough.
-- Browser checks: start Chromium with `--remote-debugging-port=9222`, then
-  `node test/browser-upgrades.mjs --interactions --battle` (36 checks), and
-  `--battle-scene` for staged screenshots (`SHOT_DIR` picks the folder). Kill it
-  with a pattern that cannot match your own shell: `922[2]`, not `9222`.
-- Ask for the intent behind a behaviour before designing against it. "I overfed
-  on purpose" arrived three rounds late and reversed a whole design.
+1. Get one real expedition report via `drifter.report()` and ask whether importing,
+   forge discovery, charging and stage progression were understandable. Check
+   late-run performance and whether wards/looms justify their costs. Do not tune
+   economy on automated checks alone.
+2. Prioritize versioned cross-session saves if requested: runs and selected input
+   currently disappear on reload. Define restore/migration and replay guarantees
+   before implementing persistence.
+3. Revisit statistical diagnostics if scientific comparisons are the goal: binary
+   ties and spectral deviations need measurement; empirical p-values do not prove
+   biological structure, and non-rejection is not proof of absence.
+4. Preserve existing unresolved play questions: riposte value, gambit readability,
+   lure discovery, companion pressure and long-run progression. New content does
+   not resolve those by itself.
 
-## Git
+## Git delivery
 
-`main` on `9x25dillon/NEW_REPOSITORY_30` (private), pushed. Commits this
-session: the battle pass, a handoff correction, the content pass, and this one.
-The user asks for commit, push and merge explicitly. Do not publish without it.
+Remote: `origin`, `9x25dillon/NEW_REPOSITORY_30`; integration target `main`.
+This session uses a feature branch and merge commit for a visible integration
+record. Inspect `git log`, `git status` and the remote before continuing; do not
+infer successful publication solely from this document. User-owned raw tonal
+JSON intentionally remains local and untracked. Never use blanket git add on it.

@@ -53,6 +53,8 @@ export interface Intent {
   depth: number;
   /** Call on your companion: its one active, on a cooldown. One-shot. */
   call: boolean;
+  /** Open the crystal forge (V or left-stick click). */
+  forge?: boolean;
   mute: boolean;
 }
 
@@ -206,6 +208,7 @@ export class Pad {
       out.pause = anyHit(m.pause);
       out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
       out.call = anyHit(m.call);
+      out.forge = gp.mapping === "standard" && anyHit([10]);
       out.mute = anyHit(m.mute);
 
       this.prev = [...gp.buttons].map((_, i) => down(i));
@@ -245,6 +248,7 @@ export class Pad {
     if (k("KeyC")) out.crownDown = true;
     if (tap("KeyQ")) out.cycle = -1;
     if (tap("KeyR")) out.call = true;
+    if (tap("KeyV")) out.forge = true;
     // NO RESTART KEY. It threw away a good long run on a single unconfirmed
     // keypress, in a game whose runs are ten minutes. Beginning again lives on
     // the screen you reach by dying, where it cannot be reached by accident.

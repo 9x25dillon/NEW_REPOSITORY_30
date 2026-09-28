@@ -24,6 +24,7 @@
 // No DOM. A pure function of (state, input, dt), so a bot can play whole aeons
 // headlessly and the tests can tell whether any of this is actually a game.
 
+import { type Resonance, constructIds, realm, resonanceStep, resonanceKill, resonanceBirth, wardHit } from "./resonance.js";
 import { beast } from "./beasts.js";
 import {
   type Bond, type Form, ADAPTATIONS, canBond, formFor, newBond, recruit, support, supported,
@@ -410,9 +411,11 @@ export type Ev =
   | { kind: "repair"; x: number; y: number }
   | { kind: "mended"; x: number; y: number }
   | { kind: "evolved"; trait: Trait; rank: number; cost: number }
+  | { kind: "resonance"; text: string }
   | { kind: "death" };
 
 export interface Run {
+  resonance: Resonance | null;
   bond: Bond;
   organelles: Mitochondrion[];
   /** The fight's own state: riposte tallies, gambits, snare, repair. */
@@ -542,6 +545,7 @@ export interface Run {
 export function startRun(seed = 1, ebb = false): Run {
   const world = firstWorld();
   const run: Run = {
+    resonance: null,
     bond: newBond(),
     organelles: [],
     fray: newFray(),
@@ -780,7 +784,7 @@ export function step(run: Run, input: Input, dt: number): void {
       ? 4 + Math.floor(run.world.aeon / 2)
       : settleCap(run);
     if (live < cap) {
-      const table = run.world.wildlife;
+      const table = run.resonance ? [...run.world.wildlife, realm(run.resonance).enemy, realm(run.resonance).enemy] : run.world.wildlife;
       run.entities.push(newBeast(run, table[Math.floor(run.rand() * table.length)]));
     }
   }
@@ -815,6 +819,7 @@ export function step(run: Run, input: Input, dt: number): void {
   support(run, dt);
   allies(run, dt);
   metabolise(run, dt);
+  resonanceStep(run, dt, input.grip);
   // Before contact, so an arm that reaches you inside a burst is caught rather
   // than merely survived. A thrown arm can end the reign, and then nothing
   // after it has a fight to run in.
@@ -1026,7 +1031,7 @@ function hunt(run: Run, e: Entity, dt: number): { x: number; y: number } {
   }
 
   if (b.behaviour === "orbit") {
-    const turn = e.id % 2 ? 1 : -1;
+    const turn = e.species === "phason" && run.resonance ? (Math.sin(run.resonance.psi) >= 0 ? 1 : -1) : (e.id % 2 ? 1 : -1);
     const inward = r > STRIKE_RANGE * 0.9 ? 0.8 : 0.25;
     return { x: (hx * inward - hy * turn) / r * b.speed,
       y: (hy * inward + hx * turn) / r * b.speed };
@@ -1086,7 +1091,9 @@ function graze(run: Run, e: Entity, dt: number): { x: number; y: number } {
   let target: Structure | null = null;
   let best = Infinity;
   let bx = 0, by = 0;
-  for (const s of run.structures) {
+  const resonant = e.species === "dislocator" ? constructIds(run) : new Set<number>();
+  const preferred = run.structures.filter(s => resonant.has(s.id) && s.serves.includes(e.layer));
+  for (const s of preferred.length ? preferred : run.structures) {
     if (!s.serves.includes(e.layer)) continue;
     for (const [lx, ly] of s.lobes) {
       const tx = s.x + lx * s.reach, ty = s.y + ly * s.reach;
@@ -1153,6 +1160,7 @@ export function kill(run: Run, e: Entity): void {
   const b = beast(e.species);
   run.entities = run.entities.filter((x) => x !== e);
   run.score += b.score;
+  resonanceKill(run, e.species);
   // Killing pays for itself: grip is the only offence and the only defence, so
   // running dry has to be recoverable by fighting rather than only by waiting.
   run.wave.stamina = Math.min(100, run.wave.stamina + KILL_REFUND);
@@ -1520,6 +1528,7 @@ export function reshape(run: Run): void {
   const liveIds = new Set(run.structures.map((s) => s.id));
   for (const id of run.bond.limbReadyAt.keys()) if (!liveIds.has(id)) run.bond.limbReadyAt.delete(id);
   run.organelles = run.organelles.filter((o) => liveIds.has(o.hostId));
+  if (run.resonance) run.resonance.constructs = run.resonance.constructs.filter(c => c.ids.every(id => liveIds.has(id)));
   const pitch = latticePitch(run);
   run.bodies = bodiesOf(run.structures, pitch);
   run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
@@ -1804,7 +1813,7 @@ export function dischargesToKill(run: Run): number {
   // WHAT THIS RUN'S ARMS ARE WORTH, not what a fresh one's would be. ARSENAL
   // and REFINE both move the number the player is shown, so they move it here.
   const evolved = (1 + 0.15 * rankOf(run, "arsenal")) * (1 + 0.03 * rankOf(run, "refine"));
-  const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+  const organelleIds = new Set([...run.organelles.map((o) => o.hostId), ...constructIds(run)]);
   const hms = [
     ...run.structures.filter((s) => !organelleIds.has(s.id)).map((s) => s.hm),
     ...run.cells.map((c) => c.group.hm),
@@ -1931,7 +1940,7 @@ function driveStructures(run: Run, dt: number): void {
   }
   const driving = handed(run.you);
   const spent: Structure[] = [];
-  const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+  const organelleIds = new Set([...run.organelles.map((o) => o.hostId), ...constructIds(run)]);
   const quicker = 1 - 0.25 * rankOf(run, "capacitor");
 
   const k = run.throne;
@@ -2412,6 +2421,11 @@ function contact(run: Run, dt: number): void {
     run.fray.turned = run.t;
     bite = 0;
   }
+  if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0 && wardHit(run)) {
+    run.iframe = 0.35;
+    run.events.push({ kind: "guard", x: run.you.x, y: run.you.y });
+    bite = 0;
+  }
   if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0) {
     run.integrity -= 1;
     run.iframe = IFRAME + 0.6 * rankOf(run, "chitin");
@@ -2464,6 +2478,7 @@ export function birth(run: Run): void {
 export function enterWorld(run: Run): void {
   if (run.phase !== "birth") return;
   const w = run.world;
+  resonanceBirth(run);
 
   run.wave = newWave(w.pitch, MAX_AMPLITUDE, focusFor(w.pitch), w.medium);
   run.wave.stamina = 100;
