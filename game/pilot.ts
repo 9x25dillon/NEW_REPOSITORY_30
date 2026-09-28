@@ -44,7 +44,7 @@
 // src/ imports this file.
 
 import { type Particle, contrastFactor } from "../src/gorkov.js";
-import { type Wave, advance, aimAt } from "./wave.js";
+import { type Wave, advance, aimAt, deepWhereAligned } from "./wave.js";
 
 /**
  * The body you are.
@@ -269,8 +269,13 @@ export function aimFor(
   const tx = p.x + dx * lead;
   const ty = p.y + dy * lead;
 
-  // Your own sign decides which of the two lattices is put under you.
-  aimAt(w, tx, ty, ridesAntinodes(p, w));
+  // Your own sign decides which of the two lattices is put under you. And out
+  // of quadrature, which HALF of it: the deep antinodes and the shallow ones
+  // differ by the sign of cos tx cos ty, which is one pitch of Y phase, so the
+  // device simply puts the deep one under your hand. At quadrature there is no
+  // difference and no flip.
+  const inverted = ridesAntinodes(p, w);
+  aimAt(w, tx, ty, inverted, inverted && !deepWhereAligned(w, p.particle));
   return { x: tx, y: ty };
 }
 

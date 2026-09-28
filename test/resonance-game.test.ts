@@ -108,5 +108,7 @@ test('utility crystal cannot silently discharge in a reign and new enemies follo
 test('disabled mode stays absent through normal simulation and ordinary births',()=>{
   const run=startRun(111);step(run,idle,.01);assert.equal(run.resonance,null);
   run.phase='birth';enterWorld(run);assert.equal(run.resonance,null);
-  assert.equal(BLUEPRINTS.length,3);
+  assert.equal(BLUEPRINTS.length,4);
+  // Bare glass and no shifter: an ordinary run is at quadrature whatever the stick says.
+  step(run,{...idle,trim:1},.01);assert.equal(run.wave.cross,Math.PI/2);
 });

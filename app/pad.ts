@@ -55,6 +55,12 @@ export interface Intent {
   call: boolean;
   /** Open the crystal forge (V or left-stick click). */
   forge?: boolean;
+  /**
+   * Cross-phase trim, -1..1, HELD: the right stick's horizontal, or Z / X.
+   * The right stick was the one thing on the pad nothing used, and a phase
+   * shifter is an analogue knob. Only an expedition reads it.
+   */
+  trim?: number;
   mute: boolean;
 }
 
@@ -209,6 +215,10 @@ export class Pad {
       out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
       out.call = anyHit(m.call);
       out.forge = gp.mapping === "standard" && anyHit([10]);
+      // Only the standard mapping promises axis 2 is the right stick; a loose
+      // pad's axis 2 is often a trigger resting at -1, which would hold a full
+      // trim forever and drain the bank without anybody touching anything.
+      if (gp.mapping === "standard") out.trim = this.stick(gp.axes[2] ?? 0, 0).x;
       out.mute = anyHit(m.mute);
 
       this.prev = [...gp.buttons].map((_, i) => down(i));
@@ -249,6 +259,8 @@ export class Pad {
     if (tap("KeyQ")) out.cycle = -1;
     if (tap("KeyR")) out.call = true;
     if (tap("KeyV")) out.forge = true;
+    const kt = (k("KeyX") ? 1 : 0) - (k("KeyZ") ? 1 : 0);
+    if (kt !== 0) out.trim = kt;
     // NO RESTART KEY. It threw away a good long run on a single unconfirmed
     // keypress, in a game whose runs are ten minutes. Beginning again lives on
     // the screen you reach by dying, where it cannot be reached by accident.

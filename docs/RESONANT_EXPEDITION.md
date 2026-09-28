@@ -15,7 +15,7 @@ in page memory; nothing is sent to a server or stored automatically.
 
 1. Start with six twofold cells, four tetragonal cells and six phase fragments.
 2. Open the forge with **V / left-stick click (L3)** or the **Crystal forge** button.
-3. Choose with **Q / B / D-pad left/right**, or keyboard **1–4**. Rotate with
+3. Choose with **Q / B / D-pad left/right**, or keyboard **1–5**. Rotate with
    **C / Y**. Assemble with **Enter / Space / X / A**, or click the assembly button.
 4. Close with **V / L3 / LB / Escape**. The forge pauses the simulation, including
    enemy wind-ups; opening it does not leave a held build/lift action queued.
@@ -36,6 +36,11 @@ calculation, pool expansion, inheritance and destruction.
 | Phase condenser | 3 cells + 2 fragments; straight rail | Stores charge while gripped, then returns it to stamina while released nearby. |
 | Bragg ward | 4 tetragonal cells + 3 fragments; square | Spends 12 charge to absorb a hit nearby on the same plane; costs 6 when the existing band solver finds a gap containing the bound mode. |
 | Lattice loom | 3 cells + 3 fragments; L shape | With the forge's **Weave cell** action, spends 15 charge and 1 fragment to copy its seated host group into the rack. |
+| Quadrature tap | 3 cells + 2 fragments; diagonal | While your hand is a mesh, drinks nearby motifs as charge. See [Quadrature](QUADRATURE.md). |
+
+The expedition chip also carries metal strips that set the cross-phase between the
+two transducer pairs, and the right stick (or Z / X) trims it using stored charge.
+[QUADRATURE.md](QUADRATURE.md) covers the physics, the map and the resource rules.
 
 A ward accepts cells seating as **4 or 422**. A sixfold `622` seats as `222` on
 this game's square trap net and cannot masquerade as tetragonal material. The

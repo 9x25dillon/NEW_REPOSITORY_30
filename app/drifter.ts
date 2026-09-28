@@ -18,7 +18,7 @@
 
 import {
   type Entity, type Run,
-  ARENA_H, ARENA_W, LURE_TIME, THRONE_RADIUS, dropLure,
+  LURE_TIME, THRONE_RADIUS, dropLure,
   arrivalRate, settleCap, suspension,
   DISCHARGE_GAIN, HOLD_CATCH, LOBE_ARC, LOBE_RANGE, STRIKE_RANGE,
   bearsOn, dischargeFalloff, wearRate, wearing, WEAR_TICKS_PER_SECOND,
@@ -28,10 +28,15 @@ import {
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
   startRun, step, maxIntegrity,
 } from "../game/run.js";
-import { type ResonanceSource, BLUEPRINTS, FORGE_REACH, blueprintSites, constructIds,
-  craft, gapAligned, newResonance, realm, resonanceSource, seed32, weave } from "../game/resonance.js";
+import { type ResonanceSource, BLUEPRINTS, CONSTRUCT_MAX, FORGE_REACH, MESH_OPEN, TRIM_RANGE, bank,
+  blueprintSites, constructIds, craft, gapAligned, newResonance, realm, resonanceSource, seed32,
+  weave } from "../game/resonance.js";
+import { tartan } from "../game/plates.js";
 import { cellFor } from "../game/lattice.js";
-import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
+import {
+  type Wave, crossCoupling, envelopeAt, frequency, softDiagonal, trapsX, trapsY, wavelength,
+  wellDepth, STAMINA_MAX,
+} from "../game/wave.js";
 import {
   PRIME_KEEP, epitaphFor, helpingCosts, inheritanceOf, isPrime, nextHelpingBuys,
   primeHelpings, sovereignParticle, throneLedger, volley,
@@ -45,9 +50,10 @@ import {
 import { CHANNEL_HEIGHT, MAX_MODE, modeFrequency, planes, together } from "../game/depth.js";
 import { STREAMS, mediumAt, streamBand, streamName } from "../game/streams.js";
 import {
-  type Feature, CHIP, CHANNEL_W, EDGE_STANDOFF_FRAC, chipFlow, featureName,
+  type Feature, CHIP, CHANNEL_W, EDGE_STANDOFF_FRAC, PLATES, chipFlow, featureName,
   flowAt, nearestFeature,
 } from "../game/run.js";
+import { type Particle } from "../src/gorkov.js";
 import { YOU } from "../game/pilot.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
@@ -123,6 +129,19 @@ interface Lesson { id: string; title: string; body: string }
 
 /** How long a lesson stays up, seconds. */
 const CARD_TIME = 8;
+
+/** The forge's list: every blueprint, then weaving. */
+const FORGE_CHOICES = BLUEPRINTS.length + 1;
+const FORGE_ROW = 40;
+
+// THE QUADRATURE PALETTE. The metal is old gold, engraved rather than lit; the
+// mesh your hand makes is warm clay, because it is the one thing on screen you
+// are paying for; bone is for what the sigil reads out.
+const CLAY = "217,119,87";
+const EMBER = "255,176,128";
+const BRASS = "201,168,106";
+const BONE = "#efe6d8";
+const VIOLET = "18,12,32";
 
 const LESSONS: Readonly<Record<string, Lesson>> = {
   node: {
@@ -373,6 +392,11 @@ export class Game {
    */
   private verdict: string | null = null;
   private wasGrip = false;
+  /** Quadrature: whether the two first lessons have been said this run, and
+   *  whether last frame was locked, so the chime is an edge and not a drone. */
+  private taughtMesh = false;
+  private taughtBank = false;
+  private wasLocked = false;
   /**
    * What happened, counted.
    *
@@ -448,7 +472,7 @@ export class Game {
     this.forgeMessage = "";
   }
   private forgeAction(): void {
-    const result = this.forgePick === 3 ? weave(this.run) : craft(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation);
+    const result = this.forgePick === BLUEPRINTS.length ? weave(this.run) : craft(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation);
     const messages = {
       crafted: "ASSEMBLED. CLOSE THE FORGE, THEN GRIP NEARBY TO CHARGE.",
       woven: "NEW CELL ADDED TO YOUR RACK.",
@@ -594,8 +618,8 @@ export class Game {
 
       const { sx, sy } = world(e);
       if (this.forgeOpen) {
-        const choice = Math.floor((sy - 155) / 50);
-        if (sx >= 70 && sx <= VIEW_W - 70 && choice >= 0 && choice < 4) this.forgePick = choice;
+        const choice = Math.floor((sy - 155) / FORGE_ROW);
+        if (sx >= 70 && sx <= VIEW_W - 70 && sy < 155 + FORGE_CHOICES * FORGE_ROW && choice >= 0 && choice < FORGE_CHOICES) this.forgePick = choice;
         else if (sy >= 405 && sy <= 455) this.forgeAction();
         else if (sy > 460) this.toggleForge();
         return;
@@ -852,6 +876,7 @@ export class Game {
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
     this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
     this.forgeOpen = false; this.forgePick = 0; this.forgeRotation = 0; this.forgeMessage = "";
+    this.taughtMesh = this.taughtBank = this.wasLocked = false;
     if (this.expeditionSource) {
       this.run.resonance = newResonance(this.expeditionSource);
       // An explicit expedition starter kit; normal runs retain their original economy.
@@ -954,8 +979,8 @@ export class Game {
     if (this.forgeOpen && this.screen === "play") {
       if (it.pause || it.lift) { this.toggleForge(); return; }
       if (it.crown) this.forgeRotation = (this.forgeRotation + 1) % 4;
-      if (it.cycle) this.forgePick = (this.forgePick + it.cycle + 4) % 4;
-      const number = this.pad.slotKey(); if (number >= 1 && number <= 4) this.forgePick = number - 1;
+      if (it.cycle) this.forgePick = (this.forgePick + it.cycle + FORGE_CHOICES) % FORGE_CHOICES;
+      const number = this.pad.slotKey(); if (number >= 1 && number <= FORGE_CHOICES) this.forgePick = number - 1;
       if (it.place || it.confirm) this.forgeAction();
       return; // Design mode pauses the world, including enemy winds and model time.
     }
@@ -968,7 +993,7 @@ export class Game {
     }
     const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
     const legend = `${G.move} move · ${G.grip} grip · ${G.dash} dash / catch · ${G.place} build / hold: mitochondrion`
-      + ` · ${G.lift} lift / hold: lure · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause` + (run.resonance ? " · V / L3 forge" : "");
+      + ` · ${G.lift} lift / hold: lure · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause` + (run.resonance ? " · V / L3 forge · R-stick / Z X trim cross-phase" : "");
     if (legend !== this.controlLegend) {
       this.controlLegend = legend;
       const controls = document.getElementById("controls");
@@ -1003,8 +1028,22 @@ export class Game {
     if (gripping && !this.wasGrip) this.sfx.gripOn();
     this.wasGrip = gripping;
 
-    step(run, { move: it.move, grip: it.grip, dash: it.dash, tame: it.crownDown }, dt);
+    step(run, { move: it.move, grip: it.grip, dash: it.dash, tame: it.crownDown, trim: it.trim ?? 0 }, dt);
     this.drain();
+    const q = run.resonance;
+    if (q) {
+      if (!this.taughtMesh && Math.abs(Math.cos(q.native)) >= MESH_OPEN) {
+        this.taughtMesh = true;
+        this.say("METAL UNDER THE GLASS · THE PAIRS FALL INTO STEP · YOUR HAND OPENS INTO A MESH");
+      }
+      if (!this.taughtBank && Math.abs(it.trim ?? 0) > 0.5 && bank(run) <= 0) {
+        this.taughtBank = true;
+        this.say("TRIM RUNS ON STORED CHARGE · GRIP BESIDE AN ASSEMBLY TO BANK SOME");
+      }
+      const locked = gripping && q.lock >= 0.85;
+      if (locked && !this.wasLocked) this.sfx.lock();
+      this.wasLocked = locked;
+    }
     this.decay(dt);
 
     if (run.phase === "birth" && this.screen !== "birth") {
@@ -1066,6 +1105,7 @@ export class Game {
       if (ev.kind === "hit") this.tally[`hit:${ev.cause}`] = (this.tally[`hit:${ev.cause}`] ?? 0) + 1;
       switch (ev.kind) {
         case "resonance": this.say(ev.text); break;
+        case "quadrature": this.burst(ev.x, ev.y, 7, EMBER); this.sfx.tap(); break;
         case "hit":
           this.flash = 1; this.flashRed = true; this.shake = 13;
           // Two frames of held time. It is the cheapest weight there is.
@@ -1440,6 +1480,7 @@ export class Game {
     this.drawWalls();
     this.drawCurrent();
     this.drawChip();
+    this.drawPlates();
     this.drawField();
     this.drawLattice();
     this.drawSites();
@@ -1463,6 +1504,8 @@ export class Game {
     g.restore();
 
     this.bloom();
+    const playing = this.screen === "play" && !this.paused && !this.forgeOpen && this.run.resonance;
+    this.sfx.quadrature(this.run.wave.cross, playing ? this.run.wave.amplitude / this.run.wave.maxAmplitude : 0);
 
     g.fillStyle = this.vignette;
     g.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -1700,6 +1743,10 @@ export class Game {
     // moves everything a third faster.
     const data = this.wash.data;
     const gain = 0.05 + lit * 0.4;
+    // Out of quadrature the pressure squared gains 2 cos(phi) cos tx cos ty,
+    // which is exactly the sign this checkerboard is coloured by: one half of
+    // it swells and the other drains. At quadrature the factor is one.
+    const cc = crossCoupling(w);
     const heat = Math.min(1, Math.max(0, (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C)));
     // node cyan and antinode rose, pulled toward ember as the water heats
     const nr = 70 + heat * 150, ng = 150 - heat * 40, nb = 200 - heat * 90;
@@ -1712,7 +1759,8 @@ export class Game {
         const sgn = this.cosX[i] * cy;
         const p = Math.abs(sgn);
         const up = w.inverted ? sgn < 0 : sgn >= 0;
-        const v = 0.022 + p * gain * this.envX[i] * ey;
+        const v = 0.022 + p * gain * this.envX[i] * ey
+          * (cc === 0 ? 1 : Math.max(0, 1 + (sgn >= 0 ? cc : -cc)));
         data[o] = up ? nr : ar;
         data[o + 1] = up ? ng : ag;
         data[o + 2] = up ? nb : ab;
@@ -1730,25 +1778,124 @@ export class Game {
     const cool = { radius: 6e-6, rho: med.rho + 110, c: med.c + 80 };
     const warm = { radius: 6e-6, rho: med.rho - 85, c: med.c - 50 };
     const lead = !w.inverted;
-    this.lattice(trapsX(w, cool, ARENA_W), trapsY(w, cool, ARENA_H), NODE,
-      lead ? 0.2 + lit * 0.62 : 0.09 + lit * 0.24, lead ? 2.1 + lit * 1.7 : 1.4 + lit * 0.7);
-    this.lattice(trapsX(w, warm, ARENA_W), trapsY(w, warm, ARENA_H), ANTI,
-      lead ? 0.09 + lit * 0.26 : 0.22 + lit * 0.64, lead ? 1.4 + lit * 0.8 : 2.1 + lit * 1.8);
+    // Traps across the whole channel, kept to the window. These were asked for
+    // over [0, ARENA) — the opening pool's SIZE used as if it were its place —
+    // so the lattice was only ever drawn in the channel's far-left corner, a
+    // millimetre and a half from where anybody plays.
+    const inView = (u: number[], lo: number, span: number) => u.filter((v) => v >= lo - 20e-6 && v <= lo + span + 20e-6);
+    const x0 = mx(this.cam.x), y0 = mx(this.cam.y), vw = mx(VIEW_W), vh = mx(VIEW_H);
+    this.lattice(inView(trapsX(w, cool, CHANNEL_W), x0, vw), inView(trapsY(w, cool, CHANNEL_H), y0, vh), NODE,
+      lead ? 0.2 + lit * 0.62 : 0.09 + lit * 0.24, lead ? 2.1 + lit * 1.7 : 1.4 + lit * 0.7, cool);
+    this.lattice(inView(trapsX(w, warm, CHANNEL_W), x0, vw), inView(trapsY(w, warm, CHANNEL_H), y0, vh), ANTI,
+      lead ? 0.09 + lit * 0.26 : 0.22 + lit * 0.64, lead ? 1.4 + lit * 0.8 : 2.1 + lit * 1.8, warm);
+    if (cc !== 0) this.drawMesh(w, cool, Math.abs(cc));
   }
 
-  private lattice(xs: number[], ys: number[], rgb: string, alpha: number, r: number): void {
+  /**
+   * One trap of each lattice, sized by how deep its well is. At quadrature
+   * every well is alike; out of it the antinodes split into deep and shallow
+   * and a node's depth is its soft direction's — the numbers are wave.wellDepth.
+   */
+  private lattice(xs: number[], ys: number[], rgb: string, alpha: number, r: number, body: Particle): void {
     const g = this.ctx;
     const w = this.run.wave;
+    const crossed = crossCoupling(w) !== 0;
     for (const x of xs) {
       for (const y of ys) {
         const e = envelopeAt(w, x, y);
-        const a = alpha * (0.2 + 0.8 * e);
+        const d = crossed ? wellDepth(w, x, y, body) : 1;
+        const a = alpha * (0.2 + 0.8 * e) * Math.min(1.5, d);
         if (a < 0.02) continue;
-        g.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
+        g.fillStyle = `rgba(${rgb},${Math.min(1, a).toFixed(3)})`;
         g.beginPath();
-        g.arc(px(x), px(y), r * (0.6 + 0.4 * e), 0, Math.PI * 2);
+        g.arc(px(x), px(y), r * (0.6 + 0.4 * e) * Math.sqrt(Math.max(0.15, d)), 0, Math.PI * 2);
         g.fill();
       }
+    }
+  }
+
+  /**
+   * THE MESH. Each node is soft along one diagonal and the next node over is
+   * soft along the other (wave.softDiagonal), so a segment through each node
+   * along its own soft direction is the whole diamond net — nothing is drawn
+   * that the potential does not have. Only inside the hand: outside it there is
+   * no drive, and no mesh.
+   */
+  private drawMesh(w: Wave, body: Particle, strength: number): void {
+    const g = this.ctx;
+    const half = w.pitch / 2;
+    const reach = w.pitch * 2.6;
+    const xs = trapsX(w, body, CHANNEL_W).filter((v) => Math.abs(v - w.aimX) < reach);
+    const ys = trapsY(w, body, CHANNEL_H).filter((v) => Math.abs(v - w.aimY) < reach);
+    g.lineCap = "round";
+    for (const pass of [0, 1]) {
+      for (const x of xs) {
+        for (const y of ys) {
+          const e = envelopeAt(w, x, y);
+          const a = strength * e * (pass ? 0.85 : 0.2);
+          if (a < 0.03) continue;
+          const sigma = softDiagonal(w, x, y, body);
+          g.strokeStyle = `rgba(${pass ? EMBER : CLAY},${a.toFixed(3)})`;
+          g.lineWidth = pass ? 1.3 : 5;
+          g.beginPath();
+          g.moveTo(px(x - half), px(y + sigma * half));
+          g.lineTo(px(x + half), px(y - sigma * half));
+          g.stroke();
+        }
+      }
+    }
+    g.lineCap = "butt";
+  }
+
+  // ── the metal ────────────────────────────────────────────────────────────
+
+  private tartanCache: { lam: number; cells: ReturnType<typeof tartan> } | null = null;
+  private hatch: CanvasPattern | null | undefined;
+
+  /**
+   * The expedition chip's metal and the cross-phase it writes.
+   *
+   * The strips are engraved, not lit: they are glass and metal and do nothing
+   * until you drive over them. The clay wash over the tartan is |cos phi| for
+   * THIS world's wavelength — the same map redraws itself every aeon, because
+   * phase per millimetre of metal goes as one over the wavelength.
+   */
+  private drawPlates(): void {
+    const run = this.run;
+    if (!run.resonance) return;
+    const g = this.ctx;
+    const lam = wavelength(run.wave);
+    if (!this.tartanCache || this.tartanCache.lam !== lam) {
+      this.tartanCache = { lam, cells: tartan(PLATES, CHANNEL_W, CHANNEL_H, lam) };
+    }
+    const x0 = mx(this.cam.x), y0 = mx(this.cam.y);
+    const x1 = x0 + mx(VIEW_W), y1 = y0 + mx(VIEW_H);
+    const visible = (r: { x: number; y: number; w: number; h: number }) =>
+      r.x < x1 && r.x + r.w > x0 && r.y < y1 && r.y + r.h > y0;
+    for (const c of this.tartanCache.cells) {
+      if (!visible(c)) continue;
+      const m = Math.abs(Math.cos(c.cross));
+      if (m < 0.08) continue;
+      g.fillStyle = `rgba(${CLAY},${(0.11 * m * m).toFixed(3)})`;
+      g.fillRect(px(c.x), px(c.y), px(c.w), px(c.h));
+    }
+    if (this.hatch === undefined) {
+      const t = document.createElement("canvas");
+      t.width = t.height = 12;
+      const h = t.getContext("2d");
+      if (h) {
+        h.strokeStyle = `rgba(${BRASS},0.11)`;
+        h.lineWidth = 1;
+        h.beginPath(); h.moveTo(0, 12); h.lineTo(12, 0); h.stroke();
+      }
+      this.hatch = h ? g.createPattern(t, "repeat") : null;
+    }
+    for (const p of PLATES) {
+      if (!visible(p)) continue;
+      if (this.hatch) { g.fillStyle = this.hatch; g.fillRect(px(p.x), px(p.y), px(p.w), px(p.h)); }
+      g.strokeStyle = `rgba(${BRASS},0.34)`;
+      g.lineWidth = 1;
+      g.strokeRect(px(p.x) + 0.5, px(p.y) + 0.5, px(p.w) - 1, px(p.h) - 1);
     }
   }
 
@@ -3478,15 +3625,22 @@ export class Game {
     const g=this.ctx,hosts=new Map(this.run.structures.map(h=>[h.id,h]));
     for(const c of s.constructs) {
       if(c.layer!==this.run.layer||!this.onCamera(c.x,c.y,150))continue;
-      g.strokeStyle=c.kind==="ward"?"#aeb4ff":c.kind==="loom"?"#ffcf78":"#78e1f5";
+      g.strokeStyle=c.kind==="ward"?"#aeb4ff":c.kind==="loom"?"#ffcf78":c.kind==="tap"?`rgb(${CLAY})`:"#78e1f5";
       g.lineWidth=1.5;g.beginPath();
       c.ids.forEach((id,i)=>{const h=hosts.get(id);if(!h)return;if(i)g.lineTo(px(h.x),px(h.y));else g.moveTo(px(h.x),px(h.y));});
       if(c.kind==="ward")g.closePath();g.stroke();
-      g.globalAlpha=.15+.25*c.energy/40;g.beginPath();g.arc(px(c.x),px(c.y),px(FORGE_REACH),0,Math.PI*2);g.stroke();g.globalAlpha=1;
+      g.globalAlpha=.15+.25*c.energy/CONSTRUCT_MAX;g.beginPath();g.arc(px(c.x),px(c.y),px(FORGE_REACH),0,Math.PI*2);g.stroke();g.globalAlpha=1;
+      // A tap is drawn open while your hand is a mesh: a clay throat on every
+      // cell, which is the catch radius it is actually drinking through.
+      if(c.kind==="tap"&&Math.abs(crossCoupling(this.run.wave))>=MESH_OPEN) {
+        for(const id of c.ids){const h=hosts.get(id);if(!h)continue;
+          g.strokeStyle=`rgba(${EMBER},${(.35+.25*Math.sin(this.t*5+id)).toFixed(3)})`;g.lineWidth=1;
+          g.beginPath();g.arc(px(h.x),px(h.y),px(24e-6),0,Math.PI*2);g.stroke();}
+      }
       g.font=`600 9px ${MONO}`;g.fillStyle=INK;g.textAlign="center";
-      g.fillText(`${c.kind.toUpperCase()} ${c.energy.toFixed(0)}/40`,px(c.x),px(c.y)-14);g.textAlign="left";
+      g.fillText(`${c.kind.toUpperCase()} ${c.energy.toFixed(0)}/${CONSTRUCT_MAX}`,px(c.x),px(c.y)-14);g.textAlign="left";
     }
-    if(this.forgeOpen && this.forgePick<3) {
+    if(this.forgeOpen && this.forgePick<BLUEPRINTS.length) {
       for(const at of blueprintSites(this.run,BLUEPRINTS[this.forgePick].kind,this.forgeRotation)) {
         if(!this.onCamera(at.x,at.y))continue;
         g.strokeStyle="#fff";g.setLineDash([3,3]);g.strokeRect(px(at.x)-9,px(at.y)-9,18,18);g.setLineDash([]);
@@ -3499,16 +3653,16 @@ export class Game {
     g.textAlign="left";g.textBaseline="top";g.fillStyle=GOLD;g.font=`700 18px ${MONO}`;
     g.fillText("CRYSTAL FORGE",70,95);
     g.font=`600 11px ${MONO}`;g.fillStyle=INK;
-    g.fillText(`${s.fragments} FRAGMENTS · ${this.run.cells.length} CELLS · ${gapAligned(this.run)?"BAND GAP ALIGNED":"BAND GAP NOT ALIGNED"}`,70,127);
+    g.fillText(`${s.fragments} FRAGMENTS · ${this.run.cells.length} CELLS · ${gapAligned(this.run)?"BAND GAP ALIGNED":"BAND GAP NOT ALIGNED"} · BANK ${bank(this.run).toFixed(0)}`,70,127);
     const options=[...BLUEPRINTS.map(b=>`${b.name} · ${b.sites.length} cells + ${b.cost} fragments`),"WEAVE CELL · nearby loom + 15 charge + 1 fragment"];
     options.forEach((name,i)=>{
-      g.fillStyle=i===this.forgePick?"#193b4c":"#0c1728";g.fillRect(65,155+i*50,VIEW_W-130,42);
-      g.fillStyle=i===this.forgePick?"#fff":DIM;g.font=`600 11px ${MONO}`;g.fillText(`${i+1}. ${name}`,78,169+i*50);
+      g.fillStyle=i===this.forgePick?"#193b4c":"#0c1728";g.fillRect(65,155+i*FORGE_ROW,VIEW_W-130,FORGE_ROW-7);
+      g.fillStyle=i===this.forgePick?"#fff":DIM;g.font=`600 11px ${MONO}`;g.fillText(`${i+1}. ${name}`,78,165+i*FORGE_ROW);
     });
     g.fillStyle=INK;g.font=`500 11px ${MONO}`;
-    const description=this.forgePick<3?BLUEPRINTS[this.forgePick].description:"The loom copies its seated host point group. Sixfold material on this square net produces 222, never a fictitious hexagonal crystal.";
+    const description=this.forgePick<BLUEPRINTS.length?BLUEPRINTS[this.forgePick].description:"The loom copies its seated host point group. Sixfold material on this square net produces 222, never a fictitious hexagonal crystal.";
     wrap(g,description,70,363,VIEW_W-250,17);
-    if(this.forgePick<3) {
+    if(this.forgePick<BLUEPRINTS.length) {
       const pitch=latticePitch(this.run);g.strokeStyle=GOLD;
       for(const at of blueprintSites(this.run,BLUEPRINTS[this.forgePick].kind,this.forgeRotation))
         g.strokeRect(VIEW_W-125+(at.x-this.run.you.x)/pitch*12,368+(at.y-this.run.you.y)/pitch*12,8,8);
@@ -3518,6 +3672,128 @@ export class Game {
     g.fillText("ASSEMBLE / WEAVE · A / X / ENTER / SPACE",80,421);
     g.fillStyle=GOLD;wrap(g,this.forgeMessage,70,451,VIEW_W-140,16);
     g.fillStyle=DIM;g.fillText("Q / B / D-PAD selects · V / L3 / LB / ESC closes · world paused",70,500);
+  }
+
+  /**
+   * THE QUADRATURE SIGIL. A Lissajous figure is what you get when you plot one
+   * signal against another, and these are the two drives: the X pair's
+   * pressure across, the Y pair's up. Quadrature is the circle; in step it
+   * closes to a diagonal — the same diagonal the mesh opens along — and
+   * anywhere between is the ellipse. The travelling bead is the drive slowed
+   * seven orders of magnitude so it can be watched; its shape is exact.
+   *
+   * Around it: the ring is phase, brass at the phase the glass writes where you
+   * stand, clay where your trim has taken it. The faint figure is |cos psi|,
+   * your Resonarium's coherence phase, drawn on your side of the circle; the
+   * gold arc inside is how well you are holding the two together.
+   */
+  private drawSigil(): void {
+    const run = this.run, s = run.resonance;
+    if (!s) return;
+    const g = this.ctx;
+    const w = run.wave;
+    const cx = VIEW_W - 70, cy = 318, R = 42, r = R - 13;
+    const phi = w.cross;
+    const mesh = Math.abs(Math.cos(phi));
+    const t = Math.acos(Math.min(1, Math.abs(Math.cos(s.psi))));
+    // The target on the same side of the circle as you: |cos| cannot tell
+    // phi from pi - phi, so neither does the drawing.
+    const aim = Math.cos(phi) >= 0 ? t : Math.PI - t;
+
+    g.save();
+    const halo = g.createRadialGradient(cx, cy, 6, cx, cy, R + 20);
+    halo.addColorStop(0, `rgba(${VIOLET},0.94)`);
+    halo.addColorStop(0.75, `rgba(${VIOLET},0.7)`);
+    halo.addColorStop(1, `rgba(${VIOLET},0)`);
+    g.fillStyle = halo;
+    g.beginPath(); g.arc(cx, cy, R + 20, 0, Math.PI * 2); g.fill();
+
+    g.strokeStyle = `rgba(${BRASS},0.55)`;
+    g.lineWidth = 1;
+    g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = `rgba(${BRASS},0.2)`;
+    g.beginPath(); g.arc(cx, cy, R - 5, 0, Math.PI * 2); g.stroke();
+    for (let i = 0; i < 24; i++) {
+      const a = (i * Math.PI) / 12;
+      const len = i % 6 === 0 ? 7 : i % 2 === 0 ? 4 : 2;
+      g.strokeStyle = `rgba(${BRASS},${i % 6 === 0 ? 0.8 : 0.4})`;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * R, cy - Math.sin(a) * R);
+      g.lineTo(cx + Math.cos(a) * (R - len), cy - Math.sin(a) * (R - len));
+      g.stroke();
+    }
+
+    // Native and trimmed phase, on the ring. Counter-clockwise from east.
+    const at = (a: number, rr: number) => [cx + Math.cos(a) * rr, cy - Math.sin(a) * rr] as const;
+    if (s.trim !== 0) {
+      g.strokeStyle = `rgba(${CLAY},0.9)`;
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(cx, cy, R, -s.native, -(s.native + s.trim), s.trim > 0);
+      g.stroke();
+    }
+    const [nx, ny] = at(s.native, R);
+    g.fillStyle = `rgb(${BRASS})`;
+    g.beginPath(); g.arc(nx, ny, 2.5, 0, Math.PI * 2); g.fill();
+    const [fx, fy] = at(phi, R);
+    g.fillStyle = `rgb(${EMBER})`;
+    g.beginPath(); g.arc(fx, fy, 3.5, 0, Math.PI * 2); g.fill();
+
+    // The lock, as an arc inside the ring.
+    if (s.lock > 0.01) {
+      g.strokeStyle = `rgba(255,201,74,${(0.25 + 0.45 * s.lock).toFixed(3)})`;
+      g.lineWidth = s.lock > 0.85 ? 2 : 1;
+      g.beginPath();
+      g.arc(cx, cy, R - 8, -Math.PI / 2, -Math.PI / 2 + s.lock * Math.PI * 2);
+      g.stroke();
+    }
+
+    const figure = (p: number) => {
+      g.beginPath();
+      for (let i = 0; i <= 72; i++) {
+        const u = (i / 72) * Math.PI * 2;
+        const x = cx + Math.cos(u) * r, y = cy - Math.cos(u + p) * r;
+        if (i) g.lineTo(x, y); else g.moveTo(x, y);
+      }
+    };
+    g.setLineDash([2, 3]);
+    g.strokeStyle = "rgba(239,230,216,0.3)";
+    g.lineWidth = 1;
+    figure(aim); g.stroke();
+    g.setLineDash([]);
+    g.strokeStyle = `rgba(${CLAY},0.25)`;
+    g.lineWidth = 5;
+    figure(phi); g.stroke();
+    g.strokeStyle = `rgba(${EMBER},0.95)`;
+    g.lineWidth = 1.3;
+    figure(phi); g.stroke();
+
+    // The bead and its wake.
+    const u0 = this.t * 1.9;
+    for (let k = 9; k >= 0; k--) {
+      const u = u0 - k * 0.09;
+      g.fillStyle = `rgba(${EMBER},${((1 - k / 10) * 0.9).toFixed(3)})`;
+      g.beginPath();
+      g.arc(cx + Math.cos(u) * r, cy - Math.cos(u + phi) * r, k === 0 ? 2.6 : 1.4, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    g.textAlign = "center";
+    g.textBaseline = "top";
+    g.font = `600 8px ${MONO}`;
+    g.fillStyle = `rgba(${BRASS},0.85)`;
+    g.fillText("Q U A D R A T U R E", cx, cy - R - 16);
+    const deg = ((((phi * 180) / Math.PI) % 360) + 360) % 360;
+    g.font = `600 9px ${MONO}`;
+    g.fillStyle = BONE;
+    g.fillText(`φ ${deg.toFixed(0)}°  MESH ${mesh.toFixed(2)}`, cx, cy + R + 8);
+    g.fillStyle = s.lock >= 0.5 ? GOLD : DIM;
+    g.fillText(`LOCK ${Math.round(s.lock * 100)}%  BANK ${bank(run).toFixed(0)}`, cx, cy + R + 21);
+    g.fillStyle = FAINT;
+    g.font = `500 8px ${MONO}`;
+    g.fillText(`TRIM ±${Math.round((TRIM_RANGE * 180) / Math.PI)}° · R-STICK / Z X`, cx, cy + R + 34);
+    g.textAlign = "left";
+    g.restore();
   }
 
   private drawHud(): void {
@@ -3611,6 +3887,7 @@ export class Game {
       g.fillText(`${l.name} · R ${s.R.toFixed(2)} · ${s.fragments} FRAGMENTS`,VIEW_W/2,78);
       g.fillStyle=INK;g.fillText(s.cleared?"CLEARED · NEXT BIRTH ADVANCES":`${s.kills-s.stageKills}/${l.kills} kills · ${s.crafted-s.stageCrafts}/${l.crafts} assemblies`,VIEW_W/2,94);
       g.fillStyle=DIM;g.fillText("V / L3 · CRYSTAL FORGE",VIEW_W/2,110);g.textAlign="left";
+      this.drawSigil();
     }
 
     if (this.toastT > 0) {
@@ -4320,7 +4597,10 @@ export class Game {
       `you: integrity ${run.integrity}/${maxIntegrity(run)} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
       `companions: ${run.bond.companions.map((c, i) => `${i === run.bond.active ? "*" : ""}${c.form}:${c.rank}`).join(" ") || "none"}; bond ${run.bond.progress.toFixed(2)}s`
         + `${companion(run) ? `; call ${callWait(run) > 0 ? `in ${callWait(run).toFixed(0)}s` : "ready"}` : ""}`,
-      `resonance: ${run.resonance ? JSON.stringify({seed:run.resonance.source.seed,realm:realm(run.resonance).name,R:run.resonance.R,fragments:run.resonance.fragments,crafted:run.resonance.crafted,kills:run.resonance.kills,blocks:run.resonance.blocks,woven:run.resonance.woven}) : "off"}`,
+      `resonance: ${run.resonance ? JSON.stringify({seed:run.resonance.source.seed,realm:realm(run.resonance).name,R:run.resonance.R,fragments:run.resonance.fragments,crafted:run.resonance.crafted,kills:run.resonance.kills,blocks:run.resonance.blocks,woven:run.resonance.woven,
+        crossDeg:+(run.wave.cross*180/Math.PI).toFixed(1),nativeDeg:+(run.resonance.native*180/Math.PI).toFixed(1),trimDeg:+(run.resonance.trim*180/Math.PI).toFixed(1),
+        lock:+run.resonance.lock.toFixed(2),bank:+bank(run).toFixed(1),meshSeconds:+run.resonance.meshTime.toFixed(1),lockSeconds:+run.resonance.lockTime.toFixed(1),
+        trimSpent:+run.resonance.trimSpent.toFixed(1),tapped:run.resonance.tapped}) : "off"}`,
       `mitochondria: ${run.organelles.length}; stored energy ${run.organelles.reduce((n, o) => n + o.energy, 0).toFixed(0)}`
         + `; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
       // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather

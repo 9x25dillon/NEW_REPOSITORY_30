@@ -1,15 +1,17 @@
 // Resonarium -> game boundary: data only. No natal data enters src/ physics.
 // Coherence, charge, recipes and encounter rewards are explicit gameplay models.
-import { type Run, latticePitch, retune, THRONE_RADIUS } from './run.js';
+import { type Run, latticePitch, retune, PLATES, THRONE_RADIUS } from './run.js';
 import { snap, seatedGroup } from './body.js';
 import { cellFor } from './lattice.js';
 import { structureFrom } from './world.js';
 import { catches } from './bound.js';
-import { rng } from './wave.js';
+import { QUADRATURE, crossCoupling, rng, wavelength } from './wave.js';
+import { nativeCross } from './plates.js';
+import { together } from './depth.js';
 
 export interface ResonanceFrame { t: number; K: number; R_mean: number; psi: number }
 export interface ResonanceSource { seed: string; trajectory: ResonanceFrame[] }
-export type Blueprint = 'condenser' | 'ward' | 'loom';
+export type Blueprint = 'condenser' | 'ward' | 'loom' | 'tap';
 export interface Construct {
   kind: Blueprint; ids: number[]; energy: number; x: number; y: number; layer: number;
 }
@@ -18,6 +20,12 @@ export interface Resonance {
   K: number; R: number; psi: number; symbol: 'L' | 'S'; pulse: number; pulseTime: number;
   fragments: number; constructs: Construct[]; crafted: number; kills: number; blocks: number; woven: number;
   stage: number; stageKills: number; stageCrafts: number; cleared: boolean;
+  /** Cross-phase: what the glass writes where you stand, the trim you are
+   *  paying for on top of it, and how well your lattice matches |cos psi|. */
+  native: number; trim: number; lock: number;
+  /** For the report: seconds in a mesh, seconds locked, charge spent on trim,
+   *  and motifs a tap has caught. */
+  meshTime: number; lockTime: number; trimSpent: number; tapped: number;
 }
 export const REALMS = [
   { name: 'NUCLEATION GARDEN', enemy: 'faceter', kills: 2, crafts: 1, reward: 3 },
@@ -28,7 +36,33 @@ export const BLUEPRINTS: ReadonlyArray<{kind:Blueprint;name:string;cost:number;s
   {kind:'condenser',name:'PHASE CONDENSER',cost:2,sites:[[0,0],[1,0],[2,0]],description:'3 cells in a rail. Grip nearby to store coherence charge; release to recover stamina.'},
   {kind:'ward',name:'BRAGG WARD',cost:3,sites:[[0,0],[1,0],[1,1],[0,1]],description:'4 tetragonal cells (4 or 422) in a square. 12 charge blocks a hit nearby (6 when the real band gap aligns).'},
   {kind:'loom',name:'LATTICE LOOM',cost:3,sites:[[0,0],[1,0],[0,1]],description:'3 cells in an L. Store charge, then weave a cell for 1 fragment and 15 charge. Output follows the seated host group.'},
+  {kind:'tap',name:'QUADRATURE TAP',cost:2,sites:[[0,0],[1,1],[2,2]],description:'3 cells on a diagonal, the way the mesh runs. While your hand is a mesh (|cos φ| ≥ 0.5) within reach, it drinks passing motifs as charge.'},
 ];
+
+// ── cross-phase, as a resource ──────────────────────────────────────────────
+//
+// The glass decides the cross-phase where you stand (game/plates.ts). A trim
+// is a phase shifter in the Y pair's feed, and it is the one thing here that is
+// a GAME RULE rather than a consequence: it runs on stored construct charge,
+// so overriding the map costs what you banked, and an empty bank lets the glass
+// have its way. The shifter slews rather than jumps, as a real one does.
+
+/** Most trim the shifter can hold, rad. A quarter period reaches any shape. */
+export const TRIM_RANGE = Math.PI / 2;
+/** How fast it slews, rad/s. */
+export const TRIM_SLEW = 2.4;
+/** Charge per second at full trim; proportional below it. GAME CONSTANT. */
+export const TRIM_DRAW = 3;
+/** How near |cos phi| must come to |cos psi| to count, and what a perfect
+ *  lock multiplies the shared charging budget by. GAME CONSTANTS. */
+export const LOCK_WIDTH = 0.3;
+export const LOCK_GAIN = 1;
+/** |cos phi| at which the hand is a mesh and a tap opens. */
+export const MESH_OPEN = 0.5;
+/** How near a tap cell a motif is caught, m, and what one is worth. */
+export const TAP_CATCH = 24e-6;
+export const TAP_YIELD = 4;
+export const CONSTRUCT_MAX = 40;
 export const FORGE_REACH = 110e-6;
 export const MAX_CONSTRUCTS = 24;
 export function seed32(seed:string):number {
@@ -62,7 +96,8 @@ export function newResonance(source:ResonanceSource):Resonance {
   return {source:{seed:source.seed,trajectory:source.trajectory.map(r=>({...r}))},time:0,remainder:0,
     theta:Array.from({length:24},()=>random()*Math.PI*2),omega:Array.from({length:24},()=>.35+(random()-.5)*.9),
     K:0,R:0,psi:0,symbol:'L',pulse:0,pulseTime:0,fragments:6,constructs:[],crafted:0,kills:0,blocks:0,woven:0,
-    stage:0,stageKills:0,stageCrafts:0,cleared:false};
+    stage:0,stageKills:0,stageCrafts:0,cleared:false,
+    native:QUADRATURE,trim:0,lock:0,meshTime:0,lockTime:0,trimSpent:0,tapped:0};
 }
 let word='L';for(let i=0;i<10;i++)word=[...word].map(c=>c==='L'?'LS':'L').join('');
 /** Fixed-step toy coherence driver, or direct playback of imported observations. */
@@ -129,19 +164,26 @@ export function resonanceStep(run:Run,dt:number,gripping:boolean):void {
   const s=run.resonance;if(!s)return;advanceResonance(s,dt);
   const live=new Map(run.structures.map(h=>[h.id,h]));
   s.constructs=s.constructs.filter(c=>c.ids.every(id=>live.has(id)));
-  let chargeBudget=8*(.25+.75*s.R)*dt,transferBudget=10*dt;
+  // THE LOCK. Your lattice's shape is |cos phi|; the coherence phase's is
+  // |cos psi|, and it keeps moving. Matching them multiplies the shared budget.
+  const mesh=Math.abs(crossCoupling(run.wave));
+  s.lock=Math.max(0,1-Math.abs(mesh-Math.abs(Math.cos(s.psi)))/LOCK_WIDTH);
+  if(mesh>=MESH_OPEN)s.meshTime+=dt;
+  if(s.lock>=.5&&gripping)s.lockTime+=dt;
+  let chargeBudget=8*(.25+.75*s.R)*(1+LOCK_GAIN*s.lock)*dt,transferBudget=10*dt;
   for(const c of s.constructs) {
     const hosts=c.ids.map(id=>live.get(id)!);
     c.x=hosts.reduce((v,h)=>v+h.x,0)/hosts.length;c.y=hosts.reduce((v,h)=>v+h.y,0)/hosts.length;c.layer=hosts[0].layer;
     if(hosts.some(h=>h.layer!==c.layer)){c.layer=-1;continue;}
     const near=c.layer===run.layer&&Math.hypot(c.x-run.you.x,c.y-run.you.y)<=FORGE_REACH;
     if(near&&gripping&&!run.wave.spent) {
-      const add=Math.min(40-c.energy,chargeBudget);c.energy+=add;chargeBudget-=add;
+      const add=Math.min(CONSTRUCT_MAX-c.energy,chargeBudget);c.energy+=add;chargeBudget-=add;
     } else if(near&&!gripping&&c.kind==='condenser') {
       const add=Math.min(c.energy,transferBudget,100-run.wave.stamina);
       run.wave.stamina+=add;c.energy-=add;transferBudget-=add;if(run.wave.stamina>25)run.wave.spent=false;
     }
   }
+  if(mesh>=MESH_OPEN)drinkTaps(run,s,live);
   const level=realm(s);
   if(!s.cleared&&s.kills-s.stageKills>=level.kills&&s.crafted-s.stageCrafts>=level.crafts) {
     s.fragments+=level.reward;s.cleared=true;
@@ -164,3 +206,55 @@ export function resonanceBirth(run:Run):void {
 }
 /** Real band-gap calculation is displayed as a fabrication diagnostic, never fabricated by the overlay. */
 export function gapAligned(run:Run):boolean {return catches(run.gap,run.bound.omega);}
+
+/** Constructs whose cells all still stand, on one plane. */
+function intact(run:Run,s:Resonance):Construct[] {
+  const live=new Set(run.structures.map(h=>h.id));
+  return s.constructs.filter(c=>c.layer>=0&&c.ids.every(id=>live.has(id)));
+}
+/** Stored charge the shifter can draw on. */
+export function bank(run:Run):number {
+  const s=run.resonance;return s?intact(run,s).reduce((v,c)=>v+c.energy,0):0;
+}
+/**
+ * Set the pairs' timing for this frame: the glass where you stand, plus the
+ * trim, which slews toward what the stick asks and is paid for as it is held.
+ * Exactly QUADRATURE on an ordinary run, whatever the stick says.
+ */
+export function crossPhase(run:Run,trim:number,dt:number):void {
+  const w=run.wave,s=run.resonance;
+  if(!s){w.cross=QUADRATURE;return;}
+  const native=nativeCross(PLATES,run.you.x,run.you.y,wavelength(w));s.native=native;
+  const pool=intact(run,s).sort((a,b)=>b.energy-a.energy);
+  const stored=pool.reduce((v,c)=>v+c.energy,0);
+  const ask=Number.isFinite(trim)?Math.max(-1,Math.min(1,trim)):0;
+  const want=stored>0?TRIM_RANGE*ask:0;
+  if(Number.isFinite(dt)&&dt>0) {
+    const step=TRIM_SLEW*dt;s.trim+=Math.max(-step,Math.min(step,want-s.trim));
+    let owe=TRIM_DRAW*Math.abs(s.trim)/TRIM_RANGE*dt;
+    for(const c of pool){if(owe<=0)break;const take=Math.min(c.energy,owe);c.energy-=take;owe-=take;s.trimSpent+=take;}
+  }
+  w.cross=s.trim===0?native:native+s.trim;
+}
+/** Taps near your hand drink the motifs the mesh has carried to them. Only
+ *  runs while the hand is a mesh, and only over taps within reach — never an
+ *  entity-by-structure product over the whole channel. */
+function drinkTaps(run:Run,s:Resonance,live:Map<number,{x:number;y:number;layer:number}>):void {
+  // Reach is to the NEAREST tap cell: a diagonal is long, and its middle sits
+  // a pitch and a half from where you stood to build it.
+  const open=s.constructs.filter(c=>c.kind==='tap'&&c.layer===run.layer&&c.energy<CONSTRUCT_MAX
+    &&c.ids.some(id=>{const h=live.get(id);return !!h&&Math.hypot(h.x-run.you.x,h.y-run.you.y)<=FORGE_REACH;}));
+  if(!open.length)return;
+  const cells=open.flatMap(c=>c.ids.map(id=>({c,h:live.get(id)!})));
+  const reach=FORGE_REACH+TAP_CATCH*4;
+  run.entities=run.entities.filter(e=>{
+    if(e.faction!=='motif'||!together(e.layer,run.layer)||Math.abs(e.x-run.you.x)>reach||Math.abs(e.y-run.you.y)>reach)return true;
+    for(const {c,h} of cells) {
+      if(c.energy<CONSTRUCT_MAX&&Math.hypot(h.x-e.x,h.y-e.y)<=TAP_CATCH) {
+        c.energy=Math.min(CONSTRUCT_MAX,c.energy+TAP_YIELD);s.tapped++;
+        run.events.push({kind:'quadrature',what:'tap',x:e.x,y:e.y});return false;
+      }
+    }
+    return true;
+  });
+}

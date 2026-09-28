@@ -912,10 +912,10 @@
     return d.substrate.velocity / ssawWavelength(d);
   }
   function ssawField(d, amplitudePa) {
-    const wavelength = ssawWavelength(d);
+    const wavelength2 = ssawWavelength(d);
     return {
-      k: 2 * Math.PI / wavelength,
-      wavelength,
+      k: 2 * Math.PI / wavelength2,
+      wavelength: wavelength2,
       frequency: ssawFrequency(d),
       amplitude: amplitudePa,
       // Two waves of phase difference p sum to an envelope cos(kx - p/2).
@@ -990,6 +990,7 @@
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
   }
+  var QUADRATURE = Math.PI / 2;
   function newWave(pitch, maxAmplitude, focus = 0, medium = WATER) {
     return {
       pitch,
@@ -1004,7 +1005,9 @@
       aimX: 0,
       aimY: 0,
       focus,
-      inverted: false
+      inverted: false,
+      cross: QUADRATURE,
+      flipped: false
     };
   }
   function axis(w, phase, amplitude) {
@@ -1030,17 +1033,21 @@
   function frequency(w) {
     return ssawFrequency({ fingerPitch: w.pitch, substrate: SUBSTRATE, medium: w.medium });
   }
+  function wavelength(w) {
+    return ssawWavelength({ fingerPitch: w.pitch, substrate: SUBSTRATE, medium: w.medium });
+  }
   function phaseForNodeAt(w, u) {
     const k = Math.PI / w.pitch;
     return -2 * (Math.PI / 2 - k * u);
   }
-  function aimAt(w, x, y, invert = false) {
+  function aimAt(w, x, y, invert = false, flip = false) {
     const off = invert ? w.pitch / 2 : 0;
     w.phaseX = phaseForNodeAt(w, x + off);
-    w.phaseY = phaseForNodeAt(w, y + off);
+    w.phaseY = phaseForNodeAt(w, y + off + (flip ? w.pitch : 0));
     w.aimX = x;
     w.aimY = y;
     w.inverted = invert;
+    w.flipped = flip;
   }
   function trapsX(w, p, span) {
     return trapPositions(axisX(w), p, span);
@@ -1056,17 +1063,68 @@
     const amp = localAmplitude(w, x, y);
     if (amp <= 0) return { vx: 0, vy: 0 };
     const mu = viscosity(w.tC);
+    const sx = axisX(w, amp), sy = axisY(w, amp);
+    let fx = forceAt(sx, x, p), fy = forceAt(sy, y, p);
+    const c = crossCoupling(w);
+    if (c !== 0) {
+      const f = crossForce(sx, sy, x, y, p, c);
+      fx += f.x;
+      fy += f.y;
+    }
     return {
-      vx: driftVelocity(forceAt(axisX(w, amp), x, p), p.radius, mu),
-      vy: driftVelocity(forceAt(axisY(w, amp), y, p), p.radius, mu)
+      vx: driftVelocity(fx, p.radius, mu),
+      vy: driftVelocity(fy, p.radius, mu)
     };
+  }
+  function crossCoupling(w) {
+    return w.cross === QUADRATURE ? 0 : Math.cos(w.cross);
+  }
+  function crossForce(sx, sy, x, y, p, c) {
+    const tx = sx.k * x + sx.phase;
+    const ty = sy.k * y + sy.phase;
+    const amp = sx.amplitude;
+    const coef = 2 / 3 * Math.PI * Math.pow(p.radius, 3) * compressibility(sx.medium) * amp * amp * f1(p, sx.medium) * c;
+    return {
+      x: coef * sx.k * Math.sin(tx) * Math.cos(ty),
+      y: coef * sy.k * Math.cos(tx) * Math.sin(ty)
+    };
+  }
+  function crossReach(w, p) {
+    const c = crossCoupling(w);
+    if (c === 0) return 0;
+    const phi = contrastFactor(p, w.medium);
+    const m = Math.abs(f1(p, w.medium) * c);
+    return phi === 0 ? m === 0 ? 0 : Infinity : m / (3 * Math.abs(phi));
+  }
+  function wellDepth(w, x, y, p) {
+    const c = crossCoupling(w);
+    if (c === 0) return 1;
+    const phi = contrastFactor(p, w.medium);
+    if (phi === 0) return 1;
+    const g2 = f1(p, w.medium) * c / (3 * phi);
+    if (phi > 0) return Math.max(0, 1 - Math.abs(g2));
+    const sx = axisX(w), sy = axisY(w);
+    const s = Math.cos(sx.k * x + sx.phase) * Math.cos(sy.k * y + sy.phase) < 0 ? -1 : 1;
+    return Math.max(0, 1 + g2 * s);
+  }
+  function softDiagonal(w, x, y, p) {
+    const c = crossCoupling(w);
+    if (c === 0) return 0;
+    const sx = axisX(w), sy = axisY(w);
+    const v = f1(p, w.medium) * c * Math.sin(sx.k * x + sx.phase) * Math.sin(sy.k * y + sy.phase);
+    return v >= 0 ? 1 : -1;
+  }
+  function deepWhereAligned(w, p) {
+    const c = crossCoupling(w);
+    if (c === 0) return true;
+    return f1(p, w.medium) * c <= 0;
   }
   var SUBSTEP_RELAX = 0.5;
   var SUBSTEP_CAP = 64;
   function advance(w, x, y, p, dt) {
     const amp = localAmplitude(w, x, y);
     if (amp <= 0) return { x, y, vx: 0, vy: 0 };
-    const rate = 2 * (Math.PI / w.pitch) * Math.abs(rateConstant(axisX(w, amp), p, viscosity(w.tC)));
+    const rate = 2 * (Math.PI / w.pitch) * Math.abs(rateConstant(axisX(w, amp), p, viscosity(w.tC))) * (1 + Math.min(8, crossReach(w, p)));
     const n = Math.min(SUBSTEP_CAP, Math.max(1, Math.ceil(rate * dt / SUBSTEP_RELAX)));
     const h = dt / n;
     let v = velocityAt(w, x, y, p);
@@ -1621,7 +1679,8 @@
     const lead = w.pitch * (p.dash > 0 ? DASH_LEAD : LEAD) * r;
     const tx = p.x + dx * lead;
     const ty = p.y + dy * lead;
-    aimAt(w, tx, ty, ridesAntinodes(p, w));
+    const inverted = ridesAntinodes(p, w);
+    aimAt(w, tx, ty, inverted, inverted && !deepWhereAligned(w, p.particle));
     return { x: tx, y: ty };
   }
   function carry(p, w, dt, bounds, flow = { x: 0, y: 0 }) {
@@ -1865,6 +1924,58 @@
     };
   }
 
+  // game/plates.ts
+  var METAL_SLOWING = 0.027;
+  var LAYOUT = [
+    [0.04, 0.1, 0.92, 0.1],
+    // the north band, a row
+    [0.5, 0.76, 0.46, 0.08],
+    // the south-east shelf, a half row
+    [0.8, 0.04, 0.08, 0.92],
+    // the east column
+    [0.1, 0.3, 0.06, 0.66],
+    // the west column
+    [0.3, 0.66, 0.04, 0.3]
+    // the south-west reed, a thin column
+  ];
+  function plates(channelW, channelH) {
+    return LAYOUT.map(([x, y, w, h]) => ({
+      x: x * channelW,
+      y: y * channelH,
+      w: w * channelW,
+      h: h * channelH
+    }));
+  }
+  function rowMetal(ps, y) {
+    let m = 0;
+    for (const p of ps) if (y >= p.y && y < p.y + p.h) m += p.w;
+    return m;
+  }
+  function colMetal(ps, x) {
+    let m = 0;
+    for (const p of ps) if (x >= p.x && x < p.x + p.w) m += p.h;
+    return m;
+  }
+  function metalPhase(length, wavelength2) {
+    return Math.PI / wavelength2 * METAL_SLOWING * length;
+  }
+  function nativeCross(ps, x, y, wavelength2) {
+    const d = rowMetal(ps, y) - colMetal(ps, x);
+    return d === 0 ? QUADRATURE : QUADRATURE + metalPhase(d, wavelength2);
+  }
+  function tartan(ps, channelW, channelH, wavelength2) {
+    const xs = [.../* @__PURE__ */ new Set([0, channelW, ...ps.flatMap((p) => [p.x, p.x + p.w])])].sort((a, b) => a - b);
+    const ys = [.../* @__PURE__ */ new Set([0, channelH, ...ps.flatMap((p) => [p.y, p.y + p.h])])].sort((a, b) => a - b);
+    const out = [];
+    for (let j = 0; j + 1 < ys.length; j++) {
+      for (let i = 0; i + 1 < xs.length; i++) {
+        const x = xs[i], y = ys[j], w = xs[i + 1] - x, h = ys[j + 1] - y;
+        out.push({ x, y, w, h, cross: nativeCross(ps, x + w / 2, y + h / 2, wavelength2) });
+      }
+    }
+    return out;
+  }
+
   // game/resonance.ts
   var REALMS = [
     { name: "NUCLEATION GARDEN", enemy: "faceter", kills: 2, crafts: 1, reward: 3 },
@@ -1874,8 +1985,18 @@
   var BLUEPRINTS = [
     { kind: "condenser", name: "PHASE CONDENSER", cost: 2, sites: [[0, 0], [1, 0], [2, 0]], description: "3 cells in a rail. Grip nearby to store coherence charge; release to recover stamina." },
     { kind: "ward", name: "BRAGG WARD", cost: 3, sites: [[0, 0], [1, 0], [1, 1], [0, 1]], description: "4 tetragonal cells (4 or 422) in a square. 12 charge blocks a hit nearby (6 when the real band gap aligns)." },
-    { kind: "loom", name: "LATTICE LOOM", cost: 3, sites: [[0, 0], [1, 0], [0, 1]], description: "3 cells in an L. Store charge, then weave a cell for 1 fragment and 15 charge. Output follows the seated host group." }
+    { kind: "loom", name: "LATTICE LOOM", cost: 3, sites: [[0, 0], [1, 0], [0, 1]], description: "3 cells in an L. Store charge, then weave a cell for 1 fragment and 15 charge. Output follows the seated host group." },
+    { kind: "tap", name: "QUADRATURE TAP", cost: 2, sites: [[0, 0], [1, 1], [2, 2]], description: "3 cells on a diagonal, the way the mesh runs. While your hand is a mesh (|cos \u03C6| \u2265 0.5) within reach, it drinks passing motifs as charge." }
   ];
+  var TRIM_RANGE = Math.PI / 2;
+  var TRIM_SLEW = 2.4;
+  var TRIM_DRAW = 3;
+  var LOCK_WIDTH = 0.3;
+  var LOCK_GAIN = 1;
+  var MESH_OPEN = 0.5;
+  var TAP_CATCH = 24e-6;
+  var TAP_YIELD = 4;
+  var CONSTRUCT_MAX = 40;
   var FORGE_REACH = 11e-5;
   var MAX_CONSTRUCTS = 24;
   function seed32(seed) {
@@ -1929,7 +2050,14 @@
       stage: 0,
       stageKills: 0,
       stageCrafts: 0,
-      cleared: false
+      cleared: false,
+      native: QUADRATURE,
+      trim: 0,
+      lock: 0,
+      meshTime: 0,
+      lockTime: 0,
+      trimSpent: 0,
+      tapped: 0
     };
   }
   var word = "L";
@@ -2050,7 +2178,11 @@
     advanceResonance(s, dt);
     const live = new Map(run.structures.map((h) => [h.id, h]));
     s.constructs = s.constructs.filter((c) => c.ids.every((id) => live.has(id)));
-    let chargeBudget = 8 * (0.25 + 0.75 * s.R) * dt, transferBudget = 10 * dt;
+    const mesh = Math.abs(crossCoupling(run.wave));
+    s.lock = Math.max(0, 1 - Math.abs(mesh - Math.abs(Math.cos(s.psi))) / LOCK_WIDTH);
+    if (mesh >= MESH_OPEN) s.meshTime += dt;
+    if (s.lock >= 0.5 && gripping) s.lockTime += dt;
+    let chargeBudget = 8 * (0.25 + 0.75 * s.R) * (1 + LOCK_GAIN * s.lock) * dt, transferBudget = 10 * dt;
     for (const c of s.constructs) {
       const hosts = c.ids.map((id) => live.get(id));
       c.x = hosts.reduce((v, h) => v + h.x, 0) / hosts.length;
@@ -2062,7 +2194,7 @@
       }
       const near = c.layer === run.layer && Math.hypot(c.x - run.you.x, c.y - run.you.y) <= FORGE_REACH;
       if (near && gripping && !run.wave.spent) {
-        const add = Math.min(40 - c.energy, chargeBudget);
+        const add = Math.min(CONSTRUCT_MAX - c.energy, chargeBudget);
         c.energy += add;
         chargeBudget -= add;
       } else if (near && !gripping && c.kind === "condenser") {
@@ -2073,6 +2205,7 @@
         if (run.wave.stamina > 25) run.wave.spent = false;
       }
     }
+    if (mesh >= MESH_OPEN) drinkTaps(run, s, live);
     const level = realm(s);
     if (!s.cleared && s.kills - s.stageKills >= level.kills && s.crafted - s.stageCrafts >= level.crafts) {
       s.fragments += level.reward;
@@ -2106,6 +2239,61 @@
   }
   function gapAligned(run) {
     return catches(run.gap, run.bound.omega);
+  }
+  function intact(run, s) {
+    const live = new Set(run.structures.map((h) => h.id));
+    return s.constructs.filter((c) => c.layer >= 0 && c.ids.every((id) => live.has(id)));
+  }
+  function bank(run) {
+    const s = run.resonance;
+    return s ? intact(run, s).reduce((v, c) => v + c.energy, 0) : 0;
+  }
+  function crossPhase(run, trim, dt) {
+    const w = run.wave, s = run.resonance;
+    if (!s) {
+      w.cross = QUADRATURE;
+      return;
+    }
+    const native = nativeCross(PLATES, run.you.x, run.you.y, wavelength(w));
+    s.native = native;
+    const pool = intact(run, s).sort((a, b) => b.energy - a.energy);
+    const stored = pool.reduce((v, c) => v + c.energy, 0);
+    const ask = Number.isFinite(trim) ? Math.max(-1, Math.min(1, trim)) : 0;
+    const want = stored > 0 ? TRIM_RANGE * ask : 0;
+    if (Number.isFinite(dt) && dt > 0) {
+      const step3 = TRIM_SLEW * dt;
+      s.trim += Math.max(-step3, Math.min(step3, want - s.trim));
+      let owe = TRIM_DRAW * Math.abs(s.trim) / TRIM_RANGE * dt;
+      for (const c of pool) {
+        if (owe <= 0) break;
+        const take = Math.min(c.energy, owe);
+        c.energy -= take;
+        owe -= take;
+        s.trimSpent += take;
+      }
+    }
+    w.cross = s.trim === 0 ? native : native + s.trim;
+  }
+  function drinkTaps(run, s, live) {
+    const open = s.constructs.filter((c) => c.kind === "tap" && c.layer === run.layer && c.energy < CONSTRUCT_MAX && c.ids.some((id) => {
+      const h = live.get(id);
+      return !!h && Math.hypot(h.x - run.you.x, h.y - run.you.y) <= FORGE_REACH;
+    }));
+    if (!open.length) return;
+    const cells = open.flatMap((c) => c.ids.map((id) => ({ c, h: live.get(id) })));
+    const reach = FORGE_REACH + TAP_CATCH * 4;
+    run.entities = run.entities.filter((e) => {
+      if (e.faction !== "motif" || !together(e.layer, run.layer) || Math.abs(e.x - run.you.x) > reach || Math.abs(e.y - run.you.y) > reach) return true;
+      for (const { c, h } of cells) {
+        if (c.energy < CONSTRUCT_MAX && Math.hypot(h.x - e.x, h.y - e.y) <= TAP_CATCH) {
+          c.energy = Math.min(CONSTRUCT_MAX, c.energy + TAP_YIELD);
+          s.tapped++;
+          run.events.push({ kind: "quadrature", what: "tap", x: e.x, y: e.y });
+          return false;
+        }
+      }
+      return true;
+    });
   }
 
   // game/evolution.ts
@@ -3034,6 +3222,7 @@
   var CHANNEL_W = 42e-4;
   var CHANNEL_H = 3e-3;
   var CHIP = features(CHANNEL_W, CHANNEL_H);
+  var PLATES = plates(CHANNEL_W, CHANNEL_H);
   function currentAt(run, x, y) {
     const b = run.bounds;
     const ca = Math.PI * (x - b.x) / b.w;
@@ -3240,6 +3429,7 @@
       run.events.push({ kind: "dash", x: you.x, y: you.y });
     }
     concentrate(you, w, input.grip && alive && !w.spent, dt);
+    crossPhase(run, alive ? input.trim ?? 0 : 0, dt);
     const trap = alive ? aimFor(you, w, input.move.x, input.move.y) : aimFor(you, w, 0, 0);
     run.aim.x = trap.x;
     run.aim.y = trap.y;
@@ -3504,6 +3694,7 @@
     if (nx === null || ny === null) return false;
     return Math.hypot(nx - x, ny - y) < captureRadius(w.pitch) + p.radius * 0.5;
   }
+  var HELD_FLOOR = 0.1;
   function settle(run, dt) {
     const w = run.wave;
     const dead = [];
@@ -3512,12 +3703,16 @@
         e.held = 0;
         continue;
       }
-      if (!capturedAt(inWater(w, waterAt(run, e.y)), e.x, e.y, particleOf(e))) {
+      const lw = inWater(w, waterAt(run, e.y));
+      if (!capturedAt(lw, e.x, e.y, particleOf(e))) {
         e.held = 0;
         continue;
       }
-      e.held += dt;
-      if (e.faction !== "beast") continue;
+      if (e.faction !== "beast") {
+        e.held += dt;
+        continue;
+      }
+      e.held += dt * Math.max(HELD_FLOOR, wellDepth(lw, e.x, e.y, particleOf(e)));
       const holds = beast(e.species).hold * (1 - 0.2 * rankOf(run, "cilia"));
       if (e.held >= holds) dead.push(e);
     }
@@ -4466,6 +4661,7 @@
         out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
         out.call = anyHit(m.call);
         out.forge = gp.mapping === "standard" && anyHit([10]);
+        if (gp.mapping === "standard") out.trim = this.stick(gp.axes[2] ?? 0, 0).x;
         out.mute = anyHit(m.mute);
         this.prev = [...gp.buttons].map((_, i) => down(i));
         if (!this.everMoved && (out.grip || out.dash || out.place || out.crownDown || out.confirm || Math.hypot(gp.axes[0] ?? 0, gp.axes[1] ?? 0) > DEADZONE)) {
@@ -4497,6 +4693,8 @@
       if (tap("KeyQ")) out.cycle = -1;
       if (tap("KeyR")) out.call = true;
       if (tap("KeyV")) out.forge = true;
+      const kt = (k("KeyX") ? 1 : 0) - (k("KeyZ") ? 1 : 0);
+      if (kt !== 0) out.trim = kt;
       if (tap("KeyM")) out.mute = true;
       if (tap("Space") || tap("Enter")) out.confirm = true;
       if (tap("Escape") || tap("KeyP")) out.pause = true;
@@ -4582,10 +4780,12 @@
   };
 
   // app/sfx.ts
+  var DRONE = [98, 392];
   var Sfx = class {
     constructor() {
       __publicField(this, "ac", null);
       __publicField(this, "muted", false);
+      __publicField(this, "drone", null);
     }
     /** Must be called from inside a user gesture or the context stays suspended. */
     unlock() {
@@ -4739,6 +4939,58 @@
     lesson() {
       this.tone(660, 0.08, "sine", 0.028);
     }
+    /** A tap drinking a motif: a small glass ping, a fifth over the drone. */
+    tap() {
+      this.tone(1175, 0.12, "sine", 0.018, void 0, 0);
+      this.tone(1760, 0.18, "sine", 0.01, void 0, 0.03);
+    }
+    /** Your lattice locking to the coherence phase: the drone's own G, rising
+     *  through its fifth to the octave, soft enough to hear under a fight. */
+    lock() {
+      this.tone(392, 0.35, "sine", 0.026, void 0, 0);
+      this.tone(587, 0.4, "sine", 0.022, void 0, 0.09);
+      this.tone(784, 0.6, "triangle", 0.016, void 0, 0.18);
+    }
+    /**
+     * The two pairs, one per ear, `cross` radians apart, at `level` 0..1.
+     * Called every frame; built the first time it is asked for with a level.
+     */
+    quadrature(cross, level) {
+      const ac = this.ac;
+      if (!ac) return;
+      if (!this.drone) {
+        if (level <= 0) return;
+        const merge = ac.createChannelMerger(2);
+        const out = ac.createGain();
+        out.gain.value = 0;
+        merge.connect(out);
+        out.connect(ac.destination);
+        const delays = [];
+        for (const f of DRONE) {
+          const o = ac.createOscillator();
+          o.type = "sine";
+          o.frequency.value = f;
+          const left = ac.createGain(), right = ac.createGain();
+          left.gain.value = right.gain.value = f === DRONE[0] ? 1 : 0.22;
+          const d = ac.createDelay(1);
+          o.connect(left);
+          left.connect(merge, 0, 0);
+          o.connect(d);
+          d.connect(right);
+          right.connect(merge, 0, 1);
+          o.start();
+          delays.push(d);
+        }
+        this.drone = { level: out, delays };
+      }
+      const t = ac.currentTime;
+      const on = this.muted ? 0 : Math.max(0, Math.min(1, level));
+      this.drone.level.gain.setTargetAtTime(0.03 * on, t, 0.12);
+      const phi = (cross % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      this.drone.delays.forEach((d, i) => {
+        d.delayTime.setTargetAtTime(phi / (2 * Math.PI * DRONE[i]), t, 0.05);
+      });
+    }
   };
 
   // app/drifter.ts
@@ -4763,6 +5015,13 @@
   var RED = "#ff4d6d";
   var MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
   var CARD_TIME = 8;
+  var FORGE_CHOICES = BLUEPRINTS.length + 1;
+  var FORGE_ROW = 40;
+  var CLAY = "217,119,87";
+  var EMBER = "255,176,128";
+  var BRASS = "201,168,106";
+  var BONE = "#efe6d8";
+  var VIOLET = "18,12,32";
   var LESSONS = {
     node: {
       id: "node",
@@ -4956,6 +5215,11 @@
        */
       __publicField(this, "verdict", null);
       __publicField(this, "wasGrip", false);
+      /** Quadrature: whether the two first lessons have been said this run, and
+       *  whether last frame was locked, so the chime is an edge and not a drone. */
+      __publicField(this, "taughtMesh", false);
+      __publicField(this, "taughtBank", false);
+      __publicField(this, "wasLocked", false);
       /**
        * What happened, counted.
        *
@@ -5053,6 +5317,9 @@
       __publicField(this, "wasMouseDash", false);
       /** Whether the water ebbs back as you spend your crystal. See `Run.ebb`. */
       __publicField(this, "ebb", false);
+      // ── the metal ────────────────────────────────────────────────────────────
+      __publicField(this, "tartanCache", null);
+      __publicField(this, "hatch");
       /**
        * WHICH WAY THE THRONE IS, when it is not on the screen.
        *
@@ -5185,7 +5452,7 @@
       this.forgeMessage = "";
     }
     forgeAction() {
-      const result = this.forgePick === 3 ? weave(this.run) : craft(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation);
+      const result = this.forgePick === BLUEPRINTS.length ? weave(this.run) : craft(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation);
       const messages = {
         crafted: "ASSEMBLED. CLOSE THE FORGE, THEN GRIP NEARBY TO CHARGE.",
         woven: "NEW CELL ADDED TO YOUR RACK.",
@@ -5250,8 +5517,8 @@
         }
         const { sx, sy } = world(e);
         if (this.forgeOpen) {
-          const choice = Math.floor((sy - 155) / 50);
-          if (sx >= 70 && sx <= VIEW_W - 70 && choice >= 0 && choice < 4) this.forgePick = choice;
+          const choice = Math.floor((sy - 155) / FORGE_ROW);
+          if (sx >= 70 && sx <= VIEW_W - 70 && sy < 155 + FORGE_CHOICES * FORGE_ROW && choice >= 0 && choice < FORGE_CHOICES) this.forgePick = choice;
           else if (sy >= 405 && sy <= 455) this.forgeAction();
           else if (sy > 460) this.toggleForge();
           return;
@@ -5456,6 +5723,7 @@
       this.forgePick = 0;
       this.forgeRotation = 0;
       this.forgeMessage = "";
+      this.taughtMesh = this.taughtBank = this.wasLocked = false;
       if (this.expeditionSource) {
         this.run.resonance = newResonance(this.expeditionSource);
         this.run.cells = [...Array.from({ length: 6 }, () => cellFor("2")), ...Array.from({ length: 4 }, () => cellFor("4"))];
@@ -5549,9 +5817,9 @@
           return;
         }
         if (it.crown) this.forgeRotation = (this.forgeRotation + 1) % 4;
-        if (it.cycle) this.forgePick = (this.forgePick + it.cycle + 4) % 4;
+        if (it.cycle) this.forgePick = (this.forgePick + it.cycle + FORGE_CHOICES) % FORGE_CHOICES;
         const number = this.pad.slotKey();
-        if (number >= 1 && number <= 4) this.forgePick = number - 1;
+        if (number >= 1 && number <= FORGE_CHOICES) this.forgePick = number - 1;
         if (it.place || it.confirm) this.forgeAction();
         return;
       }
@@ -5560,7 +5828,7 @@
         this.sfx.tick();
       }
       const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
-      const legend = `${G.move} move \xB7 ${G.grip} grip \xB7 ${G.dash} dash / catch \xB7 ${G.place} build / hold: mitochondrion \xB7 ${G.lift} lift / hold: lure \xB7 ${G.crown} feed / crown / tame \xB7 ${G.call} call ally \xB7 ${G.pause} pause` + (run.resonance ? " \xB7 V / L3 forge" : "");
+      const legend = `${G.move} move \xB7 ${G.grip} grip \xB7 ${G.dash} dash / catch \xB7 ${G.place} build / hold: mitochondrion \xB7 ${G.lift} lift / hold: lure \xB7 ${G.crown} feed / crown / tame \xB7 ${G.call} call ally \xB7 ${G.pause} pause` + (run.resonance ? " \xB7 V / L3 forge \xB7 R-stick / Z X trim cross-phase" : "");
       if (legend !== this.controlLegend) {
         this.controlLegend = legend;
         const controls = document.getElementById("controls");
@@ -5589,8 +5857,22 @@
       const gripping = it.grip && !run.wave.spent;
       if (gripping && !this.wasGrip) this.sfx.gripOn();
       this.wasGrip = gripping;
-      step2(run, { move: it.move, grip: it.grip, dash: it.dash, tame: it.crownDown }, dt);
+      step2(run, { move: it.move, grip: it.grip, dash: it.dash, tame: it.crownDown, trim: it.trim ?? 0 }, dt);
       this.drain();
+      const q = run.resonance;
+      if (q) {
+        if (!this.taughtMesh && Math.abs(Math.cos(q.native)) >= MESH_OPEN) {
+          this.taughtMesh = true;
+          this.say("METAL UNDER THE GLASS \xB7 THE PAIRS FALL INTO STEP \xB7 YOUR HAND OPENS INTO A MESH");
+        }
+        if (!this.taughtBank && Math.abs(it.trim ?? 0) > 0.5 && bank(run) <= 0) {
+          this.taughtBank = true;
+          this.say("TRIM RUNS ON STORED CHARGE \xB7 GRIP BESIDE AN ASSEMBLY TO BANK SOME");
+        }
+        const locked = gripping && q.lock >= 0.85;
+        if (locked && !this.wasLocked) this.sfx.lock();
+        this.wasLocked = locked;
+      }
       this.decay(dt);
       if (run.phase === "birth" && this.screen !== "birth") {
         this.screen = "birth";
@@ -5629,6 +5911,10 @@
         switch (ev.kind) {
           case "resonance":
             this.say(ev.text);
+            break;
+          case "quadrature":
+            this.burst(ev.x, ev.y, 7, EMBER);
+            this.sfx.tap();
             break;
           case "hit":
             this.flash = 1;
@@ -6011,6 +6297,7 @@
       this.drawWalls();
       this.drawCurrent();
       this.drawChip();
+      this.drawPlates();
       this.drawField();
       this.drawLattice();
       this.drawSites();
@@ -6033,6 +6320,8 @@
       this.drawPopups();
       g2.restore();
       this.bloom();
+      const playing = this.screen === "play" && !this.paused && !this.forgeOpen && this.run.resonance;
+      this.sfx.quadrature(this.run.wave.cross, playing ? this.run.wave.amplitude / this.run.wave.maxAmplitude : 0);
       g2.fillStyle = this.vignette;
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
       if (this.screen === "title") this.drawTitle();
@@ -6225,6 +6514,7 @@
       }
       const data = this.wash.data;
       const gain = 0.05 + lit * 0.4;
+      const cc = crossCoupling(w);
       const heat = Math.min(1, Math.max(0, (w.tC - AMBIENT_C) / (MAX_C - AMBIENT_C)));
       const nr = 70 + heat * 150, ng = 150 - heat * 40, nb = 200 - heat * 90;
       const ar = 200 + heat * 40, ag = 95 - heat * 20, ab = 150 - heat * 60;
@@ -6236,7 +6526,7 @@
           const sgn = this.cosX[i] * cy;
           const p = Math.abs(sgn);
           const up = w.inverted ? sgn < 0 : sgn >= 0;
-          const v = 0.022 + p * gain * this.envX[i] * ey;
+          const v = 0.022 + p * gain * this.envX[i] * ey * (cc === 0 ? 1 : Math.max(0, 1 + (sgn >= 0 ? cc : -cc)));
           data[o] = up ? nr : ar;
           data[o + 1] = up ? ng : ag;
           data[o + 2] = up ? nb : ab;
@@ -6251,34 +6541,129 @@
       const cool = { radius: 6e-6, rho: med.rho + 110, c: med.c + 80 };
       const warm = { radius: 6e-6, rho: med.rho - 85, c: med.c - 50 };
       const lead = !w.inverted;
+      const inView = (u, lo, span) => u.filter((v) => v >= lo - 2e-5 && v <= lo + span + 2e-5);
+      const x0 = mx(this.cam.x), y0 = mx(this.cam.y), vw = mx(VIEW_W), vh = mx(VIEW_H);
       this.lattice(
-        trapsX(w, cool, ARENA_W),
-        trapsY(w, cool, ARENA_H),
+        inView(trapsX(w, cool, CHANNEL_W), x0, vw),
+        inView(trapsY(w, cool, CHANNEL_H), y0, vh),
         NODE,
         lead ? 0.2 + lit * 0.62 : 0.09 + lit * 0.24,
-        lead ? 2.1 + lit * 1.7 : 1.4 + lit * 0.7
+        lead ? 2.1 + lit * 1.7 : 1.4 + lit * 0.7,
+        cool
       );
       this.lattice(
-        trapsX(w, warm, ARENA_W),
-        trapsY(w, warm, ARENA_H),
+        inView(trapsX(w, warm, CHANNEL_W), x0, vw),
+        inView(trapsY(w, warm, CHANNEL_H), y0, vh),
         ANTI,
         lead ? 0.09 + lit * 0.26 : 0.22 + lit * 0.64,
-        lead ? 1.4 + lit * 0.8 : 2.1 + lit * 1.8
+        lead ? 1.4 + lit * 0.8 : 2.1 + lit * 1.8,
+        warm
       );
+      if (cc !== 0) this.drawMesh(w, cool, Math.abs(cc));
     }
-    lattice(xs, ys, rgb, alpha, r) {
+    /**
+     * One trap of each lattice, sized by how deep its well is. At quadrature
+     * every well is alike; out of it the antinodes split into deep and shallow
+     * and a node's depth is its soft direction's — the numbers are wave.wellDepth.
+     */
+    lattice(xs, ys, rgb, alpha, r, body) {
       const g2 = this.ctx;
       const w = this.run.wave;
+      const crossed = crossCoupling(w) !== 0;
       for (const x of xs) {
         for (const y of ys) {
           const e = envelopeAt(w, x, y);
-          const a = alpha * (0.2 + 0.8 * e);
+          const d = crossed ? wellDepth(w, x, y, body) : 1;
+          const a = alpha * (0.2 + 0.8 * e) * Math.min(1.5, d);
           if (a < 0.02) continue;
-          g2.fillStyle = `rgba(${rgb},${a.toFixed(3)})`;
+          g2.fillStyle = `rgba(${rgb},${Math.min(1, a).toFixed(3)})`;
           g2.beginPath();
-          g2.arc(px(x), px(y), r * (0.6 + 0.4 * e), 0, Math.PI * 2);
+          g2.arc(px(x), px(y), r * (0.6 + 0.4 * e) * Math.sqrt(Math.max(0.15, d)), 0, Math.PI * 2);
           g2.fill();
         }
+      }
+    }
+    /**
+     * THE MESH. Each node is soft along one diagonal and the next node over is
+     * soft along the other (wave.softDiagonal), so a segment through each node
+     * along its own soft direction is the whole diamond net — nothing is drawn
+     * that the potential does not have. Only inside the hand: outside it there is
+     * no drive, and no mesh.
+     */
+    drawMesh(w, body, strength) {
+      const g2 = this.ctx;
+      const half = w.pitch / 2;
+      const reach = w.pitch * 2.6;
+      const xs = trapsX(w, body, CHANNEL_W).filter((v) => Math.abs(v - w.aimX) < reach);
+      const ys = trapsY(w, body, CHANNEL_H).filter((v) => Math.abs(v - w.aimY) < reach);
+      g2.lineCap = "round";
+      for (const pass of [0, 1]) {
+        for (const x of xs) {
+          for (const y of ys) {
+            const e = envelopeAt(w, x, y);
+            const a = strength * e * (pass ? 0.85 : 0.2);
+            if (a < 0.03) continue;
+            const sigma = softDiagonal(w, x, y, body);
+            g2.strokeStyle = `rgba(${pass ? EMBER : CLAY},${a.toFixed(3)})`;
+            g2.lineWidth = pass ? 1.3 : 5;
+            g2.beginPath();
+            g2.moveTo(px(x - half), px(y + sigma * half));
+            g2.lineTo(px(x + half), px(y - sigma * half));
+            g2.stroke();
+          }
+        }
+      }
+      g2.lineCap = "butt";
+    }
+    /**
+     * The expedition chip's metal and the cross-phase it writes.
+     *
+     * The strips are engraved, not lit: they are glass and metal and do nothing
+     * until you drive over them. The clay wash over the tartan is |cos phi| for
+     * THIS world's wavelength — the same map redraws itself every aeon, because
+     * phase per millimetre of metal goes as one over the wavelength.
+     */
+    drawPlates() {
+      const run = this.run;
+      if (!run.resonance) return;
+      const g2 = this.ctx;
+      const lam = wavelength(run.wave);
+      if (!this.tartanCache || this.tartanCache.lam !== lam) {
+        this.tartanCache = { lam, cells: tartan(PLATES, CHANNEL_W, CHANNEL_H, lam) };
+      }
+      const x0 = mx(this.cam.x), y0 = mx(this.cam.y);
+      const x1 = x0 + mx(VIEW_W), y1 = y0 + mx(VIEW_H);
+      const visible = (r) => r.x < x1 && r.x + r.w > x0 && r.y < y1 && r.y + r.h > y0;
+      for (const c of this.tartanCache.cells) {
+        if (!visible(c)) continue;
+        const m = Math.abs(Math.cos(c.cross));
+        if (m < 0.08) continue;
+        g2.fillStyle = `rgba(${CLAY},${(0.11 * m * m).toFixed(3)})`;
+        g2.fillRect(px(c.x), px(c.y), px(c.w), px(c.h));
+      }
+      if (this.hatch === void 0) {
+        const t = document.createElement("canvas");
+        t.width = t.height = 12;
+        const h = t.getContext("2d");
+        if (h) {
+          h.strokeStyle = `rgba(${BRASS},0.11)`;
+          h.lineWidth = 1;
+          h.beginPath();
+          h.moveTo(0, 12);
+          h.lineTo(12, 0);
+          h.stroke();
+        }
+        this.hatch = h ? g2.createPattern(t, "repeat") : null;
+      }
+      for (const p of PLATES) {
+        if (!visible(p)) continue;
+        if (this.hatch) {
+          g2.fillStyle = this.hatch;
+          g2.fillRect(px(p.x), px(p.y), px(p.w), px(p.h));
+        }
+        g2.strokeStyle = `rgba(${BRASS},0.34)`;
+        g2.lineWidth = 1;
+        g2.strokeRect(px(p.x) + 0.5, px(p.y) + 0.5, px(p.w) - 1, px(p.h) - 1);
       }
     }
     /** What you built: a rosette with one arm per direction its group has, and
@@ -7864,7 +8249,7 @@
       const g2 = this.ctx, hosts = new Map(this.run.structures.map((h) => [h.id, h]));
       for (const c of s.constructs) {
         if (c.layer !== this.run.layer || !this.onCamera(c.x, c.y, 150)) continue;
-        g2.strokeStyle = c.kind === "ward" ? "#aeb4ff" : c.kind === "loom" ? "#ffcf78" : "#78e1f5";
+        g2.strokeStyle = c.kind === "ward" ? "#aeb4ff" : c.kind === "loom" ? "#ffcf78" : c.kind === "tap" ? `rgb(${CLAY})` : "#78e1f5";
         g2.lineWidth = 1.5;
         g2.beginPath();
         c.ids.forEach((id, i) => {
@@ -7875,18 +8260,29 @@
         });
         if (c.kind === "ward") g2.closePath();
         g2.stroke();
-        g2.globalAlpha = 0.15 + 0.25 * c.energy / 40;
+        g2.globalAlpha = 0.15 + 0.25 * c.energy / CONSTRUCT_MAX;
         g2.beginPath();
         g2.arc(px(c.x), px(c.y), px(FORGE_REACH), 0, Math.PI * 2);
         g2.stroke();
         g2.globalAlpha = 1;
+        if (c.kind === "tap" && Math.abs(crossCoupling(this.run.wave)) >= MESH_OPEN) {
+          for (const id of c.ids) {
+            const h = hosts.get(id);
+            if (!h) continue;
+            g2.strokeStyle = `rgba(${EMBER},${(0.35 + 0.25 * Math.sin(this.t * 5 + id)).toFixed(3)})`;
+            g2.lineWidth = 1;
+            g2.beginPath();
+            g2.arc(px(h.x), px(h.y), px(24e-6), 0, Math.PI * 2);
+            g2.stroke();
+          }
+        }
         g2.font = `600 9px ${MONO}`;
         g2.fillStyle = INK;
         g2.textAlign = "center";
-        g2.fillText(`${c.kind.toUpperCase()} ${c.energy.toFixed(0)}/40`, px(c.x), px(c.y) - 14);
+        g2.fillText(`${c.kind.toUpperCase()} ${c.energy.toFixed(0)}/${CONSTRUCT_MAX}`, px(c.x), px(c.y) - 14);
         g2.textAlign = "left";
       }
-      if (this.forgeOpen && this.forgePick < 3) {
+      if (this.forgeOpen && this.forgePick < BLUEPRINTS.length) {
         for (const at of blueprintSites(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation)) {
           if (!this.onCamera(at.x, at.y)) continue;
           g2.strokeStyle = "#fff";
@@ -7907,20 +8303,20 @@
       g2.fillText("CRYSTAL FORGE", 70, 95);
       g2.font = `600 11px ${MONO}`;
       g2.fillStyle = INK;
-      g2.fillText(`${s.fragments} FRAGMENTS \xB7 ${this.run.cells.length} CELLS \xB7 ${gapAligned(this.run) ? "BAND GAP ALIGNED" : "BAND GAP NOT ALIGNED"}`, 70, 127);
+      g2.fillText(`${s.fragments} FRAGMENTS \xB7 ${this.run.cells.length} CELLS \xB7 ${gapAligned(this.run) ? "BAND GAP ALIGNED" : "BAND GAP NOT ALIGNED"} \xB7 BANK ${bank(this.run).toFixed(0)}`, 70, 127);
       const options = [...BLUEPRINTS.map((b) => `${b.name} \xB7 ${b.sites.length} cells + ${b.cost} fragments`), "WEAVE CELL \xB7 nearby loom + 15 charge + 1 fragment"];
       options.forEach((name, i) => {
         g2.fillStyle = i === this.forgePick ? "#193b4c" : "#0c1728";
-        g2.fillRect(65, 155 + i * 50, VIEW_W - 130, 42);
+        g2.fillRect(65, 155 + i * FORGE_ROW, VIEW_W - 130, FORGE_ROW - 7);
         g2.fillStyle = i === this.forgePick ? "#fff" : DIM;
         g2.font = `600 11px ${MONO}`;
-        g2.fillText(`${i + 1}. ${name}`, 78, 169 + i * 50);
+        g2.fillText(`${i + 1}. ${name}`, 78, 165 + i * FORGE_ROW);
       });
       g2.fillStyle = INK;
       g2.font = `500 11px ${MONO}`;
-      const description = this.forgePick < 3 ? BLUEPRINTS[this.forgePick].description : "The loom copies its seated host point group. Sixfold material on this square net produces 222, never a fictitious hexagonal crystal.";
+      const description = this.forgePick < BLUEPRINTS.length ? BLUEPRINTS[this.forgePick].description : "The loom copies its seated host point group. Sixfold material on this square net produces 222, never a fictitious hexagonal crystal.";
       wrap(g2, description, 70, 363, VIEW_W - 250, 17);
-      if (this.forgePick < 3) {
+      if (this.forgePick < BLUEPRINTS.length) {
         const pitch = latticePitch(this.run);
         g2.strokeStyle = GOLD;
         for (const at of blueprintSites(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation))
@@ -7937,6 +8333,129 @@
       wrap(g2, this.forgeMessage, 70, 451, VIEW_W - 140, 16);
       g2.fillStyle = DIM;
       g2.fillText("Q / B / D-PAD selects \xB7 V / L3 / LB / ESC closes \xB7 world paused", 70, 500);
+    }
+    /**
+     * THE QUADRATURE SIGIL. A Lissajous figure is what you get when you plot one
+     * signal against another, and these are the two drives: the X pair's
+     * pressure across, the Y pair's up. Quadrature is the circle; in step it
+     * closes to a diagonal — the same diagonal the mesh opens along — and
+     * anywhere between is the ellipse. The travelling bead is the drive slowed
+     * seven orders of magnitude so it can be watched; its shape is exact.
+     *
+     * Around it: the ring is phase, brass at the phase the glass writes where you
+     * stand, clay where your trim has taken it. The faint figure is |cos psi|,
+     * your Resonarium's coherence phase, drawn on your side of the circle; the
+     * gold arc inside is how well you are holding the two together.
+     */
+    drawSigil() {
+      const run = this.run, s = run.resonance;
+      if (!s) return;
+      const g2 = this.ctx;
+      const w = run.wave;
+      const cx = VIEW_W - 70, cy = 318, R = 42, r = R - 13;
+      const phi = w.cross;
+      const mesh = Math.abs(Math.cos(phi));
+      const t = Math.acos(Math.min(1, Math.abs(Math.cos(s.psi))));
+      const aim = Math.cos(phi) >= 0 ? t : Math.PI - t;
+      g2.save();
+      const halo = g2.createRadialGradient(cx, cy, 6, cx, cy, R + 20);
+      halo.addColorStop(0, `rgba(${VIOLET},0.94)`);
+      halo.addColorStop(0.75, `rgba(${VIOLET},0.7)`);
+      halo.addColorStop(1, `rgba(${VIOLET},0)`);
+      g2.fillStyle = halo;
+      g2.beginPath();
+      g2.arc(cx, cy, R + 20, 0, Math.PI * 2);
+      g2.fill();
+      g2.strokeStyle = `rgba(${BRASS},0.55)`;
+      g2.lineWidth = 1;
+      g2.beginPath();
+      g2.arc(cx, cy, R, 0, Math.PI * 2);
+      g2.stroke();
+      g2.strokeStyle = `rgba(${BRASS},0.2)`;
+      g2.beginPath();
+      g2.arc(cx, cy, R - 5, 0, Math.PI * 2);
+      g2.stroke();
+      for (let i = 0; i < 24; i++) {
+        const a = i * Math.PI / 12;
+        const len = i % 6 === 0 ? 7 : i % 2 === 0 ? 4 : 2;
+        g2.strokeStyle = `rgba(${BRASS},${i % 6 === 0 ? 0.8 : 0.4})`;
+        g2.beginPath();
+        g2.moveTo(cx + Math.cos(a) * R, cy - Math.sin(a) * R);
+        g2.lineTo(cx + Math.cos(a) * (R - len), cy - Math.sin(a) * (R - len));
+        g2.stroke();
+      }
+      const at = (a, rr) => [cx + Math.cos(a) * rr, cy - Math.sin(a) * rr];
+      if (s.trim !== 0) {
+        g2.strokeStyle = `rgba(${CLAY},0.9)`;
+        g2.lineWidth = 3;
+        g2.beginPath();
+        g2.arc(cx, cy, R, -s.native, -(s.native + s.trim), s.trim > 0);
+        g2.stroke();
+      }
+      const [nx, ny] = at(s.native, R);
+      g2.fillStyle = `rgb(${BRASS})`;
+      g2.beginPath();
+      g2.arc(nx, ny, 2.5, 0, Math.PI * 2);
+      g2.fill();
+      const [fx, fy] = at(phi, R);
+      g2.fillStyle = `rgb(${EMBER})`;
+      g2.beginPath();
+      g2.arc(fx, fy, 3.5, 0, Math.PI * 2);
+      g2.fill();
+      if (s.lock > 0.01) {
+        g2.strokeStyle = `rgba(255,201,74,${(0.25 + 0.45 * s.lock).toFixed(3)})`;
+        g2.lineWidth = s.lock > 0.85 ? 2 : 1;
+        g2.beginPath();
+        g2.arc(cx, cy, R - 8, -Math.PI / 2, -Math.PI / 2 + s.lock * Math.PI * 2);
+        g2.stroke();
+      }
+      const figure = (p) => {
+        g2.beginPath();
+        for (let i = 0; i <= 72; i++) {
+          const u = i / 72 * Math.PI * 2;
+          const x = cx + Math.cos(u) * r, y = cy - Math.cos(u + p) * r;
+          if (i) g2.lineTo(x, y);
+          else g2.moveTo(x, y);
+        }
+      };
+      g2.setLineDash([2, 3]);
+      g2.strokeStyle = "rgba(239,230,216,0.3)";
+      g2.lineWidth = 1;
+      figure(aim);
+      g2.stroke();
+      g2.setLineDash([]);
+      g2.strokeStyle = `rgba(${CLAY},0.25)`;
+      g2.lineWidth = 5;
+      figure(phi);
+      g2.stroke();
+      g2.strokeStyle = `rgba(${EMBER},0.95)`;
+      g2.lineWidth = 1.3;
+      figure(phi);
+      g2.stroke();
+      const u0 = this.t * 1.9;
+      for (let k = 9; k >= 0; k--) {
+        const u = u0 - k * 0.09;
+        g2.fillStyle = `rgba(${EMBER},${((1 - k / 10) * 0.9).toFixed(3)})`;
+        g2.beginPath();
+        g2.arc(cx + Math.cos(u) * r, cy - Math.cos(u + phi) * r, k === 0 ? 2.6 : 1.4, 0, Math.PI * 2);
+        g2.fill();
+      }
+      g2.textAlign = "center";
+      g2.textBaseline = "top";
+      g2.font = `600 8px ${MONO}`;
+      g2.fillStyle = `rgba(${BRASS},0.85)`;
+      g2.fillText("Q U A D R A T U R E", cx, cy - R - 16);
+      const deg = (phi * 180 / Math.PI % 360 + 360) % 360;
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = BONE;
+      g2.fillText(`\u03C6 ${deg.toFixed(0)}\xB0  MESH ${mesh.toFixed(2)}`, cx, cy + R + 8);
+      g2.fillStyle = s.lock >= 0.5 ? GOLD : DIM;
+      g2.fillText(`LOCK ${Math.round(s.lock * 100)}%  BANK ${bank(run).toFixed(0)}`, cx, cy + R + 21);
+      g2.fillStyle = FAINT2;
+      g2.font = `500 8px ${MONO}`;
+      g2.fillText(`TRIM \xB1${Math.round(TRIM_RANGE * 180 / Math.PI)}\xB0 \xB7 R-STICK / Z X`, cx, cy + R + 34);
+      g2.textAlign = "left";
+      g2.restore();
     }
     drawHud() {
       const g2 = this.ctx;
@@ -8037,6 +8556,7 @@
         g2.fillStyle = DIM;
         g2.fillText("V / L3 \xB7 CRYSTAL FORGE", VIEW_W / 2, 110);
         g2.textAlign = "left";
+        this.drawSigil();
       }
       if (this.toastT > 0) {
         g2.textAlign = "center";
@@ -8605,7 +9125,25 @@
         `SONIC DRIFTER  ${run.t.toFixed(0)}s  aeon ${run.world.aeon} (${run.world.name})  phase ${run.phase}`,
         `you: integrity ${run.integrity}/${maxIntegrity(run)} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
         `companions: ${run.bond.companions.map((c, i) => `${i === run.bond.active ? "*" : ""}${c.form}:${c.rank}`).join(" ") || "none"}; bond ${run.bond.progress.toFixed(2)}s${companion(run) ? `; call ${callWait(run) > 0 ? `in ${callWait(run).toFixed(0)}s` : "ready"}` : ""}`,
-        `resonance: ${run.resonance ? JSON.stringify({ seed: run.resonance.source.seed, realm: realm(run.resonance).name, R: run.resonance.R, fragments: run.resonance.fragments, crafted: run.resonance.crafted, kills: run.resonance.kills, blocks: run.resonance.blocks, woven: run.resonance.woven }) : "off"}`,
+        `resonance: ${run.resonance ? JSON.stringify({
+          seed: run.resonance.source.seed,
+          realm: realm(run.resonance).name,
+          R: run.resonance.R,
+          fragments: run.resonance.fragments,
+          crafted: run.resonance.crafted,
+          kills: run.resonance.kills,
+          blocks: run.resonance.blocks,
+          woven: run.resonance.woven,
+          crossDeg: +(run.wave.cross * 180 / Math.PI).toFixed(1),
+          nativeDeg: +(run.resonance.native * 180 / Math.PI).toFixed(1),
+          trimDeg: +(run.resonance.trim * 180 / Math.PI).toFixed(1),
+          lock: +run.resonance.lock.toFixed(2),
+          bank: +bank(run).toFixed(1),
+          meshSeconds: +run.resonance.meshTime.toFixed(1),
+          lockSeconds: +run.resonance.lockTime.toFixed(1),
+          trimSpent: +run.resonance.trimSpent.toFixed(1),
+          tapped: run.resonance.tapped
+        }) : "off"}`,
         `mitochondria: ${run.organelles.length}; stored energy ${run.organelles.reduce((n, o) => n + o.energy, 0).toFixed(0)}; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
         // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather
         // than inferred from events, so damage is in it and not just a count.
