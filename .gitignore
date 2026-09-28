@@ -6,3 +6,7 @@ dist/
 /data/raw/
 package-lock.json
 app/dist/
+
+# Generated photometabolic runs and Python caches
+artifacts/
+__pycache__/

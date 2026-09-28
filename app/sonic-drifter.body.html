@@ -42,6 +42,9 @@
   /* Three chips, and they are not decoration: they are the three facts the
      simulation runs on - the two lattices, and the size below which neither
      of them can help you. */
+  #expedition-panel { font-size:11px; color:var(--ink); }
+  #expedition-panel button, #expedition-panel label { background:#102536; color:var(--ink); border:1px solid var(--rule); padding:5px 8px; border-radius:4px; font:inherit; cursor:pointer; }
+  #expedition-status { display:block; font-size:10px; color:var(--muted); margin-top:5px; }
   .legend {
     list-style:none; margin:0; padding:0;
     display:flex; flex-wrap:wrap; justify-content:center; gap:8px 22px;
@@ -73,6 +76,12 @@
     One screen pixel is one micron. Every force here is the Gor&rsquo;kov radiation
     potential, computed live.
   </p>
+  <div id="expedition-panel">
+    <button id="expedition-start">Start Resonant Expedition</button>
+    <label>Import Resonarium JSON <input id="expedition-import" type="file" accept=".json,application/json" hidden></label>
+    <button id="forge-open">Crystal forge</button>
+    <span id="expedition-status" role="status">Optional survival mode · crystal crafting · three encounter stages · V / L3 forge</span>
+  </div>
 </header>
 
 <div id="stage">
@@ -93,154 +102,6 @@
   var __defProp = Object.defineProperty;
   var __defNormalProp = (obj, key3, value) => key3 in obj ? __defProp(obj, key3, { enumerable: true, configurable: true, writable: true, value }) : obj[key3] = value;
   var __publicField = (obj, key3, value) => __defNormalProp(obj, typeof key3 !== "symbol" ? key3 + "" : key3, value);
-
-  // game/beasts.ts
-  var LIPID = { rho: 915, c: 1450 };
-  var FLESH = { rho: 1100, c: 1570 };
-  var FAINT = { rho: 1050, c: 1520 };
-  var BEASTS = {
-    /**
-     * It does not come for you at all.
-     *
-     * A TENDER swims to whatever you crowned and mends it, and it is the first
-     * body in this water that makes you choose a target other than the thing in
-     * front of you. It carries no strike, so it cannot be answered by dodging:
-     * it is answered by holding it, like everything else here, or by ignoring it
-     * and watching the bar you are working on go back up.
-     */
-    tender: {
-      // Lipid, so it shares YOUR sign: your own drive reels it into your lap,
-      // and the body that mends a king is the one you can snatch by standing
-      // still. The leech is flesh and has to be gone to.
-      id: "tender",
-      label: "TENDER",
-      particle: { radius: 7e-6, ...LIPID },
-      hold: 1.3,
-      speed: 7e-5,
-      behaviour: "tend",
-      damage: 0,
-      drain: 0,
-      score: 7,
-      wind: 0,
-      strike: 0,
-      surge: 0
-    },
-    /**
-     * It comes for what you BUILT.
-     *
-     * A LEECH fastens onto the nearest building and gnaws, and a building is
-     * both your arsenal and the crystal the pool opens with — so ignoring one is
-     * a discharge and a stretch of water. It does nothing to you directly.
-     */
-    leech: {
-      id: "leech",
-      label: "LEECH",
-      particle: { radius: 8e-6, ...FLESH },
-      hold: 1.5,
-      speed: 8e-5,
-      behaviour: "graze",
-      damage: 0,
-      drain: 0,
-      score: 6,
-      wind: 0,
-      strike: 0,
-      surge: 0
-    },
-    ribbon: {
-      id: "ribbon",
-      label: "RIBBON",
-      particle: { radius: 45e-7, ...LIPID },
-      hold: 1.1,
-      speed: 6e-5,
-      behaviour: "orbit",
-      damage: 1,
-      drain: 0,
-      score: 5,
-      wind: 0.65,
-      strike: 0.28,
-      surge: 6
-    },
-    sentinel: {
-      id: "sentinel",
-      label: "SENTINEL",
-      particle: { radius: 1e-5, ...FLESH },
-      hold: 1.8,
-      speed: 4e-5,
-      behaviour: "ambush",
-      damage: 1,
-      drain: 0,
-      score: 6,
-      wind: 0.85,
-      strike: 0.45,
-      surge: 7
-    },
-    vesicle: {
-      id: "vesicle",
-      label: "VESICLE",
-      particle: { radius: 55e-7, ...LIPID },
-      hold: 1.05,
-      speed: 5e-5,
-      behaviour: "hunt",
-      damage: 1,
-      drain: 0,
-      score: 2,
-      wind: 0.42,
-      strike: 0.3,
-      surge: 5
-    },
-    mote: {
-      id: "mote",
-      label: "MOTE",
-      particle: { radius: 9e-7, ...FAINT },
-      hold: 0.9,
-      speed: 0,
-      behaviour: "drift",
-      damage: 0,
-      drain: 24,
-      score: 1,
-      // Too small for any lattice to hold and too small to aim: it drifts, and
-      // that is the whole of it.
-      wind: 0,
-      strike: 0,
-      surge: 0
-    },
-    husk: {
-      id: "husk",
-      label: "HUSK",
-      particle: { radius: 12e-6, ...FLESH },
-      hold: 2.1,
-      speed: 6e-5,
-      behaviour: "hunt",
-      damage: 1,
-      drain: 0,
-      score: 4,
-      // Heavy: it takes a long moment to gather, and it commits hard.
-      wind: 0.62,
-      strike: 0.34,
-      surge: 4.5
-    },
-    splitter: {
-      id: "splitter",
-      label: "SPLITTER",
-      particle: { radius: 65e-7, ...LIPID },
-      hold: 0.95,
-      speed: 7e-5,
-      behaviour: "split",
-      damage: 1,
-      drain: 0,
-      score: 3,
-      // Twitchy. Barely warns you, and crosses the gap before you have finished
-      // reading it.
-      wind: 0.26,
-      strike: 0.22,
-      surge: 6.5
-    }
-  };
-  function beast(id) {
-    const b = BEASTS[id];
-    if (!b) throw new Error(`no beast ${id}`);
-    return b;
-  }
 
   // src/linalg.ts
   function zeros(n, m = n) {
@@ -1459,6 +1320,196 @@
     return body.cells.length >= AUTONOMY;
   }
 
+  // game/beasts.ts
+  var LIPID = { rho: 915, c: 1450 };
+  var FLESH = { rho: 1100, c: 1570 };
+  var FAINT = { rho: 1050, c: 1520 };
+  var BEASTS = {
+    faceter: {
+      id: "faceter",
+      label: "FACETER",
+      particle: { radius: 9e-6, ...FLESH },
+      hold: 1.6,
+      speed: 5e-5,
+      behaviour: "ambush",
+      damage: 1,
+      drain: 0,
+      score: 7,
+      wind: 0.9,
+      strike: 0.38,
+      surge: 6
+    },
+    dislocator: {
+      id: "dislocator",
+      label: "DISLOCATOR",
+      particle: { radius: 75e-7, ...FLESH },
+      hold: 1.4,
+      speed: 9e-5,
+      behaviour: "graze",
+      damage: 0,
+      drain: 0,
+      score: 8,
+      wind: 0,
+      strike: 0,
+      surge: 0
+    },
+    phason: {
+      id: "phason",
+      label: "PHASON",
+      particle: { radius: 5e-6, ...LIPID },
+      hold: 1.25,
+      speed: 7e-5,
+      behaviour: "orbit",
+      damage: 1,
+      drain: 0,
+      score: 9,
+      wind: 0.75,
+      strike: 0.3,
+      surge: 6
+    },
+    /**
+     * It does not come for you at all.
+     *
+     * A TENDER swims to whatever you crowned and mends it, and it is the first
+     * body in this water that makes you choose a target other than the thing in
+     * front of you. It carries no strike, so it cannot be answered by dodging:
+     * it is answered by holding it, like everything else here, or by ignoring it
+     * and watching the bar you are working on go back up.
+     */
+    tender: {
+      // Lipid, so it shares YOUR sign: your own drive reels it into your lap,
+      // and the body that mends a king is the one you can snatch by standing
+      // still. The leech is flesh and has to be gone to.
+      id: "tender",
+      label: "TENDER",
+      particle: { radius: 7e-6, ...LIPID },
+      hold: 1.3,
+      speed: 7e-5,
+      behaviour: "tend",
+      damage: 0,
+      drain: 0,
+      score: 7,
+      wind: 0,
+      strike: 0,
+      surge: 0
+    },
+    /**
+     * It comes for what you BUILT.
+     *
+     * A LEECH fastens onto the nearest building and gnaws, and a building is
+     * both your arsenal and the crystal the pool opens with — so ignoring one is
+     * a discharge and a stretch of water. It does nothing to you directly.
+     */
+    leech: {
+      id: "leech",
+      label: "LEECH",
+      particle: { radius: 8e-6, ...FLESH },
+      hold: 1.5,
+      speed: 8e-5,
+      behaviour: "graze",
+      damage: 0,
+      drain: 0,
+      score: 6,
+      wind: 0,
+      strike: 0,
+      surge: 0
+    },
+    ribbon: {
+      id: "ribbon",
+      label: "RIBBON",
+      particle: { radius: 45e-7, ...LIPID },
+      hold: 1.1,
+      speed: 6e-5,
+      behaviour: "orbit",
+      damage: 1,
+      drain: 0,
+      score: 5,
+      wind: 0.65,
+      strike: 0.28,
+      surge: 6
+    },
+    sentinel: {
+      id: "sentinel",
+      label: "SENTINEL",
+      particle: { radius: 1e-5, ...FLESH },
+      hold: 1.8,
+      speed: 4e-5,
+      behaviour: "ambush",
+      damage: 1,
+      drain: 0,
+      score: 6,
+      wind: 0.85,
+      strike: 0.45,
+      surge: 7
+    },
+    vesicle: {
+      id: "vesicle",
+      label: "VESICLE",
+      particle: { radius: 55e-7, ...LIPID },
+      hold: 1.05,
+      speed: 5e-5,
+      behaviour: "hunt",
+      damage: 1,
+      drain: 0,
+      score: 2,
+      wind: 0.42,
+      strike: 0.3,
+      surge: 5
+    },
+    mote: {
+      id: "mote",
+      label: "MOTE",
+      particle: { radius: 9e-7, ...FAINT },
+      hold: 0.9,
+      speed: 0,
+      behaviour: "drift",
+      damage: 0,
+      drain: 24,
+      score: 1,
+      // Too small for any lattice to hold and too small to aim: it drifts, and
+      // that is the whole of it.
+      wind: 0,
+      strike: 0,
+      surge: 0
+    },
+    husk: {
+      id: "husk",
+      label: "HUSK",
+      particle: { radius: 12e-6, ...FLESH },
+      hold: 2.1,
+      speed: 6e-5,
+      behaviour: "hunt",
+      damage: 1,
+      drain: 0,
+      score: 4,
+      // Heavy: it takes a long moment to gather, and it commits hard.
+      wind: 0.62,
+      strike: 0.34,
+      surge: 4.5
+    },
+    splitter: {
+      id: "splitter",
+      label: "SPLITTER",
+      particle: { radius: 65e-7, ...LIPID },
+      hold: 0.95,
+      speed: 7e-5,
+      behaviour: "split",
+      damage: 1,
+      drain: 0,
+      score: 3,
+      // Twitchy. Barely warns you, and crosses the gap before you have finished
+      // reading it.
+      wind: 0.26,
+      strike: 0.22,
+      surge: 6.5
+    }
+  };
+  function beast(id) {
+    const b = BEASTS[id];
+    if (!b) throw new Error(`no beast ${id}`);
+    return b;
+  }
+
   // game/depth.ts
   var CHANNEL_HEIGHT = 2e-4;
   var MAX_MODE = 4;
@@ -1812,6 +1863,249 @@
         ["YOUR CONTRAST", `${carry2 >= 0 ? "+" : ""}${carry2.toFixed(3)}`]
       ]
     };
+  }
+
+  // game/resonance.ts
+  var REALMS = [
+    { name: "NUCLEATION GARDEN", enemy: "faceter", kills: 2, crafts: 1, reward: 3 },
+    { name: "BRAGG REEF", enemy: "dislocator", kills: 4, crafts: 2, reward: 5 },
+    { name: "PHASON DEEP", enemy: "phason", kills: 6, crafts: 3, reward: 8 }
+  ];
+  var BLUEPRINTS = [
+    { kind: "condenser", name: "PHASE CONDENSER", cost: 2, sites: [[0, 0], [1, 0], [2, 0]], description: "3 cells in a rail. Grip nearby to store coherence charge; release to recover stamina." },
+    { kind: "ward", name: "BRAGG WARD", cost: 3, sites: [[0, 0], [1, 0], [1, 1], [0, 1]], description: "4 tetragonal cells (4 or 422) in a square. 12 charge blocks a hit nearby (6 when the real band gap aligns)." },
+    { kind: "loom", name: "LATTICE LOOM", cost: 3, sites: [[0, 0], [1, 0], [0, 1]], description: "3 cells in an L. Store charge, then weave a cell for 1 fragment and 15 charge. Output follows the seated host group." }
+  ];
+  var FORGE_REACH = 11e-5;
+  var MAX_CONSTRUCTS = 24;
+  function seed32(seed) {
+    if (!/^(0|[1-9][0-9]{0,19})$/.test(seed)) throw Error("Expected a decimal uint64 seed");
+    const n = BigInt(seed);
+    if (n > 18446744073709551615n) throw Error("Seed exceeds uint64");
+    return Number((n ^ n >> 32n) & 0xffffffffn);
+  }
+  function resonanceSource(raw) {
+    if (!raw || typeof raw !== "object") throw Error("Expected a Resonarium JSON object");
+    const root = raw;
+    const obj = root.schema === "ResonariumEmergenceState" ? root.experiment : root;
+    if (!obj || !["resonarium.state.v2", "ResonariumBiosentinelExperiment"].includes(String(obj.schema))) throw Error("Use a Resonarium tonal state or experiment export");
+    const value = obj.schema === "resonarium.state.v2" ? obj.natalSeed : obj.seed;
+    if (typeof value !== "string" && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) throw Error("Unsafe seed; use a decimal string");
+    const seed = String(value);
+    seed32(seed);
+    const trajectory = [];
+    if (obj.schema === "ResonariumBiosentinelExperiment") {
+      if (obj.version !== 1 || !Array.isArray(obj.trajectory) || !obj.trajectory.length || obj.trajectory.length > 377) throw Error("Unsupported experiment trajectory");
+      let last = 0;
+      for (const value2 of obj.trajectory) {
+        const r = value2;
+        if (!r || ![r.t, r.K, r.R_mean, r.psi].every((v) => typeof v === "number" && Number.isFinite(v)) || r.t <= last || r.t > 1e4 || r.K < 0 || r.K > 12 || r.R_mean < 0 || r.R_mean > 1 + 1e-12 || Math.abs(r.psi) > Math.PI + 1e-12) throw Error("Invalid trajectory observation");
+        trajectory.push({ t: r.t, K: r.K, R_mean: Math.min(1, r.R_mean), psi: r.psi });
+        last = r.t;
+      }
+    }
+    return { seed, trajectory };
+  }
+  function newResonance(source) {
+    const random = rng(seed32(source.seed));
+    return {
+      source: { seed: source.seed, trajectory: source.trajectory.map((r) => ({ ...r })) },
+      time: 0,
+      remainder: 0,
+      theta: Array.from({ length: 24 }, () => random() * Math.PI * 2),
+      omega: Array.from({ length: 24 }, () => 0.35 + (random() - 0.5) * 0.9),
+      K: 0,
+      R: 0,
+      psi: 0,
+      symbol: "L",
+      pulse: 0,
+      pulseTime: 0,
+      fragments: 6,
+      constructs: [],
+      crafted: 0,
+      kills: 0,
+      blocks: 0,
+      woven: 0,
+      stage: 0,
+      stageKills: 0,
+      stageCrafts: 0,
+      cleared: false
+    };
+  }
+  var word = "L";
+  for (let i = 0; i < 10; i++) word = [...word].map((c) => c === "L" ? "LS" : "L").join("");
+  function advanceResonance(s, dt) {
+    if (!Number.isFinite(dt) || dt <= 0) return;
+    s.time += dt;
+    if (s.source.trajectory.length) {
+      const rows = s.source.trajectory, t = s.time % rows[rows.length - 1].t;
+      const row = rows.find((r) => r.t > t) ?? rows[rows.length - 1];
+      s.K = row.K;
+      s.R = row.R_mean;
+      s.psi = row.psi;
+      return;
+    }
+    const h = 1 / 120;
+    s.remainder += dt;
+    while (s.remainder + 1e-12 >= h) {
+      s.remainder = Math.max(0, s.remainder - h);
+      s.symbol = word[s.pulse % word.length];
+      const intensity = s.symbol === "L" ? Math.sqrt(2.2) : 1 / Math.sqrt(2.2);
+      s.K = 0.8 * intensity;
+      s.pulseTime += h;
+      if (s.pulseTime >= 1 / intensity) {
+        s.pulseTime -= 1 / intensity;
+        s.pulse++;
+      }
+      let x = 0, y = 0;
+      for (const v of s.theta) {
+        x += Math.cos(v);
+        y += Math.sin(v);
+      }
+      const R = Math.hypot(x, y) / s.theta.length, psi = Math.atan2(y, x);
+      s.theta = s.theta.map((v, i) => {
+        const a = v + h * (s.omega[i] + s.K * R * Math.sin(psi - v));
+        return Math.atan2(Math.sin(a), Math.cos(a));
+      });
+      x = 0;
+      y = 0;
+      for (const v of s.theta) {
+        x += Math.cos(v);
+        y += Math.sin(v);
+      }
+      s.R = Math.hypot(x, y) / s.theta.length;
+      s.psi = Math.atan2(y, x);
+    }
+  }
+  function realm(s) {
+    return REALMS[Math.min(s.stage, REALMS.length - 1)];
+  }
+  function blueprintSites(run, kind, rotation = 0) {
+    const recipe = BLUEPRINTS.find((b) => b.kind === kind);
+    const pitch = latticePitch(run), at = snap(run.you.x, run.you.y, pitch);
+    return recipe.sites.map(([a, b]) => {
+      let x = a, y = b;
+      for (let i = 0; i < rotation; i++) {
+        const old = x;
+        x = -y;
+        y = old;
+      }
+      return { x: at.x + x * pitch, y: at.y + y * pitch };
+    });
+  }
+  function craft(run, kind, rotation = 0) {
+    if (!Number.isInteger(rotation) || rotation < 0 || rotation > 3) return "wrong-phase";
+    const s = run.resonance;
+    if (!s || !["settle", "reign"].includes(run.phase)) return "wrong-phase";
+    if (s.constructs.length >= MAX_CONSTRUCTS) return "limit";
+    const recipe = BLUEPRINTS.find((b2) => b2.kind === kind);
+    if (!recipe) return "wrong-phase";
+    if (s.fragments < recipe.cost) return "need-fragments";
+    const eligible2 = run.cells.map((c, i) => ({ c, i })).filter(({ c }) => kind !== "ward" || ["4", "422"].includes(seatedGroup(c.group.hm)));
+    if (eligible2.length < recipe.sites.length) return kind === "ward" && run.cells.length >= 4 ? "need-tetragonal" : "need-cells";
+    const sites = blueprintSites(run, kind, rotation), pitch = latticePitch(run), b = run.bounds;
+    for (const at of sites) {
+      if (at.x < b.x || at.y < b.y || at.x > b.x + b.w || at.y > b.y + b.h || Math.hypot(at.x - run.throne.x, at.y - run.throne.y) < THRONE_RADIUS) return "outside";
+      if (run.structures.some((host) => Math.hypot(host.x - at.x, host.y - at.y) < pitch * 0.5)) return "occupied";
+    }
+    const chosen = eligible2.slice(0, sites.length);
+    const hosts = sites.map((at, i) => structureFrom(run.nextId++, chosen[i].c.group.hm, at.x, at.y, run.layer));
+    run.structures.push(...hosts);
+    for (const { i } of chosen.sort((a, b2) => b2.i - a.i)) run.cells.splice(i, 1);
+    s.fragments -= recipe.cost;
+    s.crafted++;
+    s.constructs.push({
+      kind,
+      ids: hosts.map((h) => h.id),
+      energy: 0,
+      x: hosts.reduce((v, h) => v + h.x, 0) / hosts.length,
+      y: hosts.reduce((v, h) => v + h.y, 0) / hosts.length,
+      layer: run.layer
+    });
+    run.events.push({ kind: "resonance", text: recipe.name + " ASSEMBLED" });
+    retune(run);
+    return "crafted";
+  }
+  function constructIds(run) {
+    return new Set(run.resonance?.constructs.flatMap((c) => c.ids) ?? []);
+  }
+  function weave(run) {
+    const s = run.resonance;
+    if (!s || !["settle", "reign"].includes(run.phase)) return "wrong-phase";
+    const c = s.constructs.find((c2) => c2.kind === "loom" && c2.layer === run.layer && Math.hypot(c2.x - run.you.x, c2.y - run.you.y) <= FORGE_REACH);
+    if (!c || !c.ids.every((id) => run.structures.some((h) => h.id === id))) return "need-loom";
+    if (s.fragments < 1) return "need-fragments";
+    if (c.energy < 15) return "need-charge";
+    const host = run.structures.find((h) => h.id === c.ids[0]);
+    run.cells.push(cellFor(seatedGroup(host.hm)));
+    s.fragments--;
+    c.energy -= 15;
+    s.woven++;
+    run.events.push({ kind: "resonance", text: "LOOM WOVE " + seatedGroup(host.hm) });
+    return "woven";
+  }
+  function resonanceStep(run, dt, gripping) {
+    const s = run.resonance;
+    if (!s) return;
+    advanceResonance(s, dt);
+    const live = new Map(run.structures.map((h) => [h.id, h]));
+    s.constructs = s.constructs.filter((c) => c.ids.every((id) => live.has(id)));
+    let chargeBudget = 8 * (0.25 + 0.75 * s.R) * dt, transferBudget = 10 * dt;
+    for (const c of s.constructs) {
+      const hosts = c.ids.map((id) => live.get(id));
+      c.x = hosts.reduce((v, h) => v + h.x, 0) / hosts.length;
+      c.y = hosts.reduce((v, h) => v + h.y, 0) / hosts.length;
+      c.layer = hosts[0].layer;
+      if (hosts.some((h) => h.layer !== c.layer)) {
+        c.layer = -1;
+        continue;
+      }
+      const near = c.layer === run.layer && Math.hypot(c.x - run.you.x, c.y - run.you.y) <= FORGE_REACH;
+      if (near && gripping && !run.wave.spent) {
+        const add = Math.min(40 - c.energy, chargeBudget);
+        c.energy += add;
+        chargeBudget -= add;
+      } else if (near && !gripping && c.kind === "condenser") {
+        const add = Math.min(c.energy, transferBudget, 100 - run.wave.stamina);
+        run.wave.stamina += add;
+        c.energy -= add;
+        transferBudget -= add;
+        if (run.wave.stamina > 25) run.wave.spent = false;
+      }
+    }
+    const level = realm(s);
+    if (!s.cleared && s.kills - s.stageKills >= level.kills && s.crafted - s.stageCrafts >= level.crafts) {
+      s.fragments += level.reward;
+      s.cleared = true;
+      run.events.push({ kind: "resonance", text: level.name + " CLEARED \xB7 +" + level.reward + " FRAGMENTS \xB7 CROWN TO ADVANCE" });
+    }
+  }
+  function wardHit(run) {
+    const s = run.resonance;
+    if (!s) return false;
+    const cost = gapAligned(run) ? 6 : 12;
+    const c = s.constructs.find((c2) => c2.kind === "ward" && c2.energy >= cost && c2.layer === run.layer && Math.hypot(c2.x - run.you.x, c2.y - run.you.y) <= FORGE_REACH);
+    if (!c) return false;
+    c.energy -= cost;
+    s.blocks++;
+    return true;
+  }
+  function resonanceKill(run, species) {
+    const s = run.resonance;
+    if (!s) return;
+    s.kills++;
+    s.fragments = Math.min(999, s.fragments + (REALMS.some((r) => r.enemy === species) ? 2 : 1));
+  }
+  function resonanceBirth(run) {
+    const s = run.resonance;
+    if (!s || !s.cleared) return;
+    s.stage = (s.stage + 1) % REALMS.length;
+    s.stageKills = s.kills;
+    s.stageCrafts = s.crafted;
+    s.cleared = false;
+  }
+  function gapAligned(run) {
+    return catches(run.gap, run.bound.omega);
   }
 
   // game/evolution.ts
@@ -2795,6 +3089,7 @@
   function startRun(seed = 1, ebb = false) {
     const world = firstWorld();
     const run = {
+      resonance: null,
       bond: newBond(),
       organelles: [],
       fray: newFray(),
@@ -2963,7 +3258,7 @@
       const live = run.entities.filter((e) => e.faction === "beast").length;
       const cap = run.phase === "reign" ? 4 + Math.floor(run.world.aeon / 2) : settleCap(run);
       if (live < cap) {
-        const table = run.world.wildlife;
+        const table = run.resonance ? [...run.world.wildlife, realm(run.resonance).enemy, realm(run.resonance).enemy] : run.world.wildlife;
         run.entities.push(newBeast(run, table[Math.floor(run.rand() * table.length)]));
       }
     }
@@ -2992,6 +3287,7 @@
     support(run, dt);
     allies(run, dt);
     metabolise(run, dt);
+    resonanceStep(run, dt, input.grip);
     riposte(run, !!input.tame, dt, from);
     if (run.phase !== "reign" && run.phase !== "settle") return;
     contact(run, dt);
@@ -3135,7 +3431,7 @@
       return { x: 0, y: 0 };
     }
     if (b.behaviour === "orbit") {
-      const turn = e.id % 2 ? 1 : -1;
+      const turn = e.species === "phason" && run.resonance ? Math.sin(run.resonance.psi) >= 0 ? 1 : -1 : e.id % 2 ? 1 : -1;
       const inward = r > STRIKE_RANGE * 0.9 ? 0.8 : 0.25;
       return {
         x: (hx * inward - hy * turn) / r * b.speed,
@@ -3167,7 +3463,9 @@
     let target = null;
     let best = Infinity;
     let bx = 0, by = 0;
-    for (const s of run.structures) {
+    const resonant = e.species === "dislocator" ? constructIds(run) : /* @__PURE__ */ new Set();
+    const preferred = run.structures.filter((s) => resonant.has(s.id) && s.serves.includes(e.layer));
+    for (const s of preferred.length ? preferred : run.structures) {
       if (!s.serves.includes(e.layer)) continue;
       for (const [lx, ly] of s.lobes) {
         const tx = s.x + lx * s.reach, ty = s.y + ly * s.reach;
@@ -3229,6 +3527,7 @@
     const b = beast(e.species);
     run.entities = run.entities.filter((x) => x !== e);
     run.score += b.score;
+    resonanceKill(run, e.species);
     run.wave.stamina = Math.min(100, run.wave.stamina + KILL_REFUND);
     if (run.wave.stamina > 25) run.wave.spent = false;
     run.events.push({ kind: "kill", x: e.x, y: e.y, species: e.species, score: b.score });
@@ -3452,6 +3751,7 @@
     const liveIds = new Set(run.structures.map((s) => s.id));
     for (const id of run.bond.limbReadyAt.keys()) if (!liveIds.has(id)) run.bond.limbReadyAt.delete(id);
     run.organelles = run.organelles.filter((o) => liveIds.has(o.hostId));
+    if (run.resonance) run.resonance.constructs = run.resonance.constructs.filter((c) => c.ids.every((id) => liveIds.has(id)));
     const pitch = latticePitch(run);
     run.bodies = bodiesOf(run.structures, pitch);
     run.opened = Math.max(run.opened, run.bodies[0]?.cells.length ?? 0);
@@ -3576,7 +3876,7 @@
   function dischargesToKill(run) {
     let best = 0;
     const evolved = (1 + 0.15 * rankOf(run, "arsenal")) * (1 + 0.03 * rankOf(run, "refine"));
-    const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+    const organelleIds = /* @__PURE__ */ new Set([...run.organelles.map((o) => o.hostId), ...constructIds(run)]);
     const hms = [
       ...run.structures.filter((s) => !organelleIds.has(s.id)).map((s) => s.hm),
       ...run.cells.map((c) => c.group.hm)
@@ -3652,7 +3952,7 @@
     }
     const driving = handed(run.you);
     const spent = [];
-    const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+    const organelleIds = /* @__PURE__ */ new Set([...run.organelles.map((o) => o.hostId), ...constructIds(run)]);
     const quicker = 1 - 0.25 * rankOf(run, "capacitor");
     const k = run.throne;
     const hunting = k.awake && k.hp > 0;
@@ -3901,6 +4201,11 @@
       run.fray.turned = run.t;
       bite = 0;
     }
+    if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0 && wardHit(run)) {
+      run.iframe = 0.35;
+      run.events.push({ kind: "guard", x: run.you.x, y: run.you.y });
+      bite = 0;
+    }
     if (bite > 0 && run.iframe <= 0 && run.you.iframe <= 0) {
       run.integrity -= 1;
       run.iframe = IFRAME + 0.6 * rankOf(run, "chitin");
@@ -3943,6 +4248,7 @@
   function enterWorld(run) {
     if (run.phase !== "birth") return;
     const w = run.world;
+    resonanceBirth(run);
     run.wave = newWave(w.pitch, MAX_AMPLITUDE, focusFor(w.pitch), w.medium);
     run.wave.stamina = 100;
     const keep = Math.round(run.structures.length * w.inheritance);
@@ -4159,6 +4465,7 @@
         out.pause = anyHit(m.pause);
         out.depth = (anyHit(m.up) ? 1 : 0) + (anyHit(m.down) ? -1 : 0);
         out.call = anyHit(m.call);
+        out.forge = gp.mapping === "standard" && anyHit([10]);
         out.mute = anyHit(m.mute);
         this.prev = [...gp.buttons].map((_, i) => down(i));
         if (!this.everMoved && (out.grip || out.dash || out.place || out.crownDown || out.confirm || Math.hypot(gp.axes[0] ?? 0, gp.axes[1] ?? 0) > DEADZONE)) {
@@ -4189,6 +4496,7 @@
       if (k("KeyC")) out.crownDown = true;
       if (tap("KeyQ")) out.cycle = -1;
       if (tap("KeyR")) out.call = true;
+      if (tap("KeyV")) out.forge = true;
       if (tap("KeyM")) out.mute = true;
       if (tap("Space") || tap("Enter")) out.confirm = true;
       if (tap("Escape") || tap("KeyP")) out.pause = true;
@@ -4699,6 +5007,11 @@
       __publicField(this, "controlLegend", "");
       __publicField(this, "crowned", false);
       __publicField(this, "seed", 20260830);
+      __publicField(this, "expeditionSource", null);
+      __publicField(this, "forgeOpen", false);
+      __publicField(this, "forgePick", 0);
+      __publicField(this, "forgeRotation", 0);
+      __publicField(this, "forgeMessage", "");
       __publicField(this, "sparks", []);
       __publicField(this, "popups", []);
       __publicField(this, "rings", []);
@@ -4851,6 +5164,44 @@
     get state() {
       return this.run;
     }
+    /** Explicit start action; never replaces an ongoing run. */
+    startExpedition(source) {
+      if (this.screen !== "title" && this.screen !== "dead") return false;
+      seed32(source.seed);
+      this.expeditionSource = source;
+      this.begin();
+      return true;
+    }
+    toggleForge() {
+      if (this.screen !== "play") return;
+      if (!this.run.resonance) {
+        this.say("START A RESONANT EXPEDITION TO USE THE FORGE");
+        return;
+      }
+      this.forgeOpen = !this.forgeOpen;
+      this.mouseGrip = this.mouseDash = false;
+      this.buildHeld = this.crownHeld = this.liftHeld = 0;
+      this.organelleGrown = this.crowned = this.lured = false;
+      this.forgeMessage = "";
+    }
+    forgeAction() {
+      const result = this.forgePick === 3 ? weave(this.run) : craft(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation);
+      const messages = {
+        crafted: "ASSEMBLED. CLOSE THE FORGE, THEN GRIP NEARBY TO CHARGE.",
+        woven: "NEW CELL ADDED TO YOUR RACK.",
+        "need-cells": "GATHER MORE CELLS FOR THIS GEOMETRY.",
+        "need-fragments": "HOLD HUNTERS TO RECOVER MORE PHASE FRAGMENTS.",
+        "need-tetragonal": "WARD NEEDS FOUR 4 OR 422 CELLS. A SIXFOLD MOTIF SEATS AS 222 HERE.",
+        occupied: "SITES OCCUPIED. CLOSE THE FORGE AND MOVE TO CLEAR WATER.",
+        outside: "GEOMETRY CROSSES THE POOL EDGE OR THRONE. MOVE INWARD.",
+        "wrong-phase": "CRAFT WHILE SETTLING OR REIGNING.",
+        limit: "24 ASSEMBLIES ACTIVE. RECLAIM AN OLD ONE FIRST.",
+        "need-loom": "STAND WITHIN 110 MICRONS OF AN INTACT LOOM.",
+        "need-charge": "LOOM NEEDS 15 CHARGE. CLOSE THE FORGE AND GRIP NEAR IT."
+      };
+      this.forgeMessage = messages[result];
+      this.sfx.tick();
+    }
     // ── input ─────────────────────────────────────────────────────────────────
     /**
      * The pointer is not the player any more.
@@ -4898,6 +5249,13 @@
           return;
         }
         const { sx, sy } = world(e);
+        if (this.forgeOpen) {
+          const choice = Math.floor((sy - 155) / 50);
+          if (sx >= 70 && sx <= VIEW_W - 70 && choice >= 0 && choice < 4) this.forgePick = choice;
+          else if (sy >= 405 && sy <= 455) this.forgeAction();
+          else if (sy > 460) this.toggleForge();
+          return;
+        }
         const slot = this.slotAt(sx, sy);
         if (slot >= 0) {
           this.selected = slot;
@@ -4919,7 +5277,7 @@
       this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
       this.canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
-        if (this.screen !== "play" || this.paused) return;
+        if (this.screen !== "play" || this.paused || this.forgeOpen) return;
         this.retune(e.deltaY > 0 ? -1 : 1);
       }, { passive: false });
     }
@@ -5093,13 +5451,21 @@
       this.pick = 0;
       this.tally = {};
       this.seed = this.seed * 1664525 + 1013904223 >>> 0;
-      this.run = startRun(this.seed, this.ebb);
+      this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
+      this.forgeOpen = false;
+      this.forgePick = 0;
+      this.forgeRotation = 0;
+      this.forgeMessage = "";
+      if (this.expeditionSource) {
+        this.run.resonance = newResonance(this.expeditionSource);
+        this.run.cells = [...Array.from({ length: 6 }, () => cellFor("2")), ...Array.from({ length: 4 }, () => cellFor("4"))];
+      }
       this.verdict = null;
       this.screen = "play";
       this.sparks = [];
       this.popups = [];
       this.rings = [];
-      this.say("GATHER FOUR OF A KIND TO MAKE A CELL");
+      this.say(this.run.resonance ? "RESONANT EXPEDITION \xB7 V / L3 OPENS THE CRYSTAL FORGE" : "GATHER FOUR OF A KIND TO MAKE A CELL");
     }
     spend(i) {
       const run = this.run;
@@ -5173,12 +5539,28 @@
       const it = this.pad.read();
       if (this.screen === "play") this.mouse(it);
       this.intent = it;
+      if (this.screen === "play" && it.forge) {
+        this.toggleForge();
+        return;
+      }
+      if (this.forgeOpen && this.screen === "play") {
+        if (it.pause || it.lift) {
+          this.toggleForge();
+          return;
+        }
+        if (it.crown) this.forgeRotation = (this.forgeRotation + 1) % 4;
+        if (it.cycle) this.forgePick = (this.forgePick + it.cycle + 4) % 4;
+        const number = this.pad.slotKey();
+        if (number >= 1 && number <= 4) this.forgePick = number - 1;
+        if (it.place || it.confirm) this.forgeAction();
+        return;
+      }
       if (it.pause && this.screen === "play") {
         this.paused = !this.paused;
         this.sfx.tick();
       }
       const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
-      const legend = `${G.move} move \xB7 ${G.grip} grip \xB7 ${G.dash} dash / catch \xB7 ${G.place} build / hold: mitochondrion \xB7 ${G.lift} lift / hold: lure \xB7 ${G.crown} feed / crown / tame \xB7 ${G.call} call ally \xB7 ${G.pause} pause`;
+      const legend = `${G.move} move \xB7 ${G.grip} grip \xB7 ${G.dash} dash / catch \xB7 ${G.place} build / hold: mitochondrion \xB7 ${G.lift} lift / hold: lure \xB7 ${G.crown} feed / crown / tame \xB7 ${G.call} call ally \xB7 ${G.pause} pause` + (run.resonance ? " \xB7 V / L3 forge" : "");
       if (legend !== this.controlLegend) {
         this.controlLegend = legend;
         const controls = document.getElementById("controls");
@@ -5245,6 +5627,9 @@
         this.tally[ev.kind] = (this.tally[ev.kind] ?? 0) + 1;
         if (ev.kind === "hit") this.tally[`hit:${ev.cause}`] = (this.tally[`hit:${ev.cause}`] ?? 0) + 1;
         switch (ev.kind) {
+          case "resonance":
+            this.say(ev.text);
+            break;
           case "hit":
             this.flash = 1;
             this.flashRed = true;
@@ -5632,6 +6017,7 @@
       this.drawBodies();
       this.drawStructures();
       this.drawOrganelles();
+      this.drawResonanceStructures();
       this.drawBound();
       this.drawThrone();
       this.drawTrails();
@@ -5658,6 +6044,7 @@
         if (this.paused) this.drawPaused();
       }
       this.drawCard();
+      if (this.forgeOpen && this.screen === "play") this.drawForge();
       if (this.flash > 0) {
         g2.fillStyle = this.flashRed ? `rgba(255,60,90,${(this.flash * 0.42).toFixed(3)})` : `rgba(200,240,255,${(this.flash * 0.2).toFixed(3)})`;
         g2.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -6134,7 +6521,27 @@
       g2.strokeStyle = `rgba(${rgb},0.85)`;
       g2.fillStyle = `rgba(${rgb},0.16)`;
       g2.lineWidth = 1.4;
-      if (form === "warden" || form === "sentinel" || form === "husk") {
+      if (["faceter", "dislocator", "phason"].includes(form)) {
+        const sides = form === "phason" ? 5 : form === "faceter" ? 4 : 6;
+        const phase = form === "phason" ? this.run.resonance?.psi ?? 0 : 0;
+        g2.rotate(phase);
+        g2.beginPath();
+        for (let i = 0; i < sides; i++) {
+          const a = i * Math.PI * 2 / sides;
+          if (i) g2.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+          else g2.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        g2.closePath();
+        g2.fill();
+        g2.stroke();
+        if (form === "dislocator") {
+          g2.beginPath();
+          g2.moveTo(-r, 0);
+          g2.lineTo(0, -r * 0.35);
+          g2.lineTo(r, r * 0.4);
+          g2.stroke();
+        }
+      } else if (form === "warden" || form === "sentinel" || form === "husk") {
         for (let i = 0; i < 6; i++) {
           const a = i * Math.PI / 3;
           g2.beginPath();
@@ -6353,7 +6760,7 @@
       const run = this.run;
       const k = run.throne;
       const fighting2 = run.phase === "reign" && k.awake && k.hp > 0;
-      const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+      const organelleIds = /* @__PURE__ */ new Set([...run.organelles.map((o) => o.hostId), ...constructIds(run)]);
       for (const s of run.structures) {
         if (organelleIds.has(s.id)) continue;
         const inPlay = fighting2 && Math.hypot(s.x - k.x, s.y - k.y) < s.reach * LOBE_RANGE;
@@ -7062,7 +7469,7 @@
       g2.fillStyle = `rgb(${JADE})`;
       g2.fillRect(x - w / 2 + w * share - 1, y - r - 25, 2, 11);
       const need = dischargesToKill(this.run);
-      const organelleIds = new Set(this.run.organelles.map((o) => o.hostId));
+      const organelleIds = /* @__PURE__ */ new Set([...this.run.organelles.map((o) => o.hostId), ...constructIds(this.run)]);
       const bearing = this.run.structures.filter((st) => !organelleIds.has(st.id) && bearsOn(st, k.x, k.y)).length;
       g2.font = `700 9px ${MONO}`;
       g2.textAlign = "center";
@@ -7451,6 +7858,86 @@
       }
       return -1;
     }
+    drawResonanceStructures() {
+      const s = this.run.resonance;
+      if (!s) return;
+      const g2 = this.ctx, hosts = new Map(this.run.structures.map((h) => [h.id, h]));
+      for (const c of s.constructs) {
+        if (c.layer !== this.run.layer || !this.onCamera(c.x, c.y, 150)) continue;
+        g2.strokeStyle = c.kind === "ward" ? "#aeb4ff" : c.kind === "loom" ? "#ffcf78" : "#78e1f5";
+        g2.lineWidth = 1.5;
+        g2.beginPath();
+        c.ids.forEach((id, i) => {
+          const h = hosts.get(id);
+          if (!h) return;
+          if (i) g2.lineTo(px(h.x), px(h.y));
+          else g2.moveTo(px(h.x), px(h.y));
+        });
+        if (c.kind === "ward") g2.closePath();
+        g2.stroke();
+        g2.globalAlpha = 0.15 + 0.25 * c.energy / 40;
+        g2.beginPath();
+        g2.arc(px(c.x), px(c.y), px(FORGE_REACH), 0, Math.PI * 2);
+        g2.stroke();
+        g2.globalAlpha = 1;
+        g2.font = `600 9px ${MONO}`;
+        g2.fillStyle = INK;
+        g2.textAlign = "center";
+        g2.fillText(`${c.kind.toUpperCase()} ${c.energy.toFixed(0)}/40`, px(c.x), px(c.y) - 14);
+        g2.textAlign = "left";
+      }
+      if (this.forgeOpen && this.forgePick < 3) {
+        for (const at of blueprintSites(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation)) {
+          if (!this.onCamera(at.x, at.y)) continue;
+          g2.strokeStyle = "#fff";
+          g2.setLineDash([3, 3]);
+          g2.strokeRect(px(at.x) - 9, px(at.y) - 9, 18, 18);
+          g2.setLineDash([]);
+        }
+      }
+    }
+    drawForge() {
+      const g2 = this.ctx, s = this.run.resonance;
+      g2.fillStyle = "rgba(4,9,18,.94)";
+      g2.fillRect(45, 75, VIEW_W - 90, 450);
+      g2.textAlign = "left";
+      g2.textBaseline = "top";
+      g2.fillStyle = GOLD;
+      g2.font = `700 18px ${MONO}`;
+      g2.fillText("CRYSTAL FORGE", 70, 95);
+      g2.font = `600 11px ${MONO}`;
+      g2.fillStyle = INK;
+      g2.fillText(`${s.fragments} FRAGMENTS \xB7 ${this.run.cells.length} CELLS \xB7 ${gapAligned(this.run) ? "BAND GAP ALIGNED" : "BAND GAP NOT ALIGNED"}`, 70, 127);
+      const options = [...BLUEPRINTS.map((b) => `${b.name} \xB7 ${b.sites.length} cells + ${b.cost} fragments`), "WEAVE CELL \xB7 nearby loom + 15 charge + 1 fragment"];
+      options.forEach((name, i) => {
+        g2.fillStyle = i === this.forgePick ? "#193b4c" : "#0c1728";
+        g2.fillRect(65, 155 + i * 50, VIEW_W - 130, 42);
+        g2.fillStyle = i === this.forgePick ? "#fff" : DIM;
+        g2.font = `600 11px ${MONO}`;
+        g2.fillText(`${i + 1}. ${name}`, 78, 169 + i * 50);
+      });
+      g2.fillStyle = INK;
+      g2.font = `500 11px ${MONO}`;
+      const description = this.forgePick < 3 ? BLUEPRINTS[this.forgePick].description : "The loom copies its seated host point group. Sixfold material on this square net produces 222, never a fictitious hexagonal crystal.";
+      wrap(g2, description, 70, 363, VIEW_W - 250, 17);
+      if (this.forgePick < 3) {
+        const pitch = latticePitch(this.run);
+        g2.strokeStyle = GOLD;
+        for (const at of blueprintSites(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation))
+          g2.strokeRect(VIEW_W - 125 + (at.x - this.run.you.x) / pitch * 12, 368 + (at.y - this.run.you.y) / pitch * 12, 8, 8);
+        g2.fillStyle = DIM;
+        g2.font = `500 9px ${MONO}`;
+        g2.fillText(`${this.forgeRotation * 90}\xB0 \xB7 Y / C rotates`, VIEW_W - 210, 394);
+      }
+      g2.fillStyle = "#224d59";
+      g2.fillRect(65, 410, VIEW_W - 130, 35);
+      g2.fillStyle = "#fff";
+      g2.fillText("ASSEMBLE / WEAVE \xB7 A / X / ENTER / SPACE", 80, 421);
+      g2.fillStyle = GOLD;
+      wrap(g2, this.forgeMessage, 70, 451, VIEW_W - 140, 16);
+      g2.fillStyle = DIM;
+      g2.fillText("Q / B / D-PAD selects \xB7 V / L3 / LB / ESC closes \xB7 world paused", 70, 500);
+    }
     drawHud() {
       const g2 = this.ctx;
       const run = this.run;
@@ -7537,6 +8024,20 @@
       this.drawChannel();
       this.drawObjective();
       this.drawReadout();
+      if (run.resonance) {
+        const s = run.resonance, l = realm(s);
+        g2.fillStyle = "rgba(5,12,22,.88)";
+        g2.fillRect(210, 72, VIEW_W - 420, 54);
+        g2.fillStyle = GOLD;
+        g2.font = `600 10px ${MONO}`;
+        g2.textAlign = "center";
+        g2.fillText(`${l.name} \xB7 R ${s.R.toFixed(2)} \xB7 ${s.fragments} FRAGMENTS`, VIEW_W / 2, 78);
+        g2.fillStyle = INK;
+        g2.fillText(s.cleared ? "CLEARED \xB7 NEXT BIRTH ADVANCES" : `${s.kills - s.stageKills}/${l.kills} kills \xB7 ${s.crafted - s.stageCrafts}/${l.crafts} assemblies`, VIEW_W / 2, 94);
+        g2.fillStyle = DIM;
+        g2.fillText("V / L3 \xB7 CRYSTAL FORGE", VIEW_W / 2, 110);
+        g2.textAlign = "left";
+      }
       if (this.toastT > 0) {
         g2.textAlign = "center";
         g2.globalAlpha = Math.min(1, this.toastT / 0.6);
@@ -8104,6 +8605,7 @@
         `SONIC DRIFTER  ${run.t.toFixed(0)}s  aeon ${run.world.aeon} (${run.world.name})  phase ${run.phase}`,
         `you: integrity ${run.integrity}/${maxIntegrity(run)} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
         `companions: ${run.bond.companions.map((c, i) => `${i === run.bond.active ? "*" : ""}${c.form}:${c.rank}`).join(" ") || "none"}; bond ${run.bond.progress.toFixed(2)}s${companion(run) ? `; call ${callWait(run) > 0 ? `in ${callWait(run).toFixed(0)}s` : "ready"}` : ""}`,
+        `resonance: ${run.resonance ? JSON.stringify({ seed: run.resonance.source.seed, realm: realm(run.resonance).name, R: run.resonance.R, fragments: run.resonance.fragments, crafted: run.resonance.crafted, kills: run.resonance.kills, blocks: run.resonance.blocks, woven: run.resonance.woven }) : "off"}`,
         `mitochondria: ${run.organelles.length}; stored energy ${run.organelles.reduce((n, o) => n + o.energy, 0).toFixed(0)}; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
         // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather
         // than inferred from events, so damage is in it and not just a count.
@@ -8307,11 +8809,11 @@
     if (centred) g2.textAlign = "center";
     let line = "";
     let row = 0;
-    for (const word of text.split(" ")) {
-      const test = line ? `${line} ${word}` : word;
+    for (const word2 of text.split(" ")) {
+      const test = line ? `${line} ${word2}` : word2;
       if (g2.measureText(test).width > maxW && line) {
         g2.fillText(line, x, y + row * lh);
-        line = word;
+        line = word2;
         row++;
       } else {
         line = test;
@@ -8324,6 +8826,29 @@
   if (canvas) {
     const game = new Game(canvas);
     window.drifter = game;
+    let expedition = { seed: "20260927", trajectory: [] };
+    const status = document.getElementById("expedition-status");
+    document.getElementById("expedition-start")?.addEventListener("click", () => {
+      const started = game.startExpedition(expedition);
+      if (status) status.textContent = started ? `Expedition seed ${expedition.seed}. V / L3 opens the forge.` : "An existing run is active. Start an expedition from the title or death screen.";
+      canvas.focus();
+    });
+    document.getElementById("forge-open")?.addEventListener("click", () => {
+      game.toggleForge();
+      canvas.focus();
+    });
+    document.getElementById("expedition-import")?.addEventListener("change", async (event) => {
+      const input = event.target, file = input.files?.[0];
+      if (!file) return;
+      try {
+        if (file.size > 2e6) throw Error("File exceeds 2 MB");
+        expedition = resonanceSource(JSON.parse(await file.text()));
+        if (status) status.textContent = `Seed ${expedition.seed} ready for the next expedition \xB7 ${expedition.trajectory.length ? "saved trajectory" : "generated coherence field"}`;
+      } catch (error) {
+        if (status) status.textContent = error instanceof Error ? error.message : "Invalid Resonarium file";
+      }
+      input.value = "";
+    });
     game.start();
   }
 })();

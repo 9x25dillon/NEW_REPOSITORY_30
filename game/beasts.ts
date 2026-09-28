@@ -1,4 +1,4 @@
-// game/beasts.ts — the eight ways a body can be in the water with you.
+// game/beasts.ts — the wildlife sharing the water with you.
 //
 // A beast is not a stat block with a colour. It is a Particle, and the only
 // thing that decides how it behaves toward you is the sign of its contrast
@@ -62,6 +62,21 @@ const FAINT = { rho: 1050, c: 1520 };
  * walk through your idle field and they do not walk through your grip.
  */
 export const BEASTS: Readonly<Record<string, Beast>> = {
+  faceter: {
+    id: "faceter", label: "FACETER", particle: { radius: 9e-6, ...FLESH },
+    hold: 1.6, speed: 5e-5, behaviour: "ambush", damage: 1, drain: 0, score: 7,
+    wind: .9, strike: .38, surge: 6,
+  },
+  dislocator: {
+    id: "dislocator", label: "DISLOCATOR", particle: { radius: 7.5e-6, ...FLESH },
+    hold: 1.4, speed: 9e-5, behaviour: "graze", damage: 0, drain: 0, score: 8,
+    wind: 0, strike: 0, surge: 0,
+  },
+  phason: {
+    id: "phason", label: "PHASON", particle: { radius: 5e-6, ...LIPID },
+    hold: 1.25, speed: 7e-5, behaviour: "orbit", damage: 1, drain: 0, score: 9,
+    wind: .75, strike: .3, surge: 6,
+  },
   /**
    * It does not come for you at all.
    *

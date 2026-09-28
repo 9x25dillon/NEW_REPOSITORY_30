@@ -78,6 +78,9 @@ const STYLE = `
   /* Three chips, and they are not decoration: they are the three facts the
      simulation runs on - the two lattices, and the size below which neither
      of them can help you. */
+  #expedition-panel { font-size:11px; color:var(--ink); }
+  #expedition-panel button, #expedition-panel label { background:#102536; color:var(--ink); border:1px solid var(--rule); padding:5px 8px; border-radius:4px; font:inherit; cursor:pointer; }
+  #expedition-status { display:block; font-size:10px; color:var(--muted); margin-top:5px; }
   .legend {
     list-style:none; margin:0; padding:0;
     display:flex; flex-wrap:wrap; justify-content:center; gap:8px 22px;
@@ -110,6 +113,12 @@ const BODY = `<header>
     One screen pixel is one micron. Every force here is the Gor&rsquo;kov radiation
     potential, computed live.
   </p>
+  <div id="expedition-panel">
+    <button id="expedition-start">Start Resonant Expedition</button>
+    <label>Import Resonarium JSON <input id="expedition-import" type="file" accept=".json,application/json" hidden></label>
+    <button id="forge-open">Crystal forge</button>
+    <span id="expedition-status" role="status">Optional survival mode · crystal crafting · three encounter stages · V / L3 forge</span>
+  </div>
 </header>
 
 <div id="stage">

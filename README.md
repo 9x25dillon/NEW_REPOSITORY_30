@@ -5,6 +5,26 @@ microfluidic channels, SAW on open piezoelectric substrate.
 
 Private. Under development against a single subject.
 
+## Resonarium Emergence
+
+[Open Resonarium](app/resonarium/index.html) to combine the actual `astro-aae`
+natal-bedrock/Sentinel instrument with the Photometabolic simulation. It includes
+trajectory-driven audio and geometry, K/R/ψ inspection, replay, JSON interchange,
+and seeded AAFT comparisons. Use **Start with demo chart → Sentinel → Replay**;
+audio starts separately. The page works offline without a build step.
+
+[Integration, units, replay contract and tests](docs/RESONARIUM_EMERGENCE.md).
+This listening/model layer remains separate from the device-physics library.
+
+## Sonic Drifter: Resonant Expedition
+
+[Open Sonic Drifter](app/sonic-drifter.html) and choose **Start Resonant Expedition**.
+Import Resonarium JSON to use its seed or coherence trajectory. Open the crystal
+forge with **V / L3** to rotate and assemble condensers, wards and looms. Three
+encounter stages add Faceters, Dislocators and Phasons to the survival loop.
+
+[Controls, recipes, progression and verification](docs/RESONANT_EXPEDITION.md).
+
 ## Research simulation workbench
 
 The first platform extension is available at `app/simulation.html` after

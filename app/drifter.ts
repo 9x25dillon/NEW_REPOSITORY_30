@@ -28,6 +28,9 @@ import {
   particleOf, placeCell, readoutFor, retuneChannel, streamOf, waterAt,
   startRun, step, maxIntegrity,
 } from "../game/run.js";
+import { type ResonanceSource, BLUEPRINTS, FORGE_REACH, blueprintSites, constructIds,
+  craft, gapAligned, newResonance, realm, resonanceSource, seed32, weave } from "../game/resonance.js";
+import { cellFor } from "../game/lattice.js";
 import { envelopeAt, frequency, trapsX, trapsY, STAMINA_MAX } from "../game/wave.js";
 import {
   PRIME_KEEP, epitaphFor, helpingCosts, inheritanceOf, isPrime, nextHelpingBuys,
@@ -421,6 +424,48 @@ export class Game {
   private controlLegend = "";
   private crowned = false;
   private seed = 20260830;
+  private expeditionSource: ResonanceSource | null = null;
+  private forgeOpen = false;
+  private forgePick = 0;
+  private forgeRotation = 0;
+  private forgeMessage = "";
+
+  /** Explicit start action; never replaces an ongoing run. */
+  startExpedition(source: ResonanceSource): boolean {
+    if (this.screen !== "title" && this.screen !== "dead") return false;
+    seed32(source.seed);
+    this.expeditionSource = source;
+    this.begin();
+    return true;
+  }
+  toggleForge(): void {
+    if (this.screen !== "play") return;
+    if (!this.run.resonance) { this.say("START A RESONANT EXPEDITION TO USE THE FORGE"); return; }
+    this.forgeOpen = !this.forgeOpen;
+    this.mouseGrip = this.mouseDash = false;
+    this.buildHeld = this.crownHeld = this.liftHeld = 0;
+    this.organelleGrown = this.crowned = this.lured = false;
+    this.forgeMessage = "";
+  }
+  private forgeAction(): void {
+    const result = this.forgePick === 3 ? weave(this.run) : craft(this.run, BLUEPRINTS[this.forgePick].kind, this.forgeRotation);
+    const messages = {
+      crafted: "ASSEMBLED. CLOSE THE FORGE, THEN GRIP NEARBY TO CHARGE.",
+      woven: "NEW CELL ADDED TO YOUR RACK.",
+      "need-cells": "GATHER MORE CELLS FOR THIS GEOMETRY.",
+      "need-fragments": "HOLD HUNTERS TO RECOVER MORE PHASE FRAGMENTS.",
+      "need-tetragonal": "WARD NEEDS FOUR 4 OR 422 CELLS. A SIXFOLD MOTIF SEATS AS 222 HERE.",
+      occupied: "SITES OCCUPIED. CLOSE THE FORGE AND MOVE TO CLEAR WATER.",
+      outside: "GEOMETRY CROSSES THE POOL EDGE OR THRONE. MOVE INWARD.",
+      "wrong-phase": "CRAFT WHILE SETTLING OR REIGNING.",
+      limit: "24 ASSEMBLIES ACTIVE. RECLAIM AN OLD ONE FIRST.",
+      "need-loom": "STAND WITHIN 110 MICRONS OF AN INTACT LOOM.",
+      "need-charge": "LOOM NEEDS 15 CHARGE. CLOSE THE FORGE AND GRIP NEAR IT.",
+    };
+    this.forgeMessage = messages[result];
+    this.sfx.tick();
+  }
+
 
   private sparks: Spark[] = [];
   private popups: Popup[] = [];
@@ -548,6 +593,13 @@ export class Game {
       }
 
       const { sx, sy } = world(e);
+      if (this.forgeOpen) {
+        const choice = Math.floor((sy - 155) / 50);
+        if (sx >= 70 && sx <= VIEW_W - 70 && choice >= 0 && choice < 4) this.forgePick = choice;
+        else if (sy >= 405 && sy <= 455) this.forgeAction();
+        else if (sy > 460) this.toggleForge();
+        return;
+      }
       const slot = this.slotAt(sx, sy);
       if (slot >= 0) { this.selected = slot; this.spend(slot); return; }
 
@@ -572,7 +624,7 @@ export class Game {
     // and hands every body on one to whichever new plane is nearest.
     this.canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
-      if (this.screen !== "play" || this.paused) return;
+      if (this.screen !== "play" || this.paused || this.forgeOpen) return;
       this.retune(e.deltaY > 0 ? -1 : 1);
     }, { passive: false });
   }
@@ -798,11 +850,17 @@ export class Game {
     this.pick = 0;
     this.tally = {};
     this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
-    this.run = startRun(this.seed, this.ebb);
+    this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
+    this.forgeOpen = false; this.forgePick = 0; this.forgeRotation = 0; this.forgeMessage = "";
+    if (this.expeditionSource) {
+      this.run.resonance = newResonance(this.expeditionSource);
+      // An explicit expedition starter kit; normal runs retain their original economy.
+      this.run.cells = [...Array.from({length:6},()=>cellFor("2")), ...Array.from({length:4},()=>cellFor("4"))];
+    }
     this.verdict = null;
     this.screen = "play";
     this.sparks = []; this.popups = []; this.rings = [];
-    this.say("GATHER FOUR OF A KIND TO MAKE A CELL");
+    this.say(this.run.resonance ? "RESONANT EXPEDITION · V / L3 OPENS THE CRYSTAL FORGE" : "GATHER FOUR OF A KIND TO MAKE A CELL");
   }
 
   private spend(i: number): void {
@@ -892,6 +950,15 @@ export class Game {
     const it = this.pad.read();
     if (this.screen === "play") this.mouse(it);
     this.intent = it;
+    if (this.screen === "play" && it.forge) { this.toggleForge(); return; }
+    if (this.forgeOpen && this.screen === "play") {
+      if (it.pause || it.lift) { this.toggleForge(); return; }
+      if (it.crown) this.forgeRotation = (this.forgeRotation + 1) % 4;
+      if (it.cycle) this.forgePick = (this.forgePick + it.cycle + 4) % 4;
+      const number = this.pad.slotKey(); if (number >= 1 && number <= 4) this.forgePick = number - 1;
+      if (it.place || it.confirm) this.forgeAction();
+      return; // Design mode pauses the world, including enemy winds and model time.
+    }
 
     // Pause first, and only where there is something to pause. A menu is
     // already stopped.
@@ -901,7 +968,7 @@ export class Game {
     }
     const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
     const legend = `${G.move} move · ${G.grip} grip · ${G.dash} dash / catch · ${G.place} build / hold: mitochondrion`
-      + ` · ${G.lift} lift / hold: lure · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause`;
+      + ` · ${G.lift} lift / hold: lure · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause` + (run.resonance ? " · V / L3 forge" : "");
     if (legend !== this.controlLegend) {
       this.controlLegend = legend;
       const controls = document.getElementById("controls");
@@ -998,6 +1065,7 @@ export class Game {
       this.tally[ev.kind] = (this.tally[ev.kind] ?? 0) + 1;
       if (ev.kind === "hit") this.tally[`hit:${ev.cause}`] = (this.tally[`hit:${ev.cause}`] ?? 0) + 1;
       switch (ev.kind) {
+        case "resonance": this.say(ev.text); break;
         case "hit":
           this.flash = 1; this.flashRed = true; this.shake = 13;
           // Two frames of held time. It is the cheapest weight there is.
@@ -1378,6 +1446,7 @@ export class Game {
     this.drawBodies();
     this.drawStructures();
     this.drawOrganelles();
+    this.drawResonanceStructures();
     this.drawBound();
     this.drawThrone();
     this.drawTrails();
@@ -1407,6 +1476,7 @@ export class Game {
       if (this.paused) this.drawPaused();
     }
     this.drawCard();
+    if (this.forgeOpen && this.screen === "play") this.drawForge();
 
     if (this.flash > 0) {
       g.fillStyle = this.flashRed
@@ -1942,7 +2012,15 @@ export class Game {
     g.strokeStyle = `rgba(${rgb},0.85)`;
     g.fillStyle = `rgba(${rgb},0.16)`;
     g.lineWidth = 1.4;
-    if (form === "warden" || form === "sentinel" || form === "husk") {
+    if (["faceter", "dislocator", "phason"].includes(form)) {
+      const sides = form === "phason" ? 5 : form === "faceter" ? 4 : 6;
+      const phase = form === "phason" ? this.run.resonance?.psi ?? 0 : 0;
+      g.rotate(phase);
+      g.beginPath();
+      for (let i=0;i<sides;i++) { const a=i*Math.PI*2/sides; if(i)g.lineTo(Math.cos(a)*r,Math.sin(a)*r);else g.moveTo(Math.cos(a)*r,Math.sin(a)*r); }
+      g.closePath();g.fill();g.stroke();
+      if (form === "dislocator") { g.beginPath();g.moveTo(-r,0);g.lineTo(0,-r*.35);g.lineTo(r,r*.4);g.stroke(); }
+    } else if (form === "warden" || form === "sentinel" || form === "husk") {
       // Articulated plates, open at the joints.
       for (let i = 0; i < 6; i++) {
         const a = i * Math.PI / 3;
@@ -2132,7 +2210,7 @@ export class Game {
     const run = this.run;
     const k = run.throne;
     const fighting = run.phase === "reign" && k.awake && k.hp > 0;
-    const organelleIds = new Set(run.organelles.map((o) => o.hostId));
+    const organelleIds = new Set([...run.organelles.map((o) => o.hostId), ...constructIds(run)]);
 
     for (const s of run.structures) {
       if (organelleIds.has(s.id)) continue;
@@ -3011,7 +3089,7 @@ export class Game {
     // needed TWO of them, and was instead fought by hand for nine minutes
     // against a thing that heals 0.9 hp/s off the buildings it eats.
     const need = dischargesToKill(this.run);
-    const organelleIds = new Set(this.run.organelles.map((o) => o.hostId));
+    const organelleIds = new Set([...this.run.organelles.map((o) => o.hostId), ...constructIds(this.run)]);
     const bearing = this.run.structures.filter((st) => !organelleIds.has(st.id) && bearsOn(st, k.x, k.y)).length;
     g.font = `700 9px ${MONO}`;
     g.textAlign = "center";
@@ -3395,6 +3473,53 @@ export class Game {
     return -1;
   }
 
+  private drawResonanceStructures(): void {
+    const s=this.run.resonance;if(!s)return;
+    const g=this.ctx,hosts=new Map(this.run.structures.map(h=>[h.id,h]));
+    for(const c of s.constructs) {
+      if(c.layer!==this.run.layer||!this.onCamera(c.x,c.y,150))continue;
+      g.strokeStyle=c.kind==="ward"?"#aeb4ff":c.kind==="loom"?"#ffcf78":"#78e1f5";
+      g.lineWidth=1.5;g.beginPath();
+      c.ids.forEach((id,i)=>{const h=hosts.get(id);if(!h)return;if(i)g.lineTo(px(h.x),px(h.y));else g.moveTo(px(h.x),px(h.y));});
+      if(c.kind==="ward")g.closePath();g.stroke();
+      g.globalAlpha=.15+.25*c.energy/40;g.beginPath();g.arc(px(c.x),px(c.y),px(FORGE_REACH),0,Math.PI*2);g.stroke();g.globalAlpha=1;
+      g.font=`600 9px ${MONO}`;g.fillStyle=INK;g.textAlign="center";
+      g.fillText(`${c.kind.toUpperCase()} ${c.energy.toFixed(0)}/40`,px(c.x),px(c.y)-14);g.textAlign="left";
+    }
+    if(this.forgeOpen && this.forgePick<3) {
+      for(const at of blueprintSites(this.run,BLUEPRINTS[this.forgePick].kind,this.forgeRotation)) {
+        if(!this.onCamera(at.x,at.y))continue;
+        g.strokeStyle="#fff";g.setLineDash([3,3]);g.strokeRect(px(at.x)-9,px(at.y)-9,18,18);g.setLineDash([]);
+      }
+    }
+  }
+  private drawForge(): void {
+    const g=this.ctx,s=this.run.resonance!;
+    g.fillStyle="rgba(4,9,18,.94)";g.fillRect(45,75,VIEW_W-90,450);
+    g.textAlign="left";g.textBaseline="top";g.fillStyle=GOLD;g.font=`700 18px ${MONO}`;
+    g.fillText("CRYSTAL FORGE",70,95);
+    g.font=`600 11px ${MONO}`;g.fillStyle=INK;
+    g.fillText(`${s.fragments} FRAGMENTS · ${this.run.cells.length} CELLS · ${gapAligned(this.run)?"BAND GAP ALIGNED":"BAND GAP NOT ALIGNED"}`,70,127);
+    const options=[...BLUEPRINTS.map(b=>`${b.name} · ${b.sites.length} cells + ${b.cost} fragments`),"WEAVE CELL · nearby loom + 15 charge + 1 fragment"];
+    options.forEach((name,i)=>{
+      g.fillStyle=i===this.forgePick?"#193b4c":"#0c1728";g.fillRect(65,155+i*50,VIEW_W-130,42);
+      g.fillStyle=i===this.forgePick?"#fff":DIM;g.font=`600 11px ${MONO}`;g.fillText(`${i+1}. ${name}`,78,169+i*50);
+    });
+    g.fillStyle=INK;g.font=`500 11px ${MONO}`;
+    const description=this.forgePick<3?BLUEPRINTS[this.forgePick].description:"The loom copies its seated host point group. Sixfold material on this square net produces 222, never a fictitious hexagonal crystal.";
+    wrap(g,description,70,363,VIEW_W-250,17);
+    if(this.forgePick<3) {
+      const pitch=latticePitch(this.run);g.strokeStyle=GOLD;
+      for(const at of blueprintSites(this.run,BLUEPRINTS[this.forgePick].kind,this.forgeRotation))
+        g.strokeRect(VIEW_W-125+(at.x-this.run.you.x)/pitch*12,368+(at.y-this.run.you.y)/pitch*12,8,8);
+      g.fillStyle=DIM;g.font=`500 9px ${MONO}`;g.fillText(`${this.forgeRotation*90}° · Y / C rotates`,VIEW_W-210,394);
+    }
+    g.fillStyle="#224d59";g.fillRect(65,410,VIEW_W-130,35);g.fillStyle="#fff";
+    g.fillText("ASSEMBLE / WEAVE · A / X / ENTER / SPACE",80,421);
+    g.fillStyle=GOLD;wrap(g,this.forgeMessage,70,451,VIEW_W-140,16);
+    g.fillStyle=DIM;g.fillText("Q / B / D-PAD selects · V / L3 / LB / ESC closes · world paused",70,500);
+  }
+
   private drawHud(): void {
     const g = this.ctx;
     const run = this.run;
@@ -3480,6 +3605,13 @@ export class Game {
     this.drawChannel();
     this.drawObjective();
     this.drawReadout();
+    if (run.resonance) {
+      const s=run.resonance,l=realm(s);g.fillStyle="rgba(5,12,22,.88)";g.fillRect(210,72,VIEW_W-420,54);
+      g.fillStyle=GOLD;g.font=`600 10px ${MONO}`;g.textAlign="center";
+      g.fillText(`${l.name} · R ${s.R.toFixed(2)} · ${s.fragments} FRAGMENTS`,VIEW_W/2,78);
+      g.fillStyle=INK;g.fillText(s.cleared?"CLEARED · NEXT BIRTH ADVANCES":`${s.kills-s.stageKills}/${l.kills} kills · ${s.crafted-s.stageCrafts}/${l.crafts} assemblies`,VIEW_W/2,94);
+      g.fillStyle=DIM;g.fillText("V / L3 · CRYSTAL FORGE",VIEW_W/2,110);g.textAlign="left";
+    }
 
     if (this.toastT > 0) {
       g.textAlign = "center";
@@ -4188,6 +4320,7 @@ export class Game {
       `you: integrity ${run.integrity}/${maxIntegrity(run)} stamina ${run.wave.stamina.toFixed(0)} score ${run.score}`,
       `companions: ${run.bond.companions.map((c, i) => `${i === run.bond.active ? "*" : ""}${c.form}:${c.rank}`).join(" ") || "none"}; bond ${run.bond.progress.toFixed(2)}s`
         + `${companion(run) ? `; call ${callWait(run) > 0 ? `in ${callWait(run).toFixed(0)}s` : "ready"}` : ""}`,
+      `resonance: ${run.resonance ? JSON.stringify({seed:run.resonance.source.seed,realm:realm(run.resonance).name,R:run.resonance.R,fragments:run.resonance.fragments,crafted:run.resonance.crafted,kills:run.resonance.kills,blocks:run.resonance.blocks,woven:run.resonance.woven}) : "off"}`,
       `mitochondria: ${run.organelles.length}; stored energy ${run.organelles.reduce((n, o) => n + o.energy, 0).toFixed(0)}`
         + `; mending ${mending(run) ? "possible" : "no"}; repair ${run.fray.repair.toFixed(0)}/${repairCost(run).toFixed(0)}`,
       // WHAT THE FIGHT WAS MADE OF, past the volleys. Counted in the game rather
@@ -4463,5 +4596,22 @@ if (canvas) {
   // frames did not THROW, which is not the same as asserting that anything
   // moved — and the difference between those two was a build nobody could play.
   (window as unknown as { drifter?: Game }).drifter = game;
+  let expedition: ResonanceSource = {seed:"20260927",trajectory:[]};
+  const status=document.getElementById("expedition-status");
+  document.getElementById("expedition-start")?.addEventListener("click",()=>{
+    const started=game.startExpedition(expedition);
+    if(status)status.textContent=started?`Expedition seed ${expedition.seed}. V / L3 opens the forge.`:"An existing run is active. Start an expedition from the title or death screen.";
+    canvas.focus();
+  });
+  document.getElementById("forge-open")?.addEventListener("click",()=>{game.toggleForge();canvas.focus();});
+  document.getElementById("expedition-import")?.addEventListener("change",async(event)=>{
+    const input=event.target as HTMLInputElement,file=input.files?.[0];if(!file)return;
+    try {
+      if(file.size>2_000_000)throw Error("File exceeds 2 MB");
+      expedition=resonanceSource(JSON.parse(await file.text()));
+      if(status)status.textContent=`Seed ${expedition.seed} ready for the next expedition · ${expedition.trajectory.length?"saved trajectory":"generated coherence field"}`;
+    } catch(error) {if(status)status.textContent=error instanceof Error?error.message:"Invalid Resonarium file";}
+    input.value="";
+  });
   game.start();
 }

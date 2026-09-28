@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.build.json --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "app": "npm run build && npm run drifter && echo \"open app/index.html or app/sonic-drifter.html\"",
-    "drifter": "node app/build-drifter.mjs"
+    "drifter": "node app/build-drifter.mjs",
+    "test:biosentinel": "python3 -m unittest discover -s test/python"
   },
   "devDependencies": {
     "tsx": "^4.19.2",
