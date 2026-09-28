@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <!-- The same picture as the Android icon: crossed waves, their nodes, you in the ring. -->
+  <rect width="108" height="108" rx="22" fill="#05070e"/>
+  <path d="M30 42H78M30 66H78M42 30V78M66 30V78" stroke="#78e1f5" stroke-opacity="0.35" stroke-width="1.5"/>
+  <g fill="#78e1f5">
+    <circle cx="42" cy="42" r="3"/><circle cx="66" cy="42" r="3"/>
+    <circle cx="42" cy="66" r="3"/><circle cx="66" cy="66" r="3"/>
+  </g>
+  <circle cx="54" cy="54" r="9" fill="none" stroke="#ff8cbe" stroke-width="3"/>
+  <circle cx="54" cy="54" r="3" fill="#ffc94a"/>
+</svg>

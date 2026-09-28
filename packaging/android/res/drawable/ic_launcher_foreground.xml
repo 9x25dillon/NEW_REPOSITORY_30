@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The crossed standing waves, their nodes, and you in an antinode ring. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#5978E1F5" android:strokeWidth="1.5"
+        android:pathData="M30,42 L78,42 M30,66 L78,66 M42,30 L42,78 M66,30 L66,78" />
+    <path android:fillColor="#FF78E1F5"
+        android:pathData="M39,42 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 M63,42 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 M39,66 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 M63,66 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+    <path android:strokeColor="#FFFF8CBE" android:strokeWidth="3"
+        android:pathData="M45,54 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0" />
+    <path android:fillColor="#FFFFC94A"
+        android:pathData="M51,54 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>

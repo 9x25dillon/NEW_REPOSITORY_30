@@ -1,0 +1,78 @@
+# Build Sonic Drifter's installable packages and publish them as a release.
+#
+# GitHub's Ubuntu runners carry an Android SDK, so the APK builds here with the
+# same packaging/android/build.sh a person would run by hand; rpmbuild is one
+# apt package away. Every push that touches the game rebuilds both and replaces
+# the assets on the "sonic-drifter-latest" pre-release, so the newest build is
+# always at one fixed URL a phone can open.
+
+name: packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "app/**"
+      - "game/**"
+      - "src/**"
+      - "packaging/**"
+      - ".github/workflows/packages.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install
+        run: |
+          npm install --no-audit --no-fund
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm
+
+      - name: Check
+        run: |
+          npm run typecheck
+          npx tsx --test test/save.test.ts test/boundary.test.ts
+
+      - name: Android
+        run: bash packaging/android/build.sh
+
+      - name: RPM
+        run: bash packaging/rpm/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sonic-drifter-packages
+          path: releases/*
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=sonic-drifter-latest
+          version=$(tr -d '[:space:]' < packaging/VERSION)
+          notes="Sonic Drifter $version, built from ${GITHUB_SHA::7} on ${GITHUB_REF_NAME}.
+
+          Phone: download sonic-drifter.apk and open it (allow installs from your browser or the GitHub app when asked).
+          Fedora/RHEL desktop: sudo dnf install ./sonic-drifter-$version-1.noarch.rpm, then run sonic-drifter."
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" releases/* --prerelease --target "$GITHUB_SHA" \
+            --title "Sonic Drifter $version (latest build)" --notes "$notes"
