@@ -12,7 +12,14 @@
 //                                          <head>, e.g. a published artifact.
 
 import { build } from "esbuild";
+import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+
+// WHICH BUILD WROTE A SAVE. The bundle is built with a placeholder where the
+// build id goes, hashed, and the placeholder replaced by the hash — so the id
+// is a pure function of the code, the same on every machine that builds the
+// same source, and changes when anything the game runs on changes.
+const PLACEHOLDER = "__SONIC_DRIFTER_BUILD_ID__";
 
 const result = await build({
   entryPoints: ["app/drifter.ts"],
@@ -22,9 +29,12 @@ const result = await build({
   platform: "browser",
   write: false,
   legalComments: "none",
+  define: { __DRIFTER_BUILD__: JSON.stringify(PLACEHOLDER) },
 });
 
-const js = result.outputFiles[0].text;
+const raw = result.outputFiles[0].text;
+const buildId = createHash("sha256").update(raw).digest("hex").slice(0, 12);
+const js = raw.replaceAll(PLACEHOLDER, buildId);
 
 const FONT = '<link rel="preconnect" href="https://fonts.googleapis.com">'
   + '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
@@ -117,7 +127,9 @@ const BODY = `<header>
     <button id="expedition-start">Start Resonant Expedition</button>
     <label>Import Resonarium JSON <input id="expedition-import" type="file" accept=".json,application/json" hidden></label>
     <button id="forge-open">Crystal forge</button>
-    <span id="expedition-status" role="status">Optional survival mode · crystal crafting · three encounter stages · V / L3 forge</span>
+    <button id="run-export" title="Download this run as a file that loads back exactly">Export run</button>
+    <label title="Go on with a run from a file (from the title or after a death)">Import run <input id="run-import" type="file" accept=".json,application/json" hidden></label>
+    <span id="expedition-status" role="status">Optional survival mode · crystal crafting · three encounter stages · V / L3 forge · runs are kept between visits</span>
   </div>
 </header>
 
@@ -154,7 +166,7 @@ ${BODY}
 `;
 
 writeFileSync("app/sonic-drifter.html", standalone);
-console.log(`app/sonic-drifter.html  ${(standalone.length / 1024).toFixed(1)} KiB`);
+console.log(`app/sonic-drifter.html  ${(standalone.length / 1024).toFixed(1)} KiB  build ${buildId}`);
 
 if (process.argv.includes("--body")) {
   writeFileSync(

@@ -16,6 +16,14 @@ audio starts separately. The page works offline without a build step.
 [Integration, units, replay contract and tests](docs/RESONARIUM_EMERGENCE.md).
 This listening/model layer remains separate from the device-physics library.
 
+## Sonic Drifter on a phone or a Fedora desktop
+
+Install `releases/sonic-drifter.apk` on Android (touch controls, or pair the
+Xbox pad) or `releases/sonic-drifter-*.noarch.rpm` on Fedora. Both are also on
+the **sonic-drifter-latest** pre-release. Runs are saved between sessions, and
+can be exported to a file and loaded back.
+[Install instructions](docs/PACKAGES.md) · [How saving works](docs/SAVES.md).
+
 ## Sonic Drifter: Resonant Expedition
 
 [Open Sonic Drifter](app/sonic-drifter.html) and choose **Start Resonant Expedition**.

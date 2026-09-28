@@ -137,7 +137,7 @@ test("the bench and the game do not reach for each other", () => {
   // and a game that imported the bench's provenance machinery would be dressing
   // a score up as a measurement.
   const bench = ["app/main.ts", "app/field.ts", "app/listen.ts"];
-  const game = ["app/drifter.ts", "app/pad.ts", "app/sfx.ts"];
+  const game = ["app/drifter.ts", "app/pad.ts", "app/sfx.ts", "app/persist.ts", "app/touch.ts"];
 
   for (const entry of bench) {
     const text = readFileSync(join(root, entry), "utf8");
@@ -168,7 +168,7 @@ test("the game's surface is as separate as the other two", () => {
   // are UI sound at a few hundred hertz and the field is at ten megahertz —
   // four orders apart and unrelated — which is exactly the confusion this file
   // exists to keep from setting in.
-  for (const entry of ["app/drifter.ts", "app/pad.ts", "app/sfx.ts"]) {
+  for (const entry of ["app/drifter.ts", "app/pad.ts", "app/sfx.ts", "app/persist.ts", "app/touch.ts"]) {
     const text = readFileSync(join(root, entry), "utf8");
     for (const spec of importsOf(text)) {
       assert.ok(!spec.includes("personal/"),
