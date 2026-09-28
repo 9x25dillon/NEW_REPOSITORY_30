@@ -270,6 +270,16 @@ These are not preferences. Breaking one breaks something else two modules away.
    `MAX_MODE` is where the node planes get closer than the bodies standing on
    them.
 
+26. **THE FIELD IS SEPARABLE ONLY AT QUADRATURE.** `wave.cross` is the
+   temporal phase between the X and Y pairs, and every ordinary run holds it at
+   exactly `QUADRATURE`, where `crossCoupling` returns a literal zero and no
+   cross term is computed. Do not compare against a nearly-quadrature float.
+   Out of quadrature (expedition only), the well depth is
+   `1 ± |f1 cos phi| / (3|Phi|)`, the pilot's aim flips the Y pair to take the
+   deep half, and a held body's clock runs at `wellDepth`, floored by
+   `HELD_FLOOR`, because `held > 0` is also what stops a hunter striking. See
+   `docs/QUADRATURE.md`.
+
 ---
 
 ## The feedback loop that actually works

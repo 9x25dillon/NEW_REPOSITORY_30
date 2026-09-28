@@ -240,8 +240,10 @@ export function crossPhase(run:Run,trim:number,dt:number):void {
  *  runs while the hand is a mesh, and only over taps within reach — never an
  *  entity-by-structure product over the whole channel. */
 function drinkTaps(run:Run,s:Resonance,live:Map<number,{x:number;y:number;layer:number}>):void {
+  // Reach is to the NEAREST tap cell: a diagonal is long, and its middle sits
+  // a pitch and a half from where you stood to build it.
   const open=s.constructs.filter(c=>c.kind==='tap'&&c.layer===run.layer&&c.energy<CONSTRUCT_MAX
-    &&Math.hypot(c.x-run.you.x,c.y-run.you.y)<=FORGE_REACH);
+    &&c.ids.some(id=>{const h=live.get(id);return !!h&&Math.hypot(h.x-run.you.x,h.y-run.you.y)<=FORGE_REACH;}));
   if(!open.length)return;
   const cells=open.flatMap(c=>c.ids.map(id=>({c,h:live.get(id)!})));
   const reach=FORGE_REACH+TAP_CATCH*4;

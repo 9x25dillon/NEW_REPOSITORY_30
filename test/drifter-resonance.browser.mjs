@@ -58,6 +58,45 @@ try {
   await page.screenshot({path:path.join(out,'expedition.png'),fullPage:true});
   await page.evaluate(()=>{window.resonanceTestPad.tap(10);window.drifter.draw();});
   await page.screenshot({path:path.join(out,'forge.png'),fullPage:true});
+  // QUADRATURE: walk onto the metal, trim with the right stick, build a tap
+  // through the real pad path, and look at the mesh and the sigil.
+  const quad=await page.evaluate(()=>{
+    const g=window.drifter,r=g.run,{gp,tap}=window.resonanceTestPad,checks=[];
+    const check=(ok,msg)=>{if(!ok)throw Error(msg);checks.push(msg);};
+    const frame=(n=1,dt=1/60)=>{for(let i=0;i<n;i++)g.update(dt);};
+    if(g.forgeOpen)tap(10);
+    r.entities=[];g.card=null;g.queued=[];
+    frame(2);check(Math.abs(Math.cos(r.resonance.native))<.25,'the opening pool is near quadrature');
+    r.bounds={x:0,y:0,w:4200e-6,h:3000e-6};
+    r.you.x=2100e-6;r.you.y=450e-6;r.throne.x=3300e-6;r.throne.y=2400e-6;
+    for(const c of r.resonance.constructs)c.energy=40;
+    frame(3);check(Math.abs(Math.cos(r.resonance.native))>=.5,'the north band is metal: the glass writes a mesh');
+    check(Math.abs(Math.cos(r.wave.cross))>=.5,'with no trim the hand runs at the native cross-phase');
+    const bank0=r.resonance.constructs.reduce((v,c)=>v+c.energy,0);
+    gp.axes=[0,0,1,0];frame(40);
+    check(r.resonance.trim>1.5,'right stick trims the Y pair through the real pad path');
+    check(r.resonance.constructs.reduce((v,c)=>v+c.energy,0)<bank0,'holding a trim spends banked charge');
+    gp.axes=[0,0,0,0];frame(60);check(r.resonance.trim===0,'released, the shifter slews back to the glass');
+    r.resonance.fragments=10;
+    tap(10);check(g.forgeOpen,'forge reopens');
+    for(let i=0;i<3;i++)tap(15);check(g.forgePick===3,'D-pad reaches the fourth blueprint');
+    const before=r.resonance.constructs.length;tap(2);
+    check(r.resonance.constructs.length===before+1&&r.resonance.constructs.at(-1).kind==='tap','the quadrature tap assembles on a diagonal');
+    g.draw();tap(10);
+    // Assembling retunes, and a retune re-derives the pool from the crystal;
+    // this fixture opened the whole channel by hand, so it opens it again.
+    r.bounds={x:0,y:0,w:4200e-6,h:3000e-6};r.you.x=2100e-6;r.you.y=450e-6;
+    gp.buttons[7]={pressed:true,value:1};frame(30);
+    check(Math.abs(Math.cos(r.wave.cross))>=.5&&r.wave.amplitude>0,'gripping in the band holds a mesh');
+    check(g.report().includes('"tapped"')&&g.report().includes('"crossDeg"'),'report carries the cross-phase');
+    for(let i=0;i<40;i++)g.draw();
+    return checks;
+  });
+  console.log('Quadrature:',quad.length,'checks');
+  await page.screenshot({path:path.join(out,'quadrature.png'),fullPage:true});
+  await page.evaluate(()=>{const {gp}=window.resonanceTestPad;gp.axes=[0,0,.6,0];for(let i=0;i<30;i++)window.drifter.update(1/60);for(let i=0;i<5;i++)window.drifter.draw();});
+  await page.screenshot({path:path.join(out,'quadrature-trim.png'),fullPage:true});
+  await page.evaluate(()=>{const {gp}=window.resonanceTestPad;gp.axes=[0,0,0,0];gp.buttons[7]={pressed:false,value:0};window.drifter.update(1/60);});
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.drifter.draw());
   await page.screenshot({path:path.join(out,'mobile.png'),fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);

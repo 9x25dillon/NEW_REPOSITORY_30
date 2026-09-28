@@ -407,6 +407,24 @@ export function wellDepth(w: Wave, x: number, y: number, p: Particle): number {
 }
 
 /**
+ * Which diagonal a node-seeker's node is soft along: +1 for (1, -1), -1 for
+ * (1, 1), in the direction of increasing x and y. Zero at quadrature.
+ *
+ * Near a node cos t ~ -sin(t0) d, so the cross term goes as
+ * f1 c sin(tx0) sin(ty0) dx dy, and it is lowest where that product is
+ * negative. Adjacent nodes along an axis differ in the sign of one sine, so
+ * the soft diagonals alternate and join into the diamond mesh. The surface
+ * draws it from here, so what is drawn is what the tests measured.
+ */
+export function softDiagonal(w: Wave, x: number, y: number, p: Particle): number {
+  const c = crossCoupling(w);
+  if (c === 0) return 0;
+  const sx = axisX(w), sy = axisY(w);
+  const v = f1(p, w.medium) * c * Math.sin(sx.k * x + sx.phase) * Math.sin(sy.k * y + sy.phase);
+  return v >= 0 ? 1 : -1;
+}
+
+/**
  * Whether the deep half of the checkerboard lies under a cos tx cos ty = +1
  * site, for this body. The pilot asks it to decide `aimAt`'s flip.
  */

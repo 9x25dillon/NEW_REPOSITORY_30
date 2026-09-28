@@ -9,10 +9,22 @@
 // force — the beeps are at a few hundred hertz and the field is at ten
 // megahertz. They are four orders of magnitude apart and unrelated, which is
 // exactly the distinction test/boundary.test.ts exists to keep.
+//
+// ONE EXCEPTION, AND IT CARRIES ONE NUMBER. The quadrature drone is the X pair
+// in your left ear and the Y pair in your right, at the same low pitch, with the
+// right delayed by exactly the cross-phase the field is running at. The pitch is
+// a stand-in — nobody hears ten megahertz — but the relation between the ears is
+// the true one: at quadrature the image is wide and turning, in step it folds
+// into the middle of your head, and in anti-phase it goes hollow, because two
+// speakers in anti-phase cancel. It is handed a phase and a level, nothing else.
+
+/** The drone's two voices, Hz: a low G and the G two octaves over it. */
+const DRONE = [98, 392] as const;
 
 export class Sfx {
   private ac: AudioContext | null = null;
   muted = false;
+  private drone: { level: GainNode; delays: DelayNode[] } | null = null;
 
   /** Must be called from inside a user gesture or the context stays suspended. */
   unlock(): void {
@@ -167,4 +179,58 @@ export class Sfx {
   spent(): void { this.tone(300, 0.5, "sawtooth", 0.05, 55); this.noise(0.3, 0.035); }
 
   lesson(): void { this.tone(660, 0.08, "sine", 0.028); }
+
+  /** A tap drinking a motif: a small glass ping, a fifth over the drone. */
+  tap(): void {
+    this.tone(1175, 0.12, "sine", 0.018, undefined, 0);
+    this.tone(1760, 0.18, "sine", 0.01, undefined, 0.03);
+  }
+
+  /** Your lattice locking to the coherence phase: the drone's own G, rising
+   *  through its fifth to the octave, soft enough to hear under a fight. */
+  lock(): void {
+    this.tone(392, 0.35, "sine", 0.026, undefined, 0);
+    this.tone(587, 0.4, "sine", 0.022, undefined, 0.09);
+    this.tone(784, 0.6, "triangle", 0.016, undefined, 0.18);
+  }
+
+  /**
+   * The two pairs, one per ear, `cross` radians apart, at `level` 0..1.
+   * Called every frame; built the first time it is asked for with a level.
+   */
+  quadrature(cross: number, level: number): void {
+    const ac = this.ac;
+    if (!ac) return;
+    if (!this.drone) {
+      if (level <= 0) return;
+      const merge = ac.createChannelMerger(2);
+      const out = ac.createGain();
+      out.gain.value = 0;
+      merge.connect(out); out.connect(ac.destination);
+      const delays: DelayNode[] = [];
+      for (const f of DRONE) {
+        const o = ac.createOscillator();
+        o.type = "sine";
+        o.frequency.value = f;
+        const left = ac.createGain(), right = ac.createGain();
+        left.gain.value = right.gain.value = f === DRONE[0] ? 1 : 0.22;
+        const d = ac.createDelay(1);
+        o.connect(left); left.connect(merge, 0, 0);
+        o.connect(d); d.connect(right); right.connect(merge, 0, 1);
+        o.start();
+        delays.push(d);
+      }
+      this.drone = { level: out, delays };
+    }
+    const t = ac.currentTime;
+    const on = this.muted ? 0 : Math.max(0, Math.min(1, level));
+    this.drone.level.gain.setTargetAtTime(0.03 * on, t, 0.12);
+    // A phase is a delay of phase / (2 pi f) at that frequency; wrapped into
+    // one period so a trim that walks past a full turn does not glide the long
+    // way round.
+    const phi = ((cross % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    this.drone.delays.forEach((d, i) => {
+      d.delayTime.setTargetAtTime(phi / (2 * Math.PI * DRONE[i]), t, 0.05);
+    });
+  }
 }

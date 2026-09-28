@@ -5,6 +5,15 @@ remain in git history. Preserve the standing rules in `HANDOFF.md` and the battl
 rules in `docs/BATTLE.md`. When prose and code disagree, investigate the code and
 update the stale claim rather than silently trusting either.
 
+## Added 2026-09-28: Quadrature (branch `quadrature`)
+
+The expedition's third layer: cross-phase between the X and Y pairs (`game/wave.ts`),
+metal strips that write a tartan map of it on the expedition chip (`game/plates.ts`),
+trim/lock/tap resources (`game/resonance.ts`), and the sigil, mesh and stereo
+drone on the surface. Read `docs/QUADRATURE.md` and HANDOFF rule 26 first.
+Ordinary runs are unchanged (bare glass, exact quadrature). The balance
+constants are unplayed; ask for a `drifter.report()` before tuning them.
+
 ## Read only what the task needs
 
 1. `SESSION-2026-09-27.md`: decisions, open assumptions, process review and prompt examples.
