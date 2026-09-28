@@ -18,20 +18,36 @@ This listening/model layer remains separate from the device-physics library.
 
 ## Sonic Drifter on a phone or a Fedora desktop
 
-Install `releases/sonic-drifter.apk` on Android (touch controls, or pair the
-Xbox pad) or `releases/sonic-drifter-*.noarch.rpm` on Fedora. Both are also on
-the **sonic-drifter-latest** pre-release. Runs are saved between sessions, and
-can be exported to a file and loaded back.
-[Install instructions](docs/PACKAGES.md) · [How saving works](docs/SAVES.md).
+Download from the
+[**sonic-drifter-latest** release](https://github.com/9x25dillon/NEW_REPOSITORY_30/releases/tag/sonic-drifter-latest),
+which is rebuilt whenever a push touches the game. Copies are
+also committed in `releases/`.
+
+| | File | Install |
+| --- | --- | --- |
+| Android 7.0+ | `sonic-drifter.apk` | open it and allow installs from your browser; touch controls, or pair the Xbox pad over Bluetooth |
+| Fedora / RHEL | `sonic-drifter-<version>-1.noarch.rpm` | `sudo dnf install ./sonic-drifter-*.noarch.rpm`, then run `sonic-drifter` |
+
+Runs are kept between sessions, and the title screen offers to go on with
+one. **Export run** writes the run to a file that loads back exactly, and a
+dead run loads back as its death screen, which makes a replayable bug report.
+See [install and build](docs/PACKAGES.md) and [how saving works](docs/SAVES.md).
 
 ## Sonic Drifter: Resonant Expedition
 
 [Open Sonic Drifter](app/sonic-drifter.html) and choose **Start Resonant Expedition**.
 Import Resonarium JSON to use its seed or coherence trajectory. Open the crystal
-forge with **V / L3** to rotate and assemble condensers, wards and looms. Three
-encounter stages add Faceters, Dislocators and Phasons to the survival loop.
+forge with **V / L3** to rotate and assemble condensers, wards, looms and
+quadrature taps. Three encounter stages add Faceters, Dislocators and Phasons
+to the survival loop.
 
-[Controls, recipes, progression and verification](docs/RESONANT_EXPEDITION.md).
+The expedition chip has metal strips under the channel. They shift the timing
+between the two transducer pairs, so away from quadrature your trap lattice
+opens into a diamond mesh, and the right stick (or Z / X) trims that phase
+using stored charge. Ordinary runs are unchanged.
+
+[Controls, recipes, progression and verification](docs/RESONANT_EXPEDITION.md) ·
+[Quadrature: the physics, the map and the resources](docs/QUADRATURE.md).
 
 ## Research simulation workbench
 
@@ -323,11 +339,24 @@ asymmetry is worth keeping in mind when reading the rest of this repo.
 
 ```bash
 npm install
-npm test          # 122 tests, no network, no fixtures
-npm run typecheck
+npm test          # 427 tests, no network, no fixtures
+npm run typecheck # both tsconfigs: the library without a DOM, the apps with one
 
 npm run build     # tsc emits browser ESM into app/dist
 python3 -m http.server 8099   # then open localhost:8099/app/index.html
+
+npm run drifter   # rebuild app/sonic-drifter.html, the game in one file
+bash packaging/android/build.sh   # -> releases/sonic-drifter.apk
+bash packaging/rpm/build.sh       # -> releases/sonic-drifter-*.noarch.rpm
+```
+
+The browser checks drive the real pages in Chromium. They need a Playwright
+module, passed in rather than installed as a dependency:
+
+```bash
+PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs CHROMIUM_PATH=/path/to/chrome \
+  node test/drifter-resonance.browser.mjs   # upgrades, battle, expedition, quadrature
+PLAYWRIGHT_MODULE=… CHROMIUM_PATH=… node test/drifter-phone.browser.mjs   # touch, saves, the Android bridge
 ```
 
 A static server is needed because the app is native ES modules, which browsers
@@ -470,9 +499,24 @@ under.
 | **D-pad ←/→** | step the rack | back and forward; ↑/↓ still retune the channel. |
 | **START** | stop the world | and the pause screen carries the verbs, because that is the screen you open when you cannot remember what the game lets you do. |
 
-Keyboard plays the same game: WASD, space, K, E or 1–9, C, R, Q, ESC. There is no
-restart key — beginning again lives on the screen you reach by dying, because a
-bare keypress once threw away a ten-minute run.
+Keyboard plays the same game: WASD, space, K, E or 1–9, F, C, R, Q, ESC, and
+the wheel to retune. There is no restart key — beginning again lives on the
+screen you reach by dying, because a bare keypress once threw away a ten-minute
+run.
+
+**On a phone** a stick appears wherever the left thumb lands. The pad's four
+face buttons sit in their diamond under the right thumb, with GRIP above them.
+GRIP is the one verb held while another is pressed, so a double-tap locks it
+and leaves the thumb free to burst. Every on-screen button holds the same
+virtual key the keyboard would, so it obeys the same hold-and-tap rules
+(`app/touch.ts`). The buttons hide while a real pad is reporting.
+
+**A run is kept.** It is saved when you pause, when a king dies, on entering a
+new world, when the tab goes out of view, and once a minute. On the title,
+START goes on with it; abandoning it is a held throne button, the same gesture
+as crowning, because it cannot be undone. A restored run has exactly the
+future the original had: the random stream is part of what is saved, and the
+tests fork a lived-in run to prove it ([SAVES.md](docs/SAVES.md)).
 
 There is no invert button any more, and its absence is the mechanic. Both
 lattices are rigidly a quarter wavelength apart and the trap re-centres on you
@@ -1014,14 +1058,23 @@ src/bands.ts         1-D stacks exactly, 2-D crystals over the zone torus
 src/inversion.ts     measured tracks -> contrast factor -> density and kappa
 src/provenance.ts    measured / derived / assumed, and the weakest-link rule
 src/sohncke.ts       the 65 chiral space groups and their systematic absences
+src/mie.ts           finite-size radiation force on a lossless fluid sphere
+src/streaming.ts     outer Rayleigh streaming between parallel plates
+src/modelValidity.ts the Gor'kov size screen, a criterion rather than an error bound
+src/pipeline.ts      a versioned, serialisable assembly of the 1-D models
+src/validation.ts    runtime guards at every public solver and JSON boundary
 app/index.html       the bench: substrates, device, measure
+app/simulation.html  the research workbench over src/pipeline.ts
 app/listen.html      the chord: a separate page, sharing no code with the bench
-game/wave.ts         the field: crossed standing waves, apodisation, stamina
+app/resonarium/      the Resonarium: natal anchoring and the photometabolic model
+game/wave.ts         the field: crossed standing waves, apodisation, stamina, cross-phase
 game/pilot.ts        you, as a body the field moves: steering, grip, the burst
 game/lattice.ts      the eleven cells a chiral world permits, and why not a twelfth
-game/beasts.ts       eight creatures with physical contrast and telegraphed behaviours
+game/beasts.ts       eleven species with physical contrast and telegraphed behaviours
 game/combat.ts       the riposte, thrown arms, and each king form's telegraphed gambit
 game/allies.ts       companions as bodies in the water, and their calls
+game/ecology.ts      bonding with a king, companions, and what limb tips are for
+game/organelles.ts   mitochondria: stored energy for stamina, and mending in a lull
 game/evolution.ts    the trait cards dealt at every birth
 game/shape.ts        what a point group looks like from directly above it
 game/world.ts        worlds, sovereigns, and what is born out of a body
@@ -1030,17 +1083,26 @@ game/body.ts         the lattice, what is joined to what, and its space group
 game/depth.ts        the channel's harmonics, and the planes they put in the water
 game/streams.ts      laminar co-flow: the channel carries three waters, not one
 game/chip.ts         what is etched into the glass, and the streaming off it
+game/thermal.ts      the water's temperature, and what your own drive does to it
+game/plates.ts       the metal on the expedition chip, and the cross-phase it writes
+game/resonance.ts    the Resonarium boundary: seed, coherence, stages, the forge
+game/save.ts         a run written down, so that it has the same future read back
 game/run.ts          the aeon: settle, crown, reign, birth
 app/drifter.ts       SONIC DRIFTER: the game surface, canvas and rendering
 app/pad.ts           the controller, and the keyboard standing in for one
+app/touch.ts         two thumbs, for a phone: the stick and the pad's buttons
+app/persist.ts       where a run is kept between visits, and the file it exports to
 app/sfx.ts           procedural UI sound, after TAPBLADE; no assets
 app/sonic-drifter.html   the game, bundled into one file with no network at all
+packaging/android/   the APK: one Activity, one WebView, built without Gradle
+packaging/rpm/       the noarch RPM: the page, a launcher, a menu entry, an icon
+releases/            the built APK and RPM, also published as sonic-drifter-latest
 personal/tonal.ts    the chart as a chord: 110 Hz * 2^(lambda/180), audible
 personal/torus.ts    the natal 4D torus, Clifford projection, plane-pair turns
 personal/transits.ts a year of upcoming events, pasted in; no ephemeris here
 personal/quasicrystal.ts  Z^5 cut and projected: three edge lengths, powers of phi
 config/subject.ts    the one subject — natal record and biological parameters
-test/                274 tests: what the modules above are actually claiming
+test/                427 tests, plus browser checks: what the modules above are actually claiming
 ```
 
 `src/` never reads `config/` or `personal/`, and `personal/` never reads `src/`.
