@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sonic Drifter as an Android app: one Activity holding a WebView that loads the
+  same single-file game the desktop plays (app/sonic-drifter.html), from the
+  APK's own assets. No INTERNET permission: the game needs no network, and the
+  font it asks Google for simply falls back to the system monospace.
+
+  versionCode, versionName, minSdk and targetSdk are set by build.sh at link time.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="app.sonicdrifter">
+
+    <!-- A short buzz under the thumb when an on-screen button is pressed. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:label="Sonic Drifter"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="true"
+        android:hardwareAccelerated="true"
+        android:isGame="true"
+        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+
+        <!--
+          configChanges lists keyboard and navigation because PAIRING A
+          CONTROLLER IS A CONFIGURATION CHANGE: without them, turning on the
+          Xbox pad mid-run would destroy the Activity and reload the page.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -58,6 +58,7 @@ import { YOU } from "../game/pilot.js";
 import { contrastFactor } from "../src/gorkov.js";
 import { DASH_COOL, DASH_TIME, selfContrast } from "../game/pilot.js";
 import { GLYPH, Pad, type Intent } from "./pad.js";
+import { mountTouch } from "./touch.js";
 import { AMBIENT_C, MAX_C, viscosity } from "../game/thermal.js";
 import { Sfx } from "./sfx.js";
 import {
@@ -76,6 +77,29 @@ import {
   type Trait, TRAITS, cardCost, evolve, held, primeCards, rankOf,
 } from "../game/evolution.js";
 import { DASH_COST } from "../game/pilot.js";
+import { type SaveHeader, restore, serialise, snapshot } from "../game/save.js";
+import {
+  clearRun, describeSaveError, download, peek, readProfile, readRun, writeProfile, writeRun,
+} from "./persist.js";
+
+// ── provenance ──────────────────────────────────────────────────────────────
+
+/**
+ * Which build this is. `app/build-drifter.mjs` replaces the identifier with a
+ * hash of the bundle, so a saved run says what code wrote it and a restored run
+ * can be told apart from a replay: the same file on a different build is the
+ * same state under different rules. Anything not built that way says "dev".
+ */
+declare const __DRIFTER_BUILD__: string | undefined;
+const BUILD: string = typeof __DRIFTER_BUILD__ === "string" ? __DRIFTER_BUILD__ : "dev";
+
+/** Seconds of play between saves nobody asked for. Pausing, a birth, a new
+ *  world and the tab going out of view each save as well; this is the net
+ *  under a browser that dies without saying so. */
+const AUTOSAVE_EVERY = 60;
+/** How long the throne button is held on the title to throw a saved run away.
+ *  An act you cannot undo is a hold, as crowning is. */
+const ABANDON_HOLD = 1.5;
 
 // ── scale ───────────────────────────────────────────────────────────────────
 
@@ -454,9 +478,35 @@ export class Game {
   private forgeRotation = 0;
   private forgeMessage = "";
 
-  /** Explicit start action; never replaces an ongoing run. */
+  /**
+   * The run waiting in storage, read on the title screen.
+   *
+   * A saved run is a run IN PROGRESS, so everything that refuses to replace an
+   * ongoing run refuses to replace this one too: the title goes on with it,
+   * and beginning again means holding the throne button to abandon it first.
+   */
+  private saved: SaveHeader | null = null;
+  /** A run is stored and cannot be read, and why. It is not deleted for you. */
+  private savedError = "";
+  /** Seconds of unpaused play since the last save. */
+  private sinceSave = 0;
+  /** Surface time of the last save that landed, or -1. For the pause screen,
+   *  and so a second save in the same frame — `visibilitychange` and
+   *  `pagehide` both fire on the way out, with no frame between — is skipped. */
+  private lastSave = -1;
+  /** Why the last save did not land, said on the pause screen and in reports. */
+  private saveTrouble = "";
+  private abandonHeld = 0;
+  /** Put the camera straight onto you on the next frame, rather than sliding
+   *  there from wherever the attract loop left it. */
+  private snapCam = false;
+  /** Whether the page was last laid out for a run in progress. */
+  private wasPlaying = false;
+
+  /** Explicit start action; never replaces an ongoing run — a saved one included. */
   startExpedition(source: ResonanceSource): boolean {
     if (this.screen !== "title" && this.screen !== "dead") return false;
+    if (this.screen === "title" && this.hasSaved()) return false;
     seed32(source.seed);
     this.expeditionSource = source;
     this.begin();
@@ -566,6 +616,188 @@ export class Game {
     this.bindInput();
     this.fit();
     window.addEventListener("resize", () => this.fit());
+
+    const profile = readProfile();
+    this.best = profile.best;
+    this.deepest = profile.deepest;
+    this.peekSaved();
+  }
+
+  /** The names to print for each verb: the pad's if one is reporting, the
+   *  on-screen buttons' if a finger has used them, otherwise the keyboard's. */
+  private glyph(): typeof GLYPH.pad | typeof GLYPH.keys | typeof GLYPH.touch {
+    return this.pad.connected ? GLYPH.pad : this.pad.touched ? GLYPH.touch : GLYPH.keys;
+  }
+
+  /** The on-screen controls, and the Android back button, go through here. */
+  get input(): Pad { return this.pad; }
+
+  /**
+   * The system back gesture. Pauses a run (or closes the forge) and says it
+   * was handled; anywhere else it is not, and the host may close the app.
+   */
+  back(): boolean {
+    if (this.screen !== "play") return false;
+    if (this.forgeOpen) { this.toggleForge(); return true; }
+    this.paused = !this.paused;
+    this.sfx.tick();
+    if (this.paused) this.save();
+    return true;
+  }
+
+  // ── keeping the run ───────────────────────────────────────────────────────
+
+  /** Whether the title has a run to go on with (or an unreadable one in the way). */
+  hasSaved(): boolean { return this.saved !== null || this.savedError !== ""; }
+
+  /** Read what is stored, without restoring it. */
+  private peekSaved(): void {
+    const text = readRun();
+    this.saved = null;
+    this.savedError = "";
+    if (!text) return;
+    const p = peek(text);
+    if ("header" in p) this.saved = p.header;
+    else this.savedError = p.error;
+  }
+
+  /** What the surface wants back with the run: the account the report is
+   *  built from, and which lessons have already been said. */
+  private surfaceState(): unknown {
+    return {
+      tally: this.tally, seen: [...this.seen], selected: this.selected, nudged: this.nudged,
+      taughtMesh: this.taughtMesh, taughtBank: this.taughtBank,
+    };
+  }
+
+  /**
+   * Write the run down, if there is one worth writing.
+   *
+   * Only a run being PLAYED — the title's attract loop is not anybody's run,
+   * and a dead one is over. Never throws: a save that fails says why on the
+   * pause screen and in the report, and the run on screen carries on.
+   */
+  save(): boolean {
+    if (this.screen !== "play" && this.screen !== "birth") return false;
+    const run = this.run;
+    if (run.phase === "dead") return false;
+    if (this.t === this.lastSave && this.saveTrouble === "") return true;
+    let text: string;
+    try {
+      text = serialise(snapshot(run, { build: BUILD, savedAt: new Date().toISOString() }, this.surfaceState()));
+    } catch (err) {
+      this.saveTrouble = describeSaveError(err);
+      console.error("sonic drifter: the run could not be written down", err);
+      return false;
+    }
+    const trouble = writeRun(text);
+    this.saveTrouble = trouble ?? "";
+    if (trouble) return false;
+    this.sinceSave = 0;
+    this.lastSave = this.t;
+    return true;
+  }
+
+  /** Go on with the stored run. */
+  private continueSaved(): void {
+    const text = readRun();
+    if (!text) { this.peekSaved(); return; }
+    try {
+      const r = restore(text);
+      this.adopt(r.run, r.surface, r.header);
+    } catch (err) {
+      this.saved = null;
+      this.savedError = describeSaveError(err);
+      this.sfx.hurt();
+    }
+  }
+
+  /** Throw the stored run away, on purpose, and begin again. */
+  private abandon(): void {
+    clearRun();
+    this.saved = null;
+    this.savedError = "";
+    this.abandonHeld = 0;
+    this.begin();
+  }
+
+  /** Make a restored run the one on screen, stopped, so nothing hunts you
+   *  while you find the controller again. */
+  private adopt(run: Run, surface: unknown, header: SaveHeader): void {
+    this.freshSurface();
+    this.run = run;
+    this.expeditionSource = run.resonance ? run.resonance.source : null;
+    const s = (surface ?? {}) as Record<string, unknown>;
+    if (s.tally && typeof s.tally === "object") {
+      for (const [k, v] of Object.entries(s.tally as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v)) this.tally[k] = v;
+      }
+    }
+    if (Array.isArray(s.seen)) for (const id of s.seen) if (typeof id === "string") this.seen.add(id);
+    if (typeof s.selected === "number") this.selected = s.selected;
+    this.nudged = s.nudged === true;
+    this.taughtMesh = s.taughtMesh === true;
+    this.taughtBank = s.taughtBank === true;
+    // A dead run comes back as its death screen: the post-mortem, with its
+    // report and diagnosis, which is what an exported dead run is for.
+    this.screen = run.phase === "birth" ? "birth" : run.phase === "dead" ? "dead" : "play";
+    this.paused = this.screen === "play";
+    this.snapCam = true;
+    this.saved = null;
+    this.savedError = "";
+    this.lastSave = this.t;
+    const where = `AEON ${header.aeon}  ·  ${header.name}`;
+    this.say(header.build === BUILD ? `PICKED UP WHERE YOU LEFT IT  ·  ${where}`
+      : `PICKED UP  ·  ${where}  ·  WRITTEN BY ANOTHER BUILD, PLAYING BY THIS ONE'S RULES`);
+  }
+
+  /**
+   * The run as a file. From the title, the stored one; otherwise this one —
+   * including a dead one, because a post-mortem that loads back is worth more
+   * to whoever reads a bug report than any description of it.
+   */
+  exportRun(): string {
+    let text: string | null;
+    if (this.screen === "play" || this.screen === "birth" || this.screen === "dead") {
+      try {
+        text = serialise(snapshot(this.run, { build: BUILD, savedAt: new Date().toISOString() },
+          this.surfaceState()));
+      } catch (err) {
+        return `THE RUN COULD NOT BE WRITTEN: ${describeSaveError(err)}`;
+      }
+    } else {
+      text = readRun();
+    }
+    if (!text) return "NO RUN TO EXPORT";
+    const h = peek(text);
+    const tag = "header" in h
+      ? `aeon${h.header.aeon}-${Math.floor(h.header.t / 60)}m${Math.floor(h.header.t % 60)}s` : "run";
+    return download(`sonic-drifter-${tag}.json`, text);
+  }
+
+  /**
+   * A run from a file. Only from the title or the death screen, and never over
+   * a stored run — the same rule as starting an expedition.
+   */
+  importRun(text: string): string {
+    if (this.screen !== "title" && this.screen !== "dead") return "FINISH OR PAUSE-EXPORT THE RUN IN PROGRESS FIRST";
+    if (this.screen === "title" && this.hasSaved()) {
+      return "A SAVED RUN IS ALREADY WAITING. GO ON WITH IT, OR HOLD THE THRONE BUTTON ON THE TITLE TO ABANDON IT";
+    }
+    let r: ReturnType<typeof restore>;
+    try { r = restore(text); } catch (err) { return describeSaveError(err); }
+    if (r.run.phase === "dead") {
+      this.adopt(r.run, r.surface, r.header);
+      return `A POST-MORTEM: AEON ${r.header.aeon}, NOT KEPT. drifter.report() READS IT`;
+    }
+    const trouble = writeRun(text);
+    this.adopt(r.run, r.surface, r.header);
+    return trouble ? `LOADED, BUT IT WILL NOT SURVIVE A RELOAD: ${trouble}` : `LOADED AEON ${r.header.aeon}`;
+  }
+
+  /** What a run's end changes in storage: it is over, and the records stand. */
+  private settleProfile(): void {
+    writeProfile({ best: this.best, deepest: this.deepest });
   }
 
   // ── input ─────────────────────────────────────────────────────────────────
@@ -605,6 +837,10 @@ export class Game {
       e.preventDefault();
       wake();
       this.canvas.focus();
+      if (this.screen === "title" && this.hasSaved()) {
+        if (this.saved) this.continueSaved();
+        return;
+      }
       if (this.screen === "title" || this.screen === "dead") { this.begin(); return; }
       if (this.screen === "birth") {
         const { sx, sy } = world(e);
@@ -697,6 +933,20 @@ export class Game {
       // Reachable from the pad as well as the keyboard, now that a controller
       // actually works: cycle is the spare verb on a menu.
       if (this.pad.tapped("KeyE") || it.cycle !== 0) { this.ebb = !this.ebb; return; }
+      // A SAVED RUN IS A RUN IN PROGRESS. Confirming goes on with it, and the
+      // only way past it is a hold — the gesture this game keeps for acts it
+      // cannot take back. A bare keypress once threw away a ten-minute run; a
+      // reload was about to be able to throw away a fifty-minute one.
+      if (this.screen === "title" && this.hasSaved()) {
+        if (it.crownDown) {
+          this.abandonHeld += dt;
+          if (this.abandonHeld >= ABANDON_HOLD) { this.sfx.unlock(); this.abandon(); }
+        } else {
+          this.abandonHeld = 0;
+        }
+        if (it.confirm && this.saved) { this.sfx.unlock(); this.continueSaved(); }
+        return;
+      }
       if (it.confirm) { this.sfx.unlock(); this.begin(); }
       return;
     }
@@ -731,7 +981,7 @@ export class Game {
         // in the rack: Start takes the free one and enters, so a player who
         // does not already know about buying never meets it.
         if (!this.nudged && run.evolution.offer.length > 0 && run.cells.length >= cardCost(run)) {
-          const keys = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+          const keys = this.glyph();
           this.nudged = true;
           this.say(`ANOTHER CARD IS ${cardCost(run)} CELLS  ·  ${keys.place} TAKES IT  ·  `
             + `${keys.confirm} AGAIN TO ENTER`);
@@ -866,25 +1116,38 @@ export class Game {
   /** Whether the water ebbs back as you spend your crystal. See `Run.ebb`. */
   private ebb = false;
 
-  private begin(): void {
+  /** Everything on the surface that belongs to one run, cleared — for a new
+   *  run and for a restored one alike. */
+  private freshSurface(): void {
     this.paused = false;
     this.buildHeld = this.crownHeld = 0;
     this.organelleGrown = this.crowned = this.lured = false;
     this.liftHeld = 0;
+    this.abandonHeld = 0;
     this.pick = 0;
+    this.selected = 0;
+    this.nudged = false;
     this.tally = {};
-    this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
-    this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
     this.forgeOpen = false; this.forgePick = 0; this.forgeRotation = 0; this.forgeMessage = "";
     this.taughtMesh = this.taughtBank = this.wasLocked = false;
+    this.verdict = null;
+    this.sinceSave = 0;
+    this.saveTrouble = "";
+    this.youTrail = [];
+    this.sparks = []; this.popups = []; this.rings = [];
+  }
+
+  private begin(): void {
+    this.freshSurface();
+    this.seed = (this.seed * 1664525 + 1013904223) >>> 0;
+    this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
     if (this.expeditionSource) {
       this.run.resonance = newResonance(this.expeditionSource);
       // An explicit expedition starter kit; normal runs retain their original economy.
       this.run.cells = [...Array.from({length:6},()=>cellFor("2")), ...Array.from({length:4},()=>cellFor("4"))];
     }
-    this.verdict = null;
     this.screen = "play";
-    this.sparks = []; this.popups = []; this.rings = [];
+    this.snapCam = true;
     this.say(this.run.resonance ? "RESONANT EXPEDITION · V / L3 OPENS THE CRYSTAL FORGE" : "GATHER FOUR OF A KIND TO MAKE A CELL");
   }
 
@@ -899,7 +1162,7 @@ export class Game {
 
   private doCall(): void {
     const run = this.run;
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     const r = callAlly(run);
     const c = companion(run);
     if (r === "no-companion") {
@@ -933,11 +1196,12 @@ export class Game {
     enterWorld(run);
     this.screen = "play";
     this.pick = 0;
+    this.save();
   }
 
   private doCrown(): void {
     const r = crown(this.run);
-    if (r === "nothing-fed") this.say(`FEED THE THRONE FIRST - TAP ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT`);
+    if (r === "nothing-fed") this.say(`FEED THE THRONE FIRST - TAP ${(this.glyph()).crown} NEAR IT`);
   }
 
   // ── loop ──────────────────────────────────────────────────────────────────
@@ -990,8 +1254,10 @@ export class Game {
     if (it.pause && this.screen === "play") {
       this.paused = !this.paused;
       this.sfx.tick();
+      // Stopping is the moment somebody might walk away, so it is kept then.
+      if (this.paused) this.save();
     }
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     const legend = `${G.move} move · ${G.grip} grip · ${G.dash} dash / catch · ${G.place} build / hold: mitochondrion`
       + ` · ${G.lift} lift / hold: lure · ${G.crown} feed / crown / tame · ${G.call} call ally · ${G.pause} pause` + (run.resonance ? " · V / L3 forge · R-stick / Z X trim cross-phase" : "");
     if (legend !== this.controlLegend) {
@@ -1008,6 +1274,9 @@ export class Game {
     }
 
     this.act(it, dt);
+    // A run picked up from storage opens stopped — including the frame it was
+    // picked up on, or the press that continued it would also steer it.
+    if (this.paused) return;
 
     if (this.screen === "title") {
       // The attract loop plays itself, badly and on purpose: it drives in a
@@ -1051,10 +1320,22 @@ export class Game {
       this.nudged = false;
       this.best = Math.max(this.best, run.score);
       this.deepest = Math.max(this.deepest, run.world.aeon);
+      this.settleProfile();
+      this.save();
     }
     if (run.phase === "dead" && this.screen !== "dead") {
       this.screen = "dead";
       this.best = Math.max(this.best, run.score);
+      this.settleProfile();
+      // IT IS OVER, and a save of it would only bring back a death. The report
+      // and the death screen are what is left of it, as they always were.
+      clearRun();
+    }
+    if (this.screen === "play" && run.phase !== "dead") {
+      this.sinceSave += dt;
+      // The clock restarts whether or not the save lands: a browser refusing
+      // storage must cost one attempt a minute, not one a frame.
+      if (this.sinceSave >= AUTOSAVE_EVERY) { this.sinceSave = 0; this.save(); }
     }
     // The first time something that shares your sign is drawn onto your feet,
     // say why — it is the rule the whole bestiary runs on.
@@ -1140,7 +1421,7 @@ export class Game {
           this.burst(ev.x, ev.y, 30, "255,201,74");
           this.ring(ev.x, ev.y, 8, 84, 0.7, "255,201,74");
           this.popups.push({ x: ev.x, y: ev.y, text: ev.group, life: 1.6, colour: GOLD, big: true });
-          this.sfx.capture(3); this.say(`${ev.group}  ·  ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).place} TO PLACE IT`);
+          this.sfx.capture(3); this.say(`${ev.group}  ·  ${(this.glyph()).place} TO PLACE IT`);
           this.teach("crystal");
           break;
         case "place":
@@ -1273,7 +1554,7 @@ export class Game {
           this.hitstop = Math.max(this.hitstop, 0.07);
           this.ring(ev.x, ev.y, 10, 190, 0.9, JADE);
           this.burst(ev.x, ev.y, 18, JADE);
-          this.say(`IT FALTERS  ·  HOLD ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT TO BOND`);
+          this.say(`IT FALTERS  ·  HOLD ${(this.glyph()).crown} NEAR IT TO BOND`);
           break;
         case "gambit": {
           this.sfx.gambit(ev.gambit);
@@ -1456,6 +1737,15 @@ export class Game {
   // ── draw ──────────────────────────────────────────────────────────────────
 
   private draw(): void {
+    // IN A RUN, THE PAGE CHROME CAN GO. A phone in landscape is short of
+    // height, and the header's buttons are for the title and death screens;
+    // app/touch.ts hides it on touch devices while this class is set.
+    const inRun = this.screen === "play";
+    if (inRun !== this.wasPlaying) {
+      this.wasPlaying = inRun;
+      document.body.classList.toggle("playing", inRun);
+      this.fit();
+    }
     const g = this.ctx;
     g.fillStyle = "#05070e";
     g.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -1469,6 +1759,11 @@ export class Game {
       y: px(b.h) <= VIEW_H ? px(b.y) + (px(b.h) - VIEW_H) / 2
         : Math.max(px(b.y), Math.min(px(b.y + b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2)),
     };
+    if (this.snapCam) {
+      this.cam.x = want.x;
+      this.cam.y = want.y;
+      this.snapCam = false;
+    }
     this.cam.x += (want.x - this.cam.x) * 0.12;
     this.cam.y += (want.y - this.cam.y) * 0.12;
 
@@ -2310,7 +2605,7 @@ export class Game {
 
   private drawJourney(): void {
     const run = this.run, g = this.ctx;
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     const c = companion(run);
     const x = VIEW_W - 286, y = 122;
     const tall = c ? 96 : 76;
@@ -3078,7 +3373,7 @@ export class Game {
     const form = formFor(this.run.world.aeon);
     const rgb = warmth(contrastFactor(p, waterAt(this.run, k.y)));
     this.creature(x, y, r * 1.8, form, rgb, k.spin, 0.65);
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     g.font = `700 10px ${MONO}`;
     g.fillStyle = INK;
     g.textAlign = "center";
@@ -3903,7 +4198,7 @@ export class Game {
     g.textAlign = "center";
     g.fillStyle = FAINT;
     g.font = `600 9px ${MONO}`;
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     // What to do next, and never more than one thing.
     // NOT the spacing advice — that has its own panel, and while it lived here
     // too it crowded out every other thing a player might do next. One report
@@ -4195,7 +4490,7 @@ export class Game {
     const g = this.ctx;
     const run = this.run;
     const offer = run.evolution.offer;
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     g.textAlign = "center";
     g.font = `700 10px ${MONO}`;
     g.fillStyle = `rgb(${JADE})`;
@@ -4344,7 +4639,7 @@ export class Game {
   private drawPaused(): void {
     const g = this.ctx;
     const run = this.run;
-    const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
 
     g.fillStyle = "rgba(5,7,14,0.82)";
     g.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -4353,6 +4648,15 @@ export class Game {
     g.font = `700 34px ${MONO}`;
     g.fillStyle = INK;
     g.fillText("STOPPED", VIEW_W / 2, 118);
+    // WHETHER CLOSING THE TAB NOW COSTS ANYTHING, which is the question this
+    // screen is opened with half the time.
+    g.font = `600 9px ${MONO}`;
+    g.fillStyle = this.saveTrouble ? RED : FAINT;
+    g.fillText(this.saveTrouble
+      ? `NOT SAVED: ${this.saveTrouble}`
+      : this.lastSave >= 0
+        ? `SAVED ${Math.max(0, this.t - this.lastSave).toFixed(0)} S AGO  ·  RELOADING THE PAGE GOES ON FROM HERE`
+        : "NOT SAVED YET", VIEW_W / 2, 104);
     const ally = companion(run);
     if (ally) {
       g.font = `600 10px ${MONO}`;
@@ -4676,6 +4980,9 @@ export class Game {
       })()}`,
       `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
       `pad: ${this.pad.describe()}`,
+      `save: build ${BUILD}; ${this.saveTrouble ? `NOT SAVED - ${this.saveTrouble}`
+        : this.lastSave >= 0 ? `kept ${Math.max(0, this.t - this.lastSave).toFixed(0)}s ago` : "not kept yet"}`
+        + `; drifter.exportRun() writes this run to a file that loads it back exactly`,
       `diagnosis: ${this.diagnosis()}`,
     ].join("\n");
   }
@@ -4702,18 +5009,19 @@ export class Game {
     g.fillText("WHOSE BAND GAP CATCHES IT, AND IT GOES WITH YOU.", VIEW_W / 2, 220);
 
     const on = this.pad.connected;
-    const G = on ? GLYPH.pad : GLYPH.keys;
+    const G = this.glyph();
     g.fillStyle = DIM;
     g.font = `600 11px ${MONO}`;
     const pad = (t: string) => t.padEnd(13, " ");
     const lines = [
-      `${pad(G.move)}POINT WHERE TO GO - OR WASD. THE NODE LEADS YOU AND YOU FALL IN.`,
+      `${pad(G.move)}${this.pad.touched && !on ? "PUSH WHERE TO GO." : "POINT WHERE TO GO - OR WASD."}`
+        + " THE NODE LEADS YOU AND YOU FALL IN.",
       `${pad(G.grip)}CLOSE YOUR HAND: ONE TRAP, AND SPEED. IT COSTS STAMINA.`,
       `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
       `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
       `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
       "",
-      `${pad(on ? `E / ${G.cycle}` : "E")}${this.ebb
+      `${pad(on ? `E / ${G.cycle}` : this.pad.touched ? G.cycle : "E")}${this.ebb
         ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER."
         : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
       "",
@@ -4725,9 +5033,13 @@ export class Game {
     lines.forEach((l, i) => g.fillText(l, VIEW_W / 2, 246 + i * 16));
 
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
-    g.font = `700 14px ${MONO}`;
-    g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
-    g.fillText(on ? "PRESS START" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
+    if (this.hasSaved()) this.drawSaved(G.confirm, G.crown, pulse);
+    else {
+      g.font = `700 14px ${MONO}`;
+      g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+      g.fillText(on ? "PRESS START" : this.pad.touched ? "TAP THE WATER TO BEGIN"
+        : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
+    }
     // What the browser is actually reporting, said loudly. A controller that
     // does not work is the least debuggable thing there is — nothing throws and
     // nothing logs — and this line was previously eight-point grey where nobody
@@ -4738,12 +5050,54 @@ export class Game {
     if (this.best > 0) {
       g.fillStyle = DIM;
       g.font = `600 10px ${MONO}`;
-      g.fillText(`BEST ${this.best}   ·   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 492);
+      g.fillText(`BEST ${this.best}   ·   DEEPEST AEON ${this.deepest}`, VIEW_W / 2,
+        this.hasSaved() ? 522 : 492);
     }
     g.font = `600 9px ${MONO}`;
     g.fillStyle = FAINT;
     g.fillText("EVERY FORCE HERE IS THE GOR'KOV RADIATION POTENTIAL, COMPUTED LIVE",
       VIEW_W / 2, VIEW_H - 26);
+    g.textAlign = "left";
+  }
+
+  /**
+   * The run that is waiting, in place of "PRESS START".
+   *
+   * What it is — the aeon, the water, how long, the score — because a player
+   * coming back after a day should know which run they are about to go on
+   * with. And the way past it, with the hold drawn filling, because a hold
+   * nobody can see progressing reads as a button that does not work.
+   */
+  private drawSaved(confirm: string, crown: string, pulse: number): void {
+    const g = this.ctx;
+    const h = this.saved;
+    g.textAlign = "center";
+    if (h) {
+      const mins = Math.floor(h.t / 60);
+      const secs = Math.floor(h.t % 60).toString().padStart(2, "0");
+      g.font = `700 14px ${MONO}`;
+      g.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+      g.fillText(`${confirm} TO GO ON  ·  AEON ${h.aeon}  ·  ${h.name}`, VIEW_W / 2, 462);
+      g.font = `600 10px ${MONO}`;
+      g.fillStyle = INK;
+      g.fillText(`${mins}:${secs} IN  ·  SCORE ${h.score}`
+        + `${h.expedition ? "  ·  RESONANT EXPEDITION" : ""}`
+        + `${h.phase === "reign" ? "  ·  THE KING IS AWAKE" : h.phase === "birth" ? "  ·  BETWEEN WORLDS" : ""}`
+        + `${h.build !== BUILD ? "  ·  SAVED BY ANOTHER BUILD" : ""}`,
+      VIEW_W / 2, 482);
+    } else {
+      g.font = `700 12px ${MONO}`;
+      g.fillStyle = RED;
+      wrap(g, `A SAVED RUN IS HERE AND CANNOT BE READ: ${this.savedError}`, VIEW_W / 2, 458, 760, 14, true);
+    }
+    const f = Math.min(1, this.abandonHeld / ABANDON_HOLD);
+    g.font = `600 10px ${MONO}`;
+    g.fillStyle = f > 0 ? RED : DIM;
+    g.fillText(`HOLD ${crown} TO ABANDON IT AND BEGIN AGAIN`, VIEW_W / 2, 502);
+    if (f > 0) {
+      g.fillStyle = RED;
+      g.fillRect(VIEW_W / 2 - 120, 508, 240 * f, 2);
+    }
     g.textAlign = "left";
   }
 }
@@ -4876,14 +5230,38 @@ if (canvas) {
   // frames did not THROW, which is not the same as asserting that anything
   // moved — and the difference between those two was a build nobody could play.
   (window as unknown as { drifter?: Game }).drifter = game;
+  // Thumbs, on anything driven by a finger — and always inside the Android
+  // app, which announces itself with its bridge object.
+  mountTouch(game.input, "SonicDrifterAndroid" in window);
   let expedition: ResonanceSource = {seed:"20260927",trajectory:[]};
   const status=document.getElementById("expedition-status");
   document.getElementById("expedition-start")?.addEventListener("click",()=>{
     const started=game.startExpedition(expedition);
-    if(status)status.textContent=started?`Expedition seed ${expedition.seed}. V / L3 opens the forge.`:"An existing run is active. Start an expedition from the title or death screen.";
+    if(status)status.textContent=started?`Expedition seed ${expedition.seed}. V / L3 opens the forge.`
+      :game.hasSaved()?"A saved run is waiting. Go on with it, or hold the throne button on the title to abandon it first."
+      :"An existing run is active. Start an expedition from the title or death screen.";
     canvas.focus();
   });
   document.getElementById("forge-open")?.addEventListener("click",()=>{game.toggleForge();canvas.focus();});
+  // THE WAY OUT OF THE TAB. Hidden is the last moment a page is reliably
+  // allowed to run on a phone, and pagehide the last on a desktop; both save,
+  // and a second save in the same frame is skipped.
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") game.save(); });
+  window.addEventListener("pagehide", () => { game.save(); });
+  document.getElementById("run-export")?.addEventListener("click", () => {
+    if (status) status.textContent = game.exportRun();
+    canvas.focus();
+  });
+  document.getElementById("run-import")?.addEventListener("change", async (event) => {
+    const input = event.target as HTMLInputElement, file = input.files?.[0];
+    if (!file) return;
+    if (status) {
+      status.textContent = file.size > 20_000_000 ? "That file is far larger than any saved run."
+        : game.importRun(await file.text());
+    }
+    input.value = "";
+    canvas.focus();
+  });
   document.getElementById("expedition-import")?.addEventListener("change",async(event)=>{
     const input=event.target as HTMLInputElement,file=input.files?.[0];if(!file)return;
     try {

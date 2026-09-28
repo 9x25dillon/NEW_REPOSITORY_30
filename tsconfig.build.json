@@ -19,6 +19,8 @@
     "app/field.ts",
     "game",
     "app/drifter.ts",
+    "app/persist.ts",
+    "app/touch.ts",
     "app/sfx.ts",
     "test/pad.test.ts"
   ]

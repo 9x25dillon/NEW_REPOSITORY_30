@@ -89,7 +89,9 @@
     <button id="expedition-start">Start Resonant Expedition</button>
     <label>Import Resonarium JSON <input id="expedition-import" type="file" accept=".json,application/json" hidden></label>
     <button id="forge-open">Crystal forge</button>
-    <span id="expedition-status" role="status">Optional survival mode · crystal crafting · three encounter stages · V / L3 forge</span>
+    <button id="run-export" title="Download this run as a file that loads back exactly">Export run</button>
+    <label title="Go on with a run from a file (from the title or after a death)">Import run <input id="run-import" type="file" accept=".json,application/json" hidden></label>
+    <span id="expedition-status" role="status">Optional survival mode · crystal crafting · three encounter stages · V / L3 forge · runs are kept between visits</span>
   </div>
 </header>
 
@@ -991,13 +993,14 @@
   var STAMINA_DRAIN = 17;
   function rng(seed) {
     let a = seed >>> 0;
-    return () => {
+    const next = () => {
       a = a + 1831565813 >>> 0;
       let t = a;
       t = Math.imul(t ^ t >>> 15, t | 1);
       t ^= t + Math.imul(t ^ t >>> 7, t | 61);
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
+    return Object.defineProperty(next, "state", { get: () => a, enumerable: true });
   }
   var QUADRATURE = Math.PI / 2;
   function newWave(pitch, maxAmplitude, focus = 0, medium = WATER) {
@@ -4506,10 +4509,10 @@
       hint: isBeast ? beast(e.species).behaviour === "drift" ? "TOO SMALL TO HOLD" : phi > 0 ? "YOUR NODE REELS IT IN" : "HOLD IT IN AN ANTINODE" : asm && asm.group ? `${asm.group} AT ${asm.mass}/4` : asm && asm.partial ? "NEEDS AN AXIS" : "WILL NOT BIND"
     };
   }
-  function nearest(list, v) {
-    if (list.length === 0) return null;
-    let best = list[0];
-    for (const u of list) if (Math.abs(u - v) < Math.abs(best - v)) best = u;
+  function nearest(list2, v) {
+    if (list2.length === 0) return null;
+    let best = list2[0];
+    for (const u of list2) if (Math.abs(u - v) < Math.abs(best - v)) best = u;
     return best;
   }
 
@@ -4588,6 +4591,20 @@
       __publicField(this, "prevKeys", /* @__PURE__ */ new Set());
       __publicField(this, "index", -1);
       /**
+       * The on-screen stick, -1..1 per axis, set by app/touch.ts.
+       *
+       * A phone has neither a pad nor a keyboard, so the touch layer does the same
+       * thing the keyboard does: it holds virtual keys (see `press`) and offers a
+       * stick. Nothing downstream can tell them apart, which is the point — a verb
+       * reached by touch obeys every hold and tap rule a key does.
+       */
+      __publicField(this, "touchStick", { x: 0, y: 0 });
+      /** True once a finger has touched the controls. Switches the glyphs. */
+      __publicField(this, "touched", false);
+      /** Pressed by a finger since the last `read`, and let go of before it. */
+      __publicField(this, "unread", /* @__PURE__ */ new Set());
+      __publicField(this, "letGo", /* @__PURE__ */ new Set());
+      /**
        * Whether any pad input has EVER arrived.
        *
        * A browser will not update gamepad state for a page that does not have
@@ -4613,6 +4630,27 @@
         this.index = -1;
         this.connected = false;
       });
+    }
+    /** Hold a key down on behalf of an on-screen button. */
+    press(code) {
+      this.keys.add(code);
+      this.unread.add(code);
+      this.letGo.delete(code);
+      this.touched = true;
+    }
+    /**
+     * Let it go — but not before one frame has seen it. A quick tap on glass can
+     * go down and up between two frames, and a press no frame ever read is a
+     * button that did nothing. Found by the phone test: every tap on II missed.
+     */
+    release(code) {
+      if (this.unread.has(code)) this.letGo.add(code);
+      else this.keys.delete(code);
+    }
+    /** Where the on-screen stick is, as a raw vector inside the unit circle. */
+    setStick(x, y) {
+      this.touchStick = { x, y };
+      this.touched = true;
     }
     gamepad() {
       const pads = navigator.getGamepads?.() ?? [];
@@ -4652,8 +4690,8 @@
           const b = gp.buttons[i];
           return b ? b.pressed || b.value > TRIGGER : false;
         };
-        const anyDown = (list) => list.some(down);
-        const anyHit = (list) => list.some((i) => down(i) && !this.prev[i]);
+        const anyDown = (list2) => list2.some(down);
+        const anyHit = (list2) => list2.some((i) => down(i) && !this.prev[i]);
         const m = this.layout(gp);
         out.move = this.stick(gp.axes[0] ?? 0, gp.axes[1] ?? 0);
         out.grip = anyDown(m.grip);
@@ -4682,6 +4720,8 @@
       }
       const k = (code) => this.keys.has(code);
       const tap = (code) => this.keys.has(code) && !this.prevKeys.has(code);
+      const ts = this.stick(this.touchStick.x, this.touchStick.y);
+      if (ts.x !== 0 || ts.y !== 0) out.move = ts;
       let kx = 0, ky = 0;
       if (k("KeyA") || k("ArrowLeft")) kx -= 1;
       if (k("KeyD") || k("ArrowRight")) kx += 1;
@@ -4691,6 +4731,8 @@
         const r = Math.hypot(kx, ky);
         out.move = { x: kx / r, y: ky / r };
       }
+      if (tap("TouchDepthUp")) out.depth += 1;
+      if (tap("TouchDepthDown")) out.depth -= 1;
       if (k("Space") || k("ShiftLeft") || k("ShiftRight")) out.grip = true;
       if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
       if (tap("KeyE") || tap("Enter")) out.place = true;
@@ -4708,6 +4750,9 @@
       if (tap("Space") || tap("Enter")) out.confirm = true;
       if (tap("Escape") || tap("KeyP")) out.pause = true;
       this.prevKeys = new Set(this.keys);
+      for (const code of this.letGo) this.keys.delete(code);
+      this.letGo.clear();
+      this.unread.clear();
       return out;
     }
     /**
@@ -4785,8 +4830,227 @@
       depth: "WHEEL",
       call: "R",
       mute: "M"
+    },
+    // The names printed on app/touch.ts's own buttons, so a prompt names the
+    // thing under your thumb.
+    touch: {
+      move: "STICK",
+      grip: "GRIP",
+      dash: "BURST",
+      place: "BUILD",
+      crown: "THRONE",
+      lift: "LIFT",
+      cycle: "NEXT",
+      confirm: "TAP",
+      pause: "II",
+      depth: "\u25B2 \u25BC",
+      call: "CALL",
+      mute: "\u266A"
     }
   };
+
+  // app/touch.ts
+  var FACE = [
+    { label: "THRONE", code: "KeyC", cls: "y", hint: "Tap to feed the throne, hold to crown" },
+    { label: "BUILD", code: "KeyE", cls: "x", hint: "Tap to build, hold to grow a mitochondrion" },
+    { label: "NEXT", code: "KeyQ", cls: "b", hint: "Choose the next cell in your rack" },
+    { label: "BURST", code: "KeyK", cls: "a", hint: "Burst; into an arm, it throws it back" }
+  ];
+  var EXTRA = [
+    { label: "LIFT", code: "KeyF", cls: "lb", hint: "Tap to lift a building, hold to leave a lure" },
+    { label: "CALL", code: "KeyR", cls: "r3", hint: "Call your companion" }
+  ];
+  var MENU_LEFT = [
+    { label: "\u25B2", code: "TouchDepthUp", cls: "depth", hint: "Retune the channel up a harmonic" },
+    { label: "\u25BC", code: "TouchDepthDown", cls: "depth", hint: "Retune the channel down a harmonic" }
+  ];
+  var MENU_RIGHT = [
+    { label: "FORGE", code: "KeyV", cls: "forge", hint: "Crystal forge (expeditions)" },
+    { label: "II", code: "Escape", cls: "pause", hint: "Stop" }
+  ];
+  var REACH = 58;
+  var LATCH_MS = 320;
+  var STYLE = `
+  #touch { --b: clamp(40px, 13vh, 62px); position:fixed; inset:0; pointer-events:none; z-index:10;
+    font-family:"IBM Plex Mono", ui-monospace, Menlo, monospace; user-select:none; -webkit-user-select:none; }
+  #touch[hidden] { display:none; }
+  #touch .zone { position:absolute; left:0; bottom:0; width:38vw; height:72vh; pointer-events:auto; touch-action:none; }
+  #touch .base, #touch .knob { position:absolute; border-radius:50%; pointer-events:none; transform:translate(-50%,-50%); }
+  #touch .base { width:${REACH * 2}px; height:${REACH * 2}px; border:1px solid rgba(120,225,245,0.35);
+    background:rgba(120,225,245,0.06); }
+  #touch .knob { width:46px; height:46px; background:rgba(120,225,245,0.35); border:1px solid rgba(120,225,245,0.8); }
+  #touch button { pointer-events:auto; touch-action:none; position:absolute; font:inherit; font-weight:700;
+    letter-spacing:0.06em; color:#cfe9f5; background:rgba(11,18,32,0.62); border:1px solid rgba(120,225,245,0.45);
+    border-radius:50%; width:var(--b); height:var(--b); font-size:calc(var(--b) * 0.15); padding:0;
+    -webkit-tap-highlight-color:transparent; }
+  #touch button.on { background:rgba(120,225,245,0.42); color:#05070e; }
+  #touch .face { position:absolute; right:8px; bottom:8px; width:calc(var(--b) * 2.6); height:calc(var(--b) * 2.6); }
+  #touch .face .y { left:calc(var(--b) * 0.8); top:0; border-color:rgba(255,201,74,0.75); }
+  #touch .face .x { left:0; top:calc(var(--b) * 0.8); border-color:rgba(120,190,255,0.75); }
+  #touch .face .b { right:0; top:calc(var(--b) * 0.8); border-color:rgba(255,120,140,0.75); }
+  #touch .face .a { left:calc(var(--b) * 0.8); bottom:0; border-color:rgba(160,255,214,0.75); }
+  #touch .grip { right:calc(var(--b) * 0.7); bottom:calc(var(--b) * 2.6 + 18px);
+    width:calc(var(--b) * 1.2); height:calc(var(--b) * 1.2); border-color:rgba(255,140,190,0.85); }
+  #touch .grip.latched { background:rgba(255,140,190,0.5); color:#05070e; }
+  #touch .lb { left:8px; top:calc(var(--b) * 0.75 + 16px); height:calc(var(--b) * 0.7); border-radius:10px; }
+  #touch .r3 { right:8px; top:calc(var(--b) * 0.75 + 16px); height:calc(var(--b) * 0.7); border-radius:10px; }
+  #touch .menu { position:absolute; top:8px; display:flex; gap:6px; }
+  #touch .menu.left { left:8px; }
+  #touch .menu.right { right:8px; }
+  #touch .menu button { position:static; width:calc(var(--b) * 0.8); height:calc(var(--b) * 0.7); border-radius:8px; }
+  #touch .menu .forge { width:calc(var(--b) * 1.05); }
+  @media (pointer: coarse) {
+    .sub, .legend, .controls { display:none !important; }
+    body { gap:4px !important; padding:4px !important; }
+    body.playing header { display:none; }
+  }
+`;
+  function make(parent, s, pad) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = s.label;
+    b.className = s.cls;
+    b.setAttribute("aria-label", s.hint);
+    const down = (e) => {
+      e.preventDefault();
+      b.setPointerCapture(e.pointerId);
+      pad.press(s.code);
+      b.classList.add("on");
+      navigator.vibrate?.(8);
+    };
+    const up = () => {
+      pad.release(s.code);
+      b.classList.remove("on");
+    };
+    b.addEventListener("pointerdown", down);
+    b.addEventListener("pointerup", up);
+    b.addEventListener("pointercancel", up);
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+    parent.appendChild(b);
+    return b;
+  }
+  function grip2(parent, pad) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = "GRIP";
+    b.className = "grip";
+    b.setAttribute("aria-label", "Grip: hold, or double-tap to lock");
+    let latched = false;
+    let lastTap = -1e9;
+    const code = "ShiftLeft";
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      b.setPointerCapture(e.pointerId);
+      navigator.vibrate?.(8);
+      if (latched) {
+        latched = false;
+        b.classList.remove("latched");
+        b.textContent = "GRIP";
+        pad.release(code);
+        return;
+      }
+      const now = performance.now();
+      if (now - lastTap < LATCH_MS) {
+        latched = true;
+        b.classList.add("latched");
+        b.textContent = "LOCKED";
+      }
+      lastTap = now;
+      pad.press(code);
+      b.classList.add("on");
+    });
+    const up = () => {
+      b.classList.remove("on");
+      if (!latched) {
+        pad.release(code);
+        b.textContent = "GRIP";
+      }
+    };
+    b.addEventListener("pointerup", up);
+    b.addEventListener("pointercancel", up);
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+    parent.appendChild(b);
+  }
+  function stick(root, pad) {
+    const zone = document.createElement("div");
+    zone.className = "zone";
+    const base = document.createElement("div");
+    base.className = "base";
+    const knob = document.createElement("div");
+    knob.className = "knob";
+    base.hidden = knob.hidden = true;
+    zone.append(base, knob);
+    root.appendChild(zone);
+    let id = -1, cx = 0, cy = 0;
+    const place = (el, x, y) => {
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+    };
+    zone.addEventListener("pointerdown", (e) => {
+      if (id >= 0) return;
+      e.preventDefault();
+      zone.setPointerCapture(e.pointerId);
+      id = e.pointerId;
+      const r = zone.getBoundingClientRect();
+      cx = e.clientX - r.left;
+      cy = e.clientY - r.top;
+      place(base, cx, cy);
+      place(knob, cx, cy);
+      base.hidden = knob.hidden = false;
+      pad.setStick(0, 0);
+    });
+    zone.addEventListener("pointermove", (e) => {
+      if (e.pointerId !== id) return;
+      const r = zone.getBoundingClientRect();
+      let dx = e.clientX - r.left - cx, dy = e.clientY - r.top - cy;
+      const d = Math.hypot(dx, dy);
+      if (d > REACH) {
+        dx *= REACH / d;
+        dy *= REACH / d;
+      }
+      place(knob, cx + dx, cy + dy);
+      pad.setStick(dx / REACH, dy / REACH);
+    });
+    const end = (e) => {
+      if (e.pointerId !== id) return;
+      id = -1;
+      base.hidden = knob.hidden = true;
+      pad.setStick(0, 0);
+    };
+    zone.addEventListener("pointerup", end);
+    zone.addEventListener("pointercancel", end);
+  }
+  function isTouchDevice() {
+    return typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches || typeof navigator !== "undefined" && (navigator.maxTouchPoints ?? 0) > 0 && !matchMedia("(pointer: fine)").matches;
+  }
+  function mountTouch(pad, force = false) {
+    if (!force && !isTouchDevice()) return;
+    pad.touched = true;
+    const style = document.createElement("style");
+    style.textContent = STYLE;
+    document.head.appendChild(style);
+    const root = document.createElement("div");
+    root.id = "touch";
+    stick(root, pad);
+    const face = document.createElement("div");
+    face.className = "face";
+    for (const s of FACE) make(face, s, pad);
+    root.appendChild(face);
+    grip2(root, pad);
+    for (const s of EXTRA) make(root, s, pad);
+    for (const [side, specs] of [["left", MENU_LEFT], ["right", MENU_RIGHT]]) {
+      const menu = document.createElement("div");
+      menu.className = `menu ${side}`;
+      for (const s of specs) make(menu, s, pad);
+      root.appendChild(menu);
+    }
+    document.body.appendChild(root);
+    const watch = () => {
+      root.hidden = pad.connected;
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  }
 
   // app/sfx.ts
   var DRONE = [98, 392];
@@ -5002,7 +5266,370 @@
     }
   };
 
+  // game/save.ts
+  var SAVE_SCHEMA = "sonic-drifter.save";
+  var SAVE_VERSION = 1;
+  var SaveError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "SaveError";
+    }
+  };
+  function tagged(v) {
+    const keys = Object.keys(v);
+    return keys.length === 1 && keys[0].startsWith("$") ? keys[0] : null;
+  }
+  function pack(v, path = "$") {
+    if (v === null) return null;
+    switch (typeof v) {
+      case "number":
+        if (Number.isFinite(v)) return Object.is(v, -0) ? { $n: "-0" } : v;
+        return { $n: String(v) };
+      case "string":
+      case "boolean":
+        return v;
+      case "object": {
+        if (Array.isArray(v)) {
+          return v.map((x, i) => {
+            if (x === void 0) throw new SaveError(`${path}[${i}] is undefined`);
+            return pack(x, `${path}[${i}]`);
+          });
+        }
+        if (v instanceof Map) {
+          return { $map: [...v].map(([k, x], i) => [pack(k, `${path}<key ${i}>`), pack(x, `${path}<${String(k)}>`)]) };
+        }
+        const proto = Object.getPrototypeOf(v);
+        if (proto !== Object.prototype && proto !== null) {
+          const name = v.constructor?.name ?? "an object";
+          throw new SaveError(`${path} is a ${name}, which a save cannot carry. Teach game/save.ts to write it.`);
+        }
+        const out = {};
+        for (const [k, x] of Object.entries(v)) {
+          if (k.startsWith("$")) throw new SaveError(`${path}.${k}: a key beginning with $ would read back as a tag`);
+          if (x === void 0) continue;
+          out[k] = pack(x, `${path}.${k}`);
+        }
+        return out;
+      }
+      default:
+        throw new SaveError(`${path} is a ${typeof v}. A run is data; this is not.`);
+    }
+  }
+  function unpack(v, path = "$") {
+    if (v === null || typeof v !== "object") return v;
+    if (Array.isArray(v)) return v.map((x, i) => unpack(x, `${path}[${i}]`));
+    const tag = tagged(v);
+    if (tag === "$n") {
+      const s = v.$n;
+      if (s === "-0") return -0;
+      if (s === "Infinity") return Infinity;
+      if (s === "-Infinity") return -Infinity;
+      if (s === "NaN") return NaN;
+      throw new SaveError(`${path}: ${JSON.stringify(s)} is not a number`);
+    }
+    if (tag === "$map") {
+      const pairs = v.$map;
+      if (!Array.isArray(pairs)) throw new SaveError(`${path}: a map is written as pairs`);
+      return new Map(pairs.map((p, i) => {
+        if (!Array.isArray(p) || p.length !== 2) throw new SaveError(`${path}<${i}>: not a pair`);
+        return [unpack(p[0], `${path}<key ${i}>`), unpack(p[1], `${path}<${i}>`)];
+      }));
+    }
+    if (tag !== null) throw new SaveError(`${path}: unknown tag ${tag}`);
+    const out = {};
+    for (const [k, x] of Object.entries(v)) out[k] = unpack(x, `${path}.${k}`);
+    return out;
+  }
+  var UNWRITTEN = ["rand", "events", "bodies", "cells"];
+  function streamOf2(run) {
+    const s = run.rand.state;
+    if (typeof s !== "number" || !Number.isInteger(s) || s < 0 || s > 4294967295) {
+      throw new SaveError("run.rand is not a seeded stream, so what it draws next cannot be written down");
+    }
+    return s;
+  }
+  function headerOf(run, stamp) {
+    return {
+      ...stamp,
+      aeon: run.world.aeon,
+      name: run.world.name,
+      phase: run.phase,
+      t: run.t,
+      score: run.score,
+      expedition: run.resonance !== null
+    };
+  }
+  function snapshot(run, stamp, surface = null) {
+    const index = /* @__PURE__ */ new Map();
+    run.structures.forEach((s, i) => index.set(s, i));
+    const bodies = run.bodies.map((b, bi) => ({
+      ...b,
+      cells: b.cells.map((c, ci) => {
+        const i = index.get(c);
+        if (i === void 0) {
+          throw new SaveError(`run.bodies[${bi}].cells[${ci}] (structure ${c.id}) is not in run.structures: a body is out of date with what is built, which is a bug before it is a save problem`);
+        }
+        return i;
+      })
+    }));
+    const rest = { ...run };
+    for (const k of UNWRITTEN) delete rest[k];
+    return {
+      schema: SAVE_SCHEMA,
+      version: SAVE_VERSION,
+      header: headerOf(run, stamp),
+      rng: streamOf2(run),
+      run: pack({ ...rest, bodies, cells: run.cells.map((c) => c.group.hm) }, "run"),
+      surface: pack(surface, "surface")
+    };
+  }
+  var MIGRATIONS = {};
+  function object(v, what) {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) throw new SaveError(`${what} is not an object`);
+    return v;
+  }
+  function list(v, what) {
+    if (!Array.isArray(v)) throw new SaveError(`${what} is not a list`);
+    return v;
+  }
+  function finite2(v, what) {
+    if (typeof v !== "number" || !Number.isFinite(v)) throw new SaveError(`${what} is not a finite number`);
+    return v;
+  }
+  function group(hm, what) {
+    if (typeof hm !== "string") throw new SaveError(`${what} is not a point group symbol`);
+    try {
+      pointGroup(hm);
+    } catch {
+      throw new SaveError(`${what}: there is no point group ${JSON.stringify(hm)}`);
+    }
+    return hm;
+  }
+  function migrate(raw) {
+    let file = object(raw, "the file");
+    if (file.schema !== SAVE_SCHEMA) {
+      throw new SaveError(`not a Sonic Drifter save (schema ${JSON.stringify(file.schema)})`);
+    }
+    let v = file.version;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1) throw new SaveError("the save has no version");
+    if (v > SAVE_VERSION) {
+      throw new SaveError(`written by a newer build (save version ${v}, this build reads up to ${SAVE_VERSION})`);
+    }
+    while (v < SAVE_VERSION) {
+      const up = MIGRATIONS[v];
+      if (!up) throw new SaveError(`no migration from save version ${v}`);
+      file = up(file);
+      v += 1;
+      file.version = v;
+    }
+    const h = object(file.header, "header");
+    for (const k of ["build", "savedAt", "name", "phase"]) {
+      if (typeof h[k] !== "string") throw new SaveError(`header.${k} is not text`);
+    }
+    for (const k of ["aeon", "t", "score"]) finite2(h[k], `header.${k}`);
+    if (typeof h.expedition !== "boolean") throw new SaveError("header.expedition is not true or false");
+    if (typeof file.rng !== "number" || !Number.isInteger(file.rng) || file.rng < 0 || file.rng > 4294967295) {
+      throw new SaveError("the random stream's state is not a uint32");
+    }
+    object(file.run, "run");
+    return file;
+  }
+  function audit(o) {
+    const world = object(o.world, "run.world");
+    finite2(world.aeon, "run.world.aeon");
+    for (const [i, id] of list(world.pool, "run.world.pool").entries()) {
+      try {
+        motif(String(id));
+      } catch {
+        throw new SaveError(`run.world.pool[${i}]: no motif ${JSON.stringify(id)}`);
+      }
+    }
+    for (const [i, id] of list(world.wildlife, "run.world.wildlife").entries()) {
+      try {
+        beast(String(id));
+      } catch {
+        throw new SaveError(`run.world.wildlife[${i}]: no species ${JSON.stringify(id)}`);
+      }
+    }
+    const you = object(o.you, "run.you");
+    finite2(you.x, "run.you.x");
+    finite2(you.y, "run.you.y");
+    for (const [i, raw] of list(o.entities, "run.entities").entries()) {
+      const e = object(raw, `run.entities[${i}]`);
+      finite2(e.x, `run.entities[${i}].x`);
+      finite2(e.y, `run.entities[${i}].y`);
+      if (e.faction === "beast") {
+        try {
+          beast(String(e.species));
+        } catch {
+          throw new SaveError(`run.entities[${i}]: no species ${JSON.stringify(e.species)}`);
+        }
+      } else if (e.faction === "motif") {
+        for (const [j, id] of list(e.parts, `run.entities[${i}].parts`).entries()) {
+          try {
+            motif(String(id));
+          } catch {
+            throw new SaveError(`run.entities[${i}].parts[${j}]: no motif ${JSON.stringify(id)}`);
+          }
+        }
+      } else {
+        throw new SaveError(`run.entities[${i}]: faction ${JSON.stringify(e.faction)}`);
+      }
+    }
+    const structures = list(o.structures, "run.structures");
+    for (const [i, raw] of structures.entries()) {
+      const s = object(raw, `run.structures[${i}]`);
+      group(s.hm, `run.structures[${i}].hm`);
+      finite2(s.x, `run.structures[${i}].x`);
+      finite2(s.y, `run.structures[${i}].y`);
+    }
+    for (const [i, raw] of list(o.bodies, "run.bodies").entries()) {
+      const b = object(raw, `run.bodies[${i}]`);
+      for (const [j, k] of list(b.cells, `run.bodies[${i}].cells`).entries()) {
+        if (typeof k !== "number" || !Number.isInteger(k) || k < 0 || k >= structures.length) {
+          throw new SaveError(`run.bodies[${i}].cells[${j}] points at no structure`);
+        }
+      }
+    }
+    for (const [i, hm] of list(o.cells, "run.cells").entries()) group(hm, `run.cells[${i}]`);
+    const throne = object(o.throne, "run.throne");
+    finite2(throne.x, "run.throne.x");
+    finite2(throne.y, "run.throne.y");
+    if (throne.hm !== "") group(throne.hm, "run.throne.hm");
+    for (const [i, hm] of list(throne.fed, "run.throne.fed").entries()) group(hm, `run.throne.fed[${i}]`);
+    const bond = object(o.bond, "run.bond");
+    if (!(bond.limbReadyAt instanceof Map)) throw new SaveError("run.bond.limbReadyAt is not a map");
+    for (const [i, raw] of list(bond.companions, "run.bond.companions").entries()) {
+      group(object(raw, `run.bond.companions[${i}]`).hm, `run.bond.companions[${i}].hm`);
+    }
+  }
+  function assemble2(file) {
+    const o = object(unpack(file.run, "run"), "run");
+    audit(o);
+    const structures = o.structures;
+    const bodies = o.bodies.map((b) => ({
+      ...b,
+      cells: b.cells.map((i) => structures[i])
+    }));
+    const made = /* @__PURE__ */ new Map();
+    const cells = o.cells.map((hm) => {
+      let c = made.get(hm);
+      if (!c) {
+        c = cellFor(hm);
+        made.set(hm, c);
+      }
+      return { ...c };
+    });
+    return { ...o, structures, bodies, cells, events: [], rand: rng(file.rng) };
+  }
+  function restore(input) {
+    let raw = input;
+    if (typeof input === "string") {
+      try {
+        raw = JSON.parse(input);
+      } catch {
+        throw new SaveError("the save is not JSON (truncated, or not a save)");
+      }
+    }
+    const file = migrate(raw);
+    const run = assemble2(file);
+    const trial = assemble2(file);
+    try {
+      step2(trial, { move: { x: 0, y: 0 }, grip: false, dash: false }, 1 / 60);
+    } catch (err) {
+      throw new SaveError(`the saved run does not survive a frame: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!Number.isFinite(trial.you.x) || !Number.isFinite(trial.you.y)) {
+      throw new SaveError("the saved run loses you on its first frame");
+    }
+    return { run, header: file.header, surface: unpack(file.surface, "surface") };
+  }
+  function serialise(file) {
+    return JSON.stringify(file);
+  }
+
+  // app/persist.ts
+  var RUN_KEY = "sonic-drifter.run";
+  var PROFILE_KEY = "sonic-drifter.profile";
+  function storage() {
+    try {
+      return typeof localStorage === "undefined" ? null : localStorage;
+    } catch {
+      return null;
+    }
+  }
+  function reason(err) {
+    if (err instanceof SaveError) return err.message.toUpperCase();
+    const name = err?.name ?? "";
+    if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") {
+      return "THE BROWSER'S STORAGE FOR THIS PAGE IS FULL";
+    }
+    return err instanceof Error ? err.message.toUpperCase() : "THE BROWSER REFUSED";
+  }
+  function readRun() {
+    try {
+      return storage()?.getItem(RUN_KEY) ?? null;
+    } catch {
+      return null;
+    }
+  }
+  function writeRun(text) {
+    const s = storage();
+    if (!s) return "THIS BROWSER KEEPS NOTHING FOR A PAGE OPENED THIS WAY";
+    try {
+      s.setItem(RUN_KEY, text);
+      return null;
+    } catch (err) {
+      return reason(err);
+    }
+  }
+  function clearRun() {
+    try {
+      storage()?.removeItem(RUN_KEY);
+    } catch {
+    }
+  }
+  function peek(text) {
+    try {
+      return { header: migrate(JSON.parse(text)).header };
+    } catch (err) {
+      return { error: err instanceof SyntaxError ? "THE SAVED RUN IS NOT READABLE TEXT" : reason(err) };
+    }
+  }
+  function readProfile() {
+    try {
+      const raw = storage()?.getItem(PROFILE_KEY);
+      const p = raw ? JSON.parse(raw) : {};
+      const n = (v, floor) => typeof v === "number" && Number.isFinite(v) ? Math.max(floor, v) : floor;
+      return { best: n(p.best, 0), deepest: n(p.deepest, 1) };
+    } catch {
+      return { best: 0, deepest: 1 };
+    }
+  }
+  function writeProfile(p) {
+    try {
+      storage()?.setItem(PROFILE_KEY, JSON.stringify(p));
+    } catch {
+    }
+  }
+  function download(name, text) {
+    const bridge = window.SonicDrifterAndroid;
+    if (bridge) return bridge.saveFile(name, text);
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1e3);
+    return "EXPORTED";
+  }
+
   // app/drifter.ts
+  var BUILD = true ? "064ba3126afa" : "dev";
+  var AUTOSAVE_EVERY = 60;
+  var ABANDON_HOLD = 1.5;
   var PX = 1e6;
   var VIEW_W = 900;
   var VIEW_H = 660;
@@ -5285,6 +5912,30 @@
       __publicField(this, "forgePick", 0);
       __publicField(this, "forgeRotation", 0);
       __publicField(this, "forgeMessage", "");
+      /**
+       * The run waiting in storage, read on the title screen.
+       *
+       * A saved run is a run IN PROGRESS, so everything that refuses to replace an
+       * ongoing run refuses to replace this one too: the title goes on with it,
+       * and beginning again means holding the throne button to abandon it first.
+       */
+      __publicField(this, "saved", null);
+      /** A run is stored and cannot be read, and why. It is not deleted for you. */
+      __publicField(this, "savedError", "");
+      /** Seconds of unpaused play since the last save. */
+      __publicField(this, "sinceSave", 0);
+      /** Surface time of the last save that landed, or -1. For the pause screen,
+       *  and so a second save in the same frame — `visibilitychange` and
+       *  `pagehide` both fire on the way out, with no frame between — is skipped. */
+      __publicField(this, "lastSave", -1);
+      /** Why the last save did not land, said on the pause screen and in reports. */
+      __publicField(this, "saveTrouble", "");
+      __publicField(this, "abandonHeld", 0);
+      /** Put the camera straight onto you on the next frame, rather than sliding
+       *  there from wherever the attract loop left it. */
+      __publicField(this, "snapCam", false);
+      /** Whether the page was last laid out for a run in progress. */
+      __publicField(this, "wasPlaying", false);
       __publicField(this, "sparks", []);
       __publicField(this, "popups", []);
       __publicField(this, "rings", []);
@@ -5435,14 +6086,19 @@
       this.bindInput();
       this.fit();
       window.addEventListener("resize", () => this.fit());
+      const profile = readProfile();
+      this.best = profile.best;
+      this.deepest = profile.deepest;
+      this.peekSaved();
     }
     /** The run, for inspection. Read-only in spirit. */
     get state() {
       return this.run;
     }
-    /** Explicit start action; never replaces an ongoing run. */
+    /** Explicit start action; never replaces an ongoing run — a saved one included. */
     startExpedition(source) {
       if (this.screen !== "title" && this.screen !== "dead") return false;
+      if (this.screen === "title" && this.hasSaved()) return false;
       seed32(source.seed);
       this.expeditionSource = source;
       this.begin();
@@ -5478,6 +6134,188 @@
       this.forgeMessage = messages[result];
       this.sfx.tick();
     }
+    /** The names to print for each verb: the pad's if one is reporting, the
+     *  on-screen buttons' if a finger has used them, otherwise the keyboard's. */
+    glyph() {
+      return this.pad.connected ? GLYPH.pad : this.pad.touched ? GLYPH.touch : GLYPH.keys;
+    }
+    /** The on-screen controls, and the Android back button, go through here. */
+    get input() {
+      return this.pad;
+    }
+    /**
+     * The system back gesture. Pauses a run (or closes the forge) and says it
+     * was handled; anywhere else it is not, and the host may close the app.
+     */
+    back() {
+      if (this.screen !== "play") return false;
+      if (this.forgeOpen) {
+        this.toggleForge();
+        return true;
+      }
+      this.paused = !this.paused;
+      this.sfx.tick();
+      if (this.paused) this.save();
+      return true;
+    }
+    // ── keeping the run ───────────────────────────────────────────────────────
+    /** Whether the title has a run to go on with (or an unreadable one in the way). */
+    hasSaved() {
+      return this.saved !== null || this.savedError !== "";
+    }
+    /** Read what is stored, without restoring it. */
+    peekSaved() {
+      const text = readRun();
+      this.saved = null;
+      this.savedError = "";
+      if (!text) return;
+      const p = peek(text);
+      if ("header" in p) this.saved = p.header;
+      else this.savedError = p.error;
+    }
+    /** What the surface wants back with the run: the account the report is
+     *  built from, and which lessons have already been said. */
+    surfaceState() {
+      return {
+        tally: this.tally,
+        seen: [...this.seen],
+        selected: this.selected,
+        nudged: this.nudged,
+        taughtMesh: this.taughtMesh,
+        taughtBank: this.taughtBank
+      };
+    }
+    /**
+     * Write the run down, if there is one worth writing.
+     *
+     * Only a run being PLAYED — the title's attract loop is not anybody's run,
+     * and a dead one is over. Never throws: a save that fails says why on the
+     * pause screen and in the report, and the run on screen carries on.
+     */
+    save() {
+      if (this.screen !== "play" && this.screen !== "birth") return false;
+      const run = this.run;
+      if (run.phase === "dead") return false;
+      if (this.t === this.lastSave && this.saveTrouble === "") return true;
+      let text;
+      try {
+        text = serialise(snapshot(run, { build: BUILD, savedAt: (/* @__PURE__ */ new Date()).toISOString() }, this.surfaceState()));
+      } catch (err) {
+        this.saveTrouble = reason(err);
+        console.error("sonic drifter: the run could not be written down", err);
+        return false;
+      }
+      const trouble = writeRun(text);
+      this.saveTrouble = trouble ?? "";
+      if (trouble) return false;
+      this.sinceSave = 0;
+      this.lastSave = this.t;
+      return true;
+    }
+    /** Go on with the stored run. */
+    continueSaved() {
+      const text = readRun();
+      if (!text) {
+        this.peekSaved();
+        return;
+      }
+      try {
+        const r = restore(text);
+        this.adopt(r.run, r.surface, r.header);
+      } catch (err) {
+        this.saved = null;
+        this.savedError = reason(err);
+        this.sfx.hurt();
+      }
+    }
+    /** Throw the stored run away, on purpose, and begin again. */
+    abandon() {
+      clearRun();
+      this.saved = null;
+      this.savedError = "";
+      this.abandonHeld = 0;
+      this.begin();
+    }
+    /** Make a restored run the one on screen, stopped, so nothing hunts you
+     *  while you find the controller again. */
+    adopt(run, surface, header) {
+      this.freshSurface();
+      this.run = run;
+      this.expeditionSource = run.resonance ? run.resonance.source : null;
+      const s = surface ?? {};
+      if (s.tally && typeof s.tally === "object") {
+        for (const [k, v] of Object.entries(s.tally)) {
+          if (typeof v === "number" && Number.isFinite(v)) this.tally[k] = v;
+        }
+      }
+      if (Array.isArray(s.seen)) {
+        for (const id of s.seen) if (typeof id === "string") this.seen.add(id);
+      }
+      if (typeof s.selected === "number") this.selected = s.selected;
+      this.nudged = s.nudged === true;
+      this.taughtMesh = s.taughtMesh === true;
+      this.taughtBank = s.taughtBank === true;
+      this.screen = run.phase === "birth" ? "birth" : run.phase === "dead" ? "dead" : "play";
+      this.paused = this.screen === "play";
+      this.snapCam = true;
+      this.saved = null;
+      this.savedError = "";
+      this.lastSave = this.t;
+      const where = `AEON ${header.aeon}  \xB7  ${header.name}`;
+      this.say(header.build === BUILD ? `PICKED UP WHERE YOU LEFT IT  \xB7  ${where}` : `PICKED UP  \xB7  ${where}  \xB7  WRITTEN BY ANOTHER BUILD, PLAYING BY THIS ONE'S RULES`);
+    }
+    /**
+     * The run as a file. From the title, the stored one; otherwise this one —
+     * including a dead one, because a post-mortem that loads back is worth more
+     * to whoever reads a bug report than any description of it.
+     */
+    exportRun() {
+      let text;
+      if (this.screen === "play" || this.screen === "birth" || this.screen === "dead") {
+        try {
+          text = serialise(snapshot(
+            this.run,
+            { build: BUILD, savedAt: (/* @__PURE__ */ new Date()).toISOString() },
+            this.surfaceState()
+          ));
+        } catch (err) {
+          return `THE RUN COULD NOT BE WRITTEN: ${reason(err)}`;
+        }
+      } else {
+        text = readRun();
+      }
+      if (!text) return "NO RUN TO EXPORT";
+      const h = peek(text);
+      const tag = "header" in h ? `aeon${h.header.aeon}-${Math.floor(h.header.t / 60)}m${Math.floor(h.header.t % 60)}s` : "run";
+      return download(`sonic-drifter-${tag}.json`, text);
+    }
+    /**
+     * A run from a file. Only from the title or the death screen, and never over
+     * a stored run — the same rule as starting an expedition.
+     */
+    importRun(text) {
+      if (this.screen !== "title" && this.screen !== "dead") return "FINISH OR PAUSE-EXPORT THE RUN IN PROGRESS FIRST";
+      if (this.screen === "title" && this.hasSaved()) {
+        return "A SAVED RUN IS ALREADY WAITING. GO ON WITH IT, OR HOLD THE THRONE BUTTON ON THE TITLE TO ABANDON IT";
+      }
+      let r;
+      try {
+        r = restore(text);
+      } catch (err) {
+        return reason(err);
+      }
+      if (r.run.phase === "dead") {
+        this.adopt(r.run, r.surface, r.header);
+        return `A POST-MORTEM: AEON ${r.header.aeon}, NOT KEPT. drifter.report() READS IT`;
+      }
+      const trouble = writeRun(text);
+      this.adopt(r.run, r.surface, r.header);
+      return trouble ? `LOADED, BUT IT WILL NOT SURVIVE A RELOAD: ${trouble}` : `LOADED AEON ${r.header.aeon}`;
+    }
+    /** What a run's end changes in storage: it is over, and the records stand. */
+    settleProfile() {
+      writeProfile({ best: this.best, deepest: this.deepest });
+    }
     // ── input ─────────────────────────────────────────────────────────────────
     /**
      * The pointer is not the player any more.
@@ -5508,6 +6346,10 @@
         e.preventDefault();
         wake();
         this.canvas.focus();
+        if (this.screen === "title" && this.hasSaved()) {
+          if (this.saved) this.continueSaved();
+          return;
+        }
         if (this.screen === "title" || this.screen === "dead") {
           this.begin();
           return;
@@ -5589,6 +6431,22 @@
           this.ebb = !this.ebb;
           return;
         }
+        if (this.screen === "title" && this.hasSaved()) {
+          if (it.crownDown) {
+            this.abandonHeld += dt;
+            if (this.abandonHeld >= ABANDON_HOLD) {
+              this.sfx.unlock();
+              this.abandon();
+            }
+          } else {
+            this.abandonHeld = 0;
+          }
+          if (it.confirm && this.saved) {
+            this.sfx.unlock();
+            this.continueSaved();
+          }
+          return;
+        }
         if (it.confirm) {
           this.sfx.unlock();
           this.begin();
@@ -5616,7 +6474,7 @@
         if (it.confirm) {
           if (run.evolution.taken === 0 && offer.length > 0) this.take();
           if (!this.nudged && run.evolution.offer.length > 0 && run.cells.length >= cardCost(run)) {
-            const keys = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+            const keys = this.glyph();
             this.nudged = true;
             this.say(`ANOTHER CARD IS ${cardCost(run)} CELLS  \xB7  ${keys.place} TAKES IT  \xB7  ${keys.confirm} AGAIN TO ENTER`);
             return;
@@ -5719,29 +6577,41 @@
       this.canvas.style.width = `${Math.floor(VIEW_W * s)}px`;
       this.canvas.style.height = `${Math.floor(VIEW_H * s)}px`;
     }
-    begin() {
+    /** Everything on the surface that belongs to one run, cleared — for a new
+     *  run and for a restored one alike. */
+    freshSurface() {
       this.paused = false;
       this.buildHeld = this.crownHeld = 0;
       this.organelleGrown = this.crowned = this.lured = false;
       this.liftHeld = 0;
+      this.abandonHeld = 0;
       this.pick = 0;
+      this.selected = 0;
+      this.nudged = false;
       this.tally = {};
-      this.seed = this.seed * 1664525 + 1013904223 >>> 0;
-      this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
       this.forgeOpen = false;
       this.forgePick = 0;
       this.forgeRotation = 0;
       this.forgeMessage = "";
       this.taughtMesh = this.taughtBank = this.wasLocked = false;
+      this.verdict = null;
+      this.sinceSave = 0;
+      this.saveTrouble = "";
+      this.youTrail = [];
+      this.sparks = [];
+      this.popups = [];
+      this.rings = [];
+    }
+    begin() {
+      this.freshSurface();
+      this.seed = this.seed * 1664525 + 1013904223 >>> 0;
+      this.run = startRun(this.expeditionSource ? seed32(this.expeditionSource.seed) : this.seed, this.ebb);
       if (this.expeditionSource) {
         this.run.resonance = newResonance(this.expeditionSource);
         this.run.cells = [...Array.from({ length: 6 }, () => cellFor("2")), ...Array.from({ length: 4 }, () => cellFor("4"))];
       }
-      this.verdict = null;
       this.screen = "play";
-      this.sparks = [];
-      this.popups = [];
-      this.rings = [];
+      this.snapCam = true;
       this.say(this.run.resonance ? "RESONANT EXPEDITION \xB7 V / L3 OPENS THE CRYSTAL FORGE" : "GATHER FOUR OF A KIND TO MAKE A CELL");
     }
     spend(i) {
@@ -5754,7 +6624,7 @@
     }
     doCall() {
       const run = this.run;
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       const r = callAlly(run);
       const c = companion(run);
       if (r === "no-companion") {
@@ -5786,10 +6656,11 @@
       enterWorld(run);
       this.screen = "play";
       this.pick = 0;
+      this.save();
     }
     doCrown() {
       const r = crown(this.run);
-      if (r === "nothing-fed") this.say(`FEED THE THRONE FIRST - TAP ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT`);
+      if (r === "nothing-fed") this.say(`FEED THE THRONE FIRST - TAP ${this.glyph().crown} NEAR IT`);
     }
     // ── loop ──────────────────────────────────────────────────────────────────
     start() {
@@ -5835,8 +6706,9 @@
       if (it.pause && this.screen === "play") {
         this.paused = !this.paused;
         this.sfx.tick();
+        if (this.paused) this.save();
       }
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       const legend = `${G.move} move \xB7 ${G.grip} grip \xB7 ${G.dash} dash / catch \xB7 ${G.place} build / hold: mitochondrion \xB7 ${G.lift} lift / hold: lure \xB7 ${G.crown} feed / crown / tame \xB7 ${G.call} call ally \xB7 ${G.pause} pause` + (run.resonance ? " \xB7 V / L3 forge \xB7 R-stick / Z X trim cross-phase" : "");
       if (legend !== this.controlLegend) {
         this.controlLegend = legend;
@@ -5851,6 +6723,7 @@
         return;
       }
       this.act(it, dt);
+      if (this.paused) return;
       if (this.screen === "title") {
         step2(run, {
           move: { x: Math.sin(this.t * 0.41), y: Math.sin(this.t * 0.63 + 1.1) },
@@ -5888,10 +6761,21 @@
         this.nudged = false;
         this.best = Math.max(this.best, run.score);
         this.deepest = Math.max(this.deepest, run.world.aeon);
+        this.settleProfile();
+        this.save();
       }
       if (run.phase === "dead" && this.screen !== "dead") {
         this.screen = "dead";
         this.best = Math.max(this.best, run.score);
+        this.settleProfile();
+        clearRun();
+      }
+      if (this.screen === "play" && run.phase !== "dead") {
+        this.sinceSave += dt;
+        if (this.sinceSave >= AUTOSAVE_EVERY) {
+          this.sinceSave = 0;
+          this.save();
+        }
       }
       const mine = selfContrast(run.you, run.wave);
       if (run.entities.some((e) => e.faction === "beast" && contrastFactor(particleOf(e), run.world.medium) * mine > 0 && Math.hypot(e.x - run.you.x, e.y - run.you.y) < 45e-6)) this.teach("sign");
@@ -5963,7 +6847,7 @@
             this.ring(ev.x, ev.y, 8, 84, 0.7, "255,201,74");
             this.popups.push({ x: ev.x, y: ev.y, text: ev.group, life: 1.6, colour: GOLD, big: true });
             this.sfx.capture(3);
-            this.say(`${ev.group}  \xB7  ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).place} TO PLACE IT`);
+            this.say(`${ev.group}  \xB7  ${this.glyph().place} TO PLACE IT`);
             this.teach("crystal");
             break;
           case "place":
@@ -6093,7 +6977,7 @@
             this.hitstop = Math.max(this.hitstop, 0.07);
             this.ring(ev.x, ev.y, 10, 190, 0.9, JADE);
             this.burst(ev.x, ev.y, 18, JADE);
-            this.say(`IT FALTERS  \xB7  HOLD ${(this.pad.connected ? GLYPH.pad : GLYPH.keys).crown} NEAR IT TO BOND`);
+            this.say(`IT FALTERS  \xB7  HOLD ${this.glyph().crown} NEAR IT TO BOND`);
             break;
           case "gambit": {
             this.sfx.gambit(ev.gambit);
@@ -6288,6 +7172,12 @@
     }
     // ── draw ──────────────────────────────────────────────────────────────────
     draw() {
+      const inRun = this.screen === "play";
+      if (inRun !== this.wasPlaying) {
+        this.wasPlaying = inRun;
+        document.body.classList.toggle("playing", inRun);
+        this.fit();
+      }
       const g2 = this.ctx;
       g2.fillStyle = "#05070e";
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -6296,6 +7186,11 @@
         x: px(b.w) <= VIEW_W ? px(b.x) + (px(b.w) - VIEW_W) / 2 : Math.max(px(b.x), Math.min(px(b.x + b.w) - VIEW_W, px(this.run.you.x) - VIEW_W / 2)),
         y: px(b.h) <= VIEW_H ? px(b.y) + (px(b.h) - VIEW_H) / 2 : Math.max(px(b.y), Math.min(px(b.y + b.h) - VIEW_H, px(this.run.you.y) - VIEW_H / 2))
       };
+      if (this.snapCam) {
+        this.cam.x = want.x;
+        this.cam.y = want.y;
+        this.snapCam = false;
+      }
       this.cam.x += (want.x - this.cam.x) * 0.12;
       this.cam.y += (want.y - this.cam.y) * 0.12;
       g2.save();
@@ -6895,9 +7790,9 @@
           const limbs = limbsOf(body, pitch);
           const legs = limbs.filter((l) => l.leg).length;
           const seated = seatedGroup(body.hm);
-          const group = seated === body.hm ? body.hm : `${body.hm}\u2192${seated}`;
+          const group2 = seated === body.hm ? body.hm : `${body.hm}\u2192${seated}`;
           g2.fillText(
-            `${group}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? `  \xB7  ${walkSpeed(body, run.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
+            `${group2}  \xB7  ${body.cells.length} CELLS${limbs.length ? `  \xB7  ${limbs.length - legs} LIMBS` : ""}${legs ? `  \xB7  ${legs} LEGS` : ""}${live ? `  \xB7  ${walkSpeed(body, run.wave) > 0 ? "WALKING" : "IT WORKS ALONE"}` : ""}`,
             px(body.x),
             px(body.y - body.extent) - 5
           );
@@ -7109,7 +8004,7 @@
     }
     drawJourney() {
       const run = this.run, g2 = this.ctx;
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       const c = companion(run);
       const x = VIEW_W - 286, y = 122;
       const tall = c ? 96 : 76;
@@ -7712,7 +8607,7 @@
       const form = formFor(this.run.world.aeon);
       const rgb = warmth(contrastFactor(p, waterAt(this.run, k.y)));
       this.creature(x, y, r * 1.8, form, rgb, k.spin, 0.65);
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       g2.font = `700 10px ${MONO}`;
       g2.fillStyle = INK;
       g2.textAlign = "center";
@@ -8579,7 +9474,7 @@
       g2.textAlign = "center";
       g2.fillStyle = FAINT2;
       g2.font = `600 9px ${MONO}`;
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       const spent = run.delivered >= suspension(run) && run.entities.filter((e) => e.faction === "motif").length < suspension(run) * 0.4;
       const hint = run.phase === "reign" ? faltering(run) ? `IT FALTERS  \xB7  GET INSIDE ${(TAME_REACH * 1e6).toFixed(0)} UM AND HOLD ${G.crown}` : vulnerable(run.throne, tameHealth(run)) ? `HOLD ${G.crown} NEAR THE BOSS TO BOND   \xB7   LET GO TO KEEP FIGHTING` : `${G.grip} ON YOUR BUILDINGS TO FIRE   \xB7   ${G.dash} INTO AN ARM THROWS IT BACK   \xB7   TAME BELOW ${Math.round(tameHealth(run) * 100)}%` : run.throne.fed.length === 0 && spent ? `THIS WATER IS GATHERED OUT   \xB7   ${G.crown} ON THE THRONE FEEDS IT   \xB7   A NEW WORLD IS THE ONLY NEW WATER` : run.cells.length > 0 ? `${G.place} BUILDS ON THE RING   \xB7   ${G.crown} ON THE THRONE FEEDS IT INSTEAD` : run.throne.fed.length > 0 ? `HOLD ${G.crown} TO WAKE IT   \xB7   TAP IT ON THE THRONE TO FEED MORE` : `${G.dash} THROUGH THE DRIFTERS TO GATHER THEM   \xB7   FOUR MAKES A CELL`;
       g2.fillText(hint, VIEW_W / 2, VIEW_H - 16);
@@ -8832,7 +9727,7 @@
       const g2 = this.ctx;
       const run = this.run;
       const offer = run.evolution.offer;
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       g2.textAlign = "center";
       g2.font = `700 10px ${MONO}`;
       g2.fillStyle = `rgb(${JADE})`;
@@ -8974,13 +9869,16 @@
     drawPaused() {
       const g2 = this.ctx;
       const run = this.run;
-      const G = this.pad.connected ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       g2.fillStyle = "rgba(5,7,14,0.82)";
       g2.fillRect(0, 0, VIEW_W, VIEW_H);
       g2.textAlign = "center";
       g2.font = `700 34px ${MONO}`;
       g2.fillStyle = INK;
       g2.fillText("STOPPED", VIEW_W / 2, 118);
+      g2.font = `600 9px ${MONO}`;
+      g2.fillStyle = this.saveTrouble ? RED : FAINT2;
+      g2.fillText(this.saveTrouble ? `NOT SAVED: ${this.saveTrouble}` : this.lastSave >= 0 ? `SAVED ${Math.max(0, this.t - this.lastSave).toFixed(0)} S AGO  \xB7  RELOADING THE PAGE GOES ON FROM HERE` : "NOT SAVED YET", VIEW_W / 2, 104);
       const ally = companion(run);
       if (ally) {
         g2.font = `600 10px ${MONO}`;
@@ -9183,6 +10081,7 @@
         })()}`,
         `events: ${keys.map((k) => `${k}=${t[k]}`).join(" ")}`,
         `pad: ${this.pad.describe()}`,
+        `save: build ${BUILD}; ${this.saveTrouble ? `NOT SAVED - ${this.saveTrouble}` : this.lastSave >= 0 ? `kept ${Math.max(0, this.t - this.lastSave).toFixed(0)}s ago` : "not kept yet"}; drifter.exportRun() writes this run to a file that loads it back exactly`,
         `diagnosis: ${this.diagnosis()}`
       ].join("\n");
     }
@@ -9215,18 +10114,18 @@
       );
       g2.fillText("WHOSE BAND GAP CATCHES IT, AND IT GOES WITH YOU.", VIEW_W / 2, 220);
       const on = this.pad.connected;
-      const G = on ? GLYPH.pad : GLYPH.keys;
+      const G = this.glyph();
       g2.fillStyle = DIM;
       g2.font = `600 11px ${MONO}`;
       const pad = (t) => t.padEnd(13, " ");
       const lines = [
-        `${pad(G.move)}POINT WHERE TO GO - OR WASD. THE NODE LEADS YOU AND YOU FALL IN.`,
+        `${pad(G.move)}${this.pad.touched && !on ? "PUSH WHERE TO GO." : "POINT WHERE TO GO - OR WASD."} THE NODE LEADS YOU AND YOU FALL IN.`,
         `${pad(G.grip)}CLOSE YOUR HAND: ONE TRAP, AND SPEED. IT COSTS STAMINA.`,
         `${pad(G.dash)}BURST. THE AMPLIFIER'S PEAK RATING, AND YOU ARE UNTOUCHABLE.`,
         `${pad(G.place)}PLACE A CELL. IT NEVER FEEDS THE THRONE.`,
         `${pad(G.crown)}TAP ON THE THRONE TO FEED. HOLD TO CROWN - AND IT IS WHAT YOU FED.`,
         "",
-        `${pad(on ? `E / ${G.cycle}` : "E")}${this.ebb ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER." : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
+        `${pad(on ? `E / ${G.cycle}` : this.pad.touched ? G.cycle : "E")}${this.ebb ? "THE WATER EBBS - SPENDING YOUR CRYSTAL CLOSES THE CHANNEL BACK. HARDER." : "THE WATER HOLDS - WHAT YOU DROVE OPEN STAYS OPEN FOR THIS WORLD."}`,
         "",
         "GATHER   BURST THROUGH THE DRIFTERS. AN N-FOLD MOTIF IS DRAWN AS AN N-GON.",
         "BUILD    HOW MUCH YOU BUILD IS WHETHER THERE IS A GAP. HOW FAR APART IS WHERE.",
@@ -9235,16 +10134,23 @@
       ];
       lines.forEach((l, i) => g2.fillText(l, VIEW_W / 2, 246 + i * 16));
       const pulse = 0.55 + 0.45 * Math.sin(this.t * 3);
-      g2.font = `700 14px ${MONO}`;
-      g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
-      g2.fillText(on ? "PRESS START" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
+      if (this.hasSaved()) this.drawSaved(G.confirm, G.crown, pulse);
+      else {
+        g2.font = `700 14px ${MONO}`;
+        g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+        g2.fillText(on ? "PRESS START" : this.pad.touched ? "TAP THE WATER TO BEGIN" : "PRESS SPACE OR CLICK TO BEGIN", VIEW_W / 2, 462);
+      }
       g2.font = on ? `600 9px ${MONO}` : `700 11px ${MONO}`;
       g2.fillStyle = on ? `rgb(${JADE})` : GOLD;
       g2.fillText(this.pad.describe(), VIEW_W / 2, 438);
       if (this.best > 0) {
         g2.fillStyle = DIM;
         g2.font = `600 10px ${MONO}`;
-        g2.fillText(`BEST ${this.best}   \xB7   DEEPEST AEON ${this.deepest}`, VIEW_W / 2, 492);
+        g2.fillText(
+          `BEST ${this.best}   \xB7   DEEPEST AEON ${this.deepest}`,
+          VIEW_W / 2,
+          this.hasSaved() ? 522 : 492
+        );
       }
       g2.font = `600 9px ${MONO}`;
       g2.fillStyle = FAINT2;
@@ -9253,6 +10159,46 @@
         VIEW_W / 2,
         VIEW_H - 26
       );
+      g2.textAlign = "left";
+    }
+    /**
+     * The run that is waiting, in place of "PRESS START".
+     *
+     * What it is — the aeon, the water, how long, the score — because a player
+     * coming back after a day should know which run they are about to go on
+     * with. And the way past it, with the hold drawn filling, because a hold
+     * nobody can see progressing reads as a button that does not work.
+     */
+    drawSaved(confirm, crown2, pulse) {
+      const g2 = this.ctx;
+      const h = this.saved;
+      g2.textAlign = "center";
+      if (h) {
+        const mins = Math.floor(h.t / 60);
+        const secs = Math.floor(h.t % 60).toString().padStart(2, "0");
+        g2.font = `700 14px ${MONO}`;
+        g2.fillStyle = `rgba(255,201,74,${pulse.toFixed(2)})`;
+        g2.fillText(`${confirm} TO GO ON  \xB7  AEON ${h.aeon}  \xB7  ${h.name}`, VIEW_W / 2, 462);
+        g2.font = `600 10px ${MONO}`;
+        g2.fillStyle = INK;
+        g2.fillText(
+          `${mins}:${secs} IN  \xB7  SCORE ${h.score}${h.expedition ? "  \xB7  RESONANT EXPEDITION" : ""}${h.phase === "reign" ? "  \xB7  THE KING IS AWAKE" : h.phase === "birth" ? "  \xB7  BETWEEN WORLDS" : ""}${h.build !== BUILD ? "  \xB7  SAVED BY ANOTHER BUILD" : ""}`,
+          VIEW_W / 2,
+          482
+        );
+      } else {
+        g2.font = `700 12px ${MONO}`;
+        g2.fillStyle = RED;
+        wrap(g2, `A SAVED RUN IS HERE AND CANNOT BE READ: ${this.savedError}`, VIEW_W / 2, 458, 760, 14, true);
+      }
+      const f = Math.min(1, this.abandonHeld / ABANDON_HOLD);
+      g2.font = `600 10px ${MONO}`;
+      g2.fillStyle = f > 0 ? RED : DIM;
+      g2.fillText(`HOLD ${crown2} TO ABANDON IT AND BEGIN AGAIN`, VIEW_W / 2, 502);
+      if (f > 0) {
+        g2.fillStyle = RED;
+        g2.fillRect(VIEW_W / 2 - 120, 508, 240 * f, 2);
+      }
       g2.textAlign = "left";
     }
   };
@@ -9373,15 +10319,35 @@
   if (canvas) {
     const game = new Game(canvas);
     window.drifter = game;
+    mountTouch(game.input, "SonicDrifterAndroid" in window);
     let expedition = { seed: "20260927", trajectory: [] };
     const status = document.getElementById("expedition-status");
     document.getElementById("expedition-start")?.addEventListener("click", () => {
       const started = game.startExpedition(expedition);
-      if (status) status.textContent = started ? `Expedition seed ${expedition.seed}. V / L3 opens the forge.` : "An existing run is active. Start an expedition from the title or death screen.";
+      if (status) status.textContent = started ? `Expedition seed ${expedition.seed}. V / L3 opens the forge.` : game.hasSaved() ? "A saved run is waiting. Go on with it, or hold the throne button on the title to abandon it first." : "An existing run is active. Start an expedition from the title or death screen.";
       canvas.focus();
     });
     document.getElementById("forge-open")?.addEventListener("click", () => {
       game.toggleForge();
+      canvas.focus();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") game.save();
+    });
+    window.addEventListener("pagehide", () => {
+      game.save();
+    });
+    document.getElementById("run-export")?.addEventListener("click", () => {
+      if (status) status.textContent = game.exportRun();
+      canvas.focus();
+    });
+    document.getElementById("run-import")?.addEventListener("change", async (event) => {
+      const input = event.target, file = input.files?.[0];
+      if (!file) return;
+      if (status) {
+        status.textContent = file.size > 2e7 ? "That file is far larger than any saved run." : game.importRun(await file.text());
+      }
+      input.value = "";
       canvas.focus();
     });
     document.getElementById("expedition-import")?.addEventListener("change", async (event) => {

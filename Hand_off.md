@@ -5,6 +5,43 @@ remain in git history. Preserve the standing rules in `HANDOFF.md` and the battl
 rules in `docs/BATTLE.md`. When prose and code disagree, investigate the code and
 update the stale claim rather than silently trusting either.
 
+## Added 2026-09-28 (later): saved runs, touch, APK and RPM (branch `claude/practical-lovelace-7emqrc`)
+
+**Saved runs.** `game/save.ts` is pure: a codec for what JSON cannot say
+(`-Infinity`, `Map`, `-0`), bodies written as indices into `structures`, a
+schema version with `MIGRATIONS`, load-time audits and a trial frame. The
+browser storage layer is `app/persist.ts`, wired into `app/drifter.ts`.
+- **Behaviour:** the title goes on with a saved run, and abandoning it is a
+  1.5 s hold of the throne button. Death clears the save.
+- **Evidence:** `test/save.test.ts` forks lived-in runs and requires identical
+  futures. Every bug it guards against was planted and caught. HANDOFF rule 27
+  states the contract.
+
+**Phone.** `app/touch.ts` adds a floating stick, the face buttons in a pad's
+diamond, and a GRIP that latches on double-tap. It found one real bug on its
+way in: a tap faster than a frame was never seen by `Pad.read`. A finger press
+now lasts at least one frame.
+
+**Packages.** `packaging/android/build.sh` (no Gradle) builds from either the
+Android SDK or Debian's packaged tools. `packaging/rpm/build.sh` builds the
+RPM. Outputs are committed in `releases/`, and
+`.github/workflows/packages.yml` republishes them to the `sonic-drifter-latest`
+pre-release on every push that touches the game.
+- **The environment's constraint:** this container cannot reach
+  `dl.google.com`, which is why the Debian toolchain path exists.
+- **Signing:** `packaging/android/sideload.keystore` is a committed debug-style
+  sideload key (password `android`). Committing it lets updates install over
+  each other. Never use it for a store.
+
+**Verified here:**
+- 427/427 tests, both typechecks, and 16 phone checks in Chromium
+  (`test/drifter-phone.browser.mjs`);
+- `apksigner verify` (v2 and v3) and `zipalign -c`;
+- `rpm -qip` / `rpm -qlp`.
+
+**Not verified:** an install on a physical phone. The first real install is
+the first real test; ask for a report and an exported run.
+
 ## Added 2026-09-28: Quadrature (branch `quadrature`)
 
 The expedition's third layer: cross-phase between the X and Y pairs (`game/wave.ts`),

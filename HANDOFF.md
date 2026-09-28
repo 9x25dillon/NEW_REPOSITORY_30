@@ -1,5 +1,20 @@
 # Handoff
 
+**2026-09-28 saves and packages:** see [Saved runs](docs/SAVES.md) and
+[Install it](docs/PACKAGES.md).
+- **Saved runs:** a run survives a reload. It is kept at pauses, births, new
+  worlds, tab changes and once a minute, and the title offers to go on with
+  it. It can be exported and imported as a file, and a dead run's export
+  loads back as its death screen with `drifter.report()` working. **Ask for
+  the exported run alongside the report**: it is the player's state itself,
+  and it loads headless.
+- **Touch controls** (`app/touch.ts`) feed the same `Pad` intent the keyboard
+  does.
+- **Packages:** an Android APK and a Fedora RPM are built by `packaging/` and
+  published by `.github/workflows/packages.yml`.
+
+Rule 27 below is the save module's contract. `src/` was not touched.
+
 **2026-09-22 battle pass:** see [Battle pass](docs/BATTLE.md). `game/combat.ts`
 owns the riposte (burst into a volley arm to throw it back) and each king
 form's telegraphed gambit (charge, shock, echo) from the second world on.
@@ -279,6 +294,19 @@ These are not preferences. Breaking one breaks something else two modules away.
    deep half, and a held body's clock runs at `wellDepth`, floored by
    `HELD_FLOOR`, because `held > 0` is also what stops a hunter striking. See
    `docs/QUADRATURE.md`.
+
+27. **A RUN IS DATA, AND A SAVE IS A PROMISE ABOUT ITS FUTURE.** `game/save.ts`
+   writes a run so that `restore(snapshot(run))` and the original, fed the
+   same input, emit the same events and end in the same state. The random
+   stream is part of that state (`Rng.state`). Anything you add to `Run` must
+   be plain data: a `Set`, a function or a class instance is refused at save
+   time, with its path. If the new field SHARES an object with another field,
+   `test/save.test.ts` lists it by path. Either stop sharing the object, or
+   write it by reference the way `bodies` is written (as indices into
+   `structures`, because a walking body moves the buildings it is made of).
+   A field whose zero would mislead an old save needs a `MIGRATIONS` entry
+   and a test that loads a file written before the change. See
+   `docs/SAVES.md`.
 
 ---
 

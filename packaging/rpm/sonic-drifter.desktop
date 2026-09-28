@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sonic Drifter
+GenericName=Acoustofluidic game
+Comment=An acoustic tweezer you play with one hand
+Exec=sonic-drifter
+Icon=sonic-drifter
+Terminal=false
+Categories=Game;Simulation;
+Keywords=acoustic;tweezer;crystal;physics;

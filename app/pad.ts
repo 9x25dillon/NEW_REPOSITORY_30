@@ -123,6 +123,40 @@ export class Pad {
   private prevKeys = new Set<string>();
   private index = -1;
   /**
+   * The on-screen stick, -1..1 per axis, set by app/touch.ts.
+   *
+   * A phone has neither a pad nor a keyboard, so the touch layer does the same
+   * thing the keyboard does: it holds virtual keys (see `press`) and offers a
+   * stick. Nothing downstream can tell them apart, which is the point — a verb
+   * reached by touch obeys every hold and tap rule a key does.
+   */
+  private touchStick = { x: 0, y: 0 };
+  /** True once a finger has touched the controls. Switches the glyphs. */
+  touched = false;
+
+  /** Pressed by a finger since the last `read`, and let go of before it. */
+  private unread = new Set<string>();
+  private letGo = new Set<string>();
+
+  /** Hold a key down on behalf of an on-screen button. */
+  press(code: string): void {
+    this.keys.add(code);
+    this.unread.add(code);
+    this.letGo.delete(code);
+    this.touched = true;
+  }
+  /**
+   * Let it go — but not before one frame has seen it. A quick tap on glass can
+   * go down and up between two frames, and a press no frame ever read is a
+   * button that did nothing. Found by the phone test: every tap on II missed.
+   */
+  release(code: string): void {
+    if (this.unread.has(code)) this.letGo.add(code);
+    else this.keys.delete(code);
+  }
+  /** Where the on-screen stick is, as a raw vector inside the unit circle. */
+  setStick(x: number, y: number): void { this.touchStick = { x, y }; this.touched = true; }
+  /**
    * Whether any pad input has EVER arrived.
    *
    * A browser will not update gamepad state for a page that does not have
@@ -238,6 +272,11 @@ export class Pad {
     const k = (code: string): boolean => this.keys.has(code);
     const tap = (code: string): boolean => this.keys.has(code) && !this.prevKeys.has(code);
 
+    // The on-screen stick goes through the same radial deadzone and curve as a
+    // real one, because the magnitude is the trap offset either way.
+    const ts = this.stick(this.touchStick.x, this.touchStick.y);
+    if (ts.x !== 0 || ts.y !== 0) out.move = ts;
+
     let kx = 0, ky = 0;
     if (k("KeyA") || k("ArrowLeft")) kx -= 1;
     if (k("KeyD") || k("ArrowRight")) kx += 1;
@@ -247,6 +286,10 @@ export class Pad {
       const r = Math.hypot(kx, ky);
       out.move = { x: kx / r, y: ky / r };
     }
+    // The channel's harmonic, which a keyboard reaches with the wheel and a
+    // finger reaches with these.
+    if (tap("TouchDepthUp")) out.depth += 1;
+    if (tap("TouchDepthDown")) out.depth -= 1;
 
     if (k("Space") || k("ShiftLeft") || k("ShiftRight")) out.grip = true;
     if (tap("KeyK") || tap("KeyJ") || tap("ControlLeft")) out.dash = true;
@@ -269,6 +312,10 @@ export class Pad {
     if (tap("Escape") || tap("KeyP")) out.pause = true;
 
     this.prevKeys = new Set(this.keys);
+    // Every finger press has now been seen once; the ones already let go go.
+    for (const code of this.letGo) this.keys.delete(code);
+    this.letGo.clear();
+    this.unread.clear();
     return out;
   }
 
@@ -361,5 +408,12 @@ export const GLYPH = {
     move: "MOUSE", grip: "L-CLICK", dash: "R-CLICK", place: "E / 1-9", crown: "C",
     lift: "F", cycle: "Q", confirm: "SPACE", pause: "ESC / P", depth: "WHEEL", call: "R",
     mute: "M",
+  },
+  // The names printed on app/touch.ts's own buttons, so a prompt names the
+  // thing under your thumb.
+  touch: {
+    move: "STICK", grip: "GRIP", dash: "BURST", place: "BUILD", crown: "THRONE",
+    lift: "LIFT", cycle: "NEXT", confirm: "TAP", pause: "II", depth: "▲ ▼", call: "CALL",
+    mute: "♪",
   },
 } as const;
