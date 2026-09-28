@@ -8,6 +8,10 @@
 // out, and dragging a finger slides that grid — because sliding it is the only
 // thing an IDT phase can do, and it is enough.
 //
+// Separable ONLY because the two pairs are driven a quarter period apart in
+// time. That was always so and never said; it has a name now, QUADRATURE, and
+// the Resonant Expedition can drive them otherwise. See "cross-phase" below.
+//
 // WHAT YOU ARE MADE OF, AND WHAT IT COSTS. Amplitude is grip. It ramps rather
 // than steps, because an amplifier does and because an instant step would let
 // the cost be feathered frame by frame. The cost is stamina and it goes as
@@ -31,7 +35,7 @@
 import {
   type Medium, type Particle,
   CROSSOVER_RADIUS_ORDER, MAMMALIAN_CELL, WATER,
-  contrastFactor, streamingRatioScaling,
+  compressibility, contrastFactor, f1, streamingRatioScaling,
 } from "../src/gorkov.js";
 import {
   type SawSubstrate, type StandingWave1D,
@@ -134,7 +138,23 @@ export interface Wave {
   focus: number;
   /** True while the grid is set so that your cursor is an ANTINODE. */
   inverted: boolean;
+  /**
+   * CROSS-PHASE, rad: how far apart in TIME the X pair and the Y pair are
+   * driven. See `crossForce`. QUADRATURE is the field this game was written
+   * in, and at exactly that value every function here is what it always was.
+   */
+  cross: number;
+  /** True while the Y pair was stepped one pitch so that the well under the
+   *  aim is the deep half of the checkerboard. Derived by `aimAt`. */
+  flipped: boolean;
 }
+
+/**
+ * The two pairs driven a quarter period apart. The ONLY cross-phase at which
+ * the potential separates into U_x(x) + U_y(y) — which the header of this file
+ * assumed without saying so for as long as the game has existed.
+ */
+export const QUADRATURE = Math.PI / 2;
 
 export function newWave(
   pitch: number, maxAmplitude: number, focus = 0, medium: Medium = WATER,
@@ -143,7 +163,7 @@ export function newWave(
     pitch, phaseX: 0, phaseY: 0,
     amplitude: 0, maxAmplitude,
     stamina: STAMINA_MAX, spent: false, medium, tC: AMBIENT_C,
-    aimX: 0, aimY: 0, focus, inverted: false,
+    aimX: 0, aimY: 0, focus, inverted: false, cross: QUADRATURE, flipped: false,
   };
 }
 
@@ -217,13 +237,20 @@ export function phaseForNodeAt(w: Wave, u: number): number {
  * The envelope centre does NOT move with the offset — you still focus on where
  * you are pointing. Only which lattice lands there changes.
  */
-export function aimAt(w: Wave, x: number, y: number, invert = false): void {
+export function aimAt(
+  w: Wave, x: number, y: number, invert = false, flip = false,
+): void {
   const off = invert ? w.pitch / 2 : 0;
   w.phaseX = phaseForNodeAt(w, x + off);
-  w.phaseY = phaseForNodeAt(w, y + off);
+  // A FLIP steps the Y pair by one trap pitch. The cursor stays a trap of the
+  // same kind — a node is still a node — but cos(k y) changes sign under it,
+  // and out of quadrature that sign decides whether this is the deep half of
+  // the checkerboard or the shallow one. See `wellDepth`.
+  w.phaseY = phaseForNodeAt(w, y + off + (flip ? w.pitch : 0));
   w.aimX = x;
   w.aimY = y;
   w.inverted = invert;
+  w.flipped = flip;
 }
 
 /** Trap coordinates on one axis, within [0, span). Positive contrast traps at
@@ -257,10 +284,137 @@ export function velocityAt(
   const amp = localAmplitude(w, x, y);
   if (amp <= 0) return { vx: 0, vy: 0 };
   const mu = viscosity(w.tC);
+  const sx = axisX(w, amp), sy = axisY(w, amp);
+  let fx = forceAt(sx, x, p), fy = forceAt(sy, y, p);
+  const c = crossCoupling(w);
+  if (c !== 0) {
+    const f = crossForce(sx, sy, x, y, p, c);
+    fx += f.x;
+    fy += f.y;
+  }
   return {
-    vx: driftVelocity(forceAt(axisX(w, amp), x, p), p.radius, mu),
-    vy: driftVelocity(forceAt(axisY(w, amp), y, p), p.radius, mu),
+    vx: driftVelocity(fx, p.radius, mu),
+    vy: driftVelocity(fy, p.radius, mu),
   };
+}
+
+// ── cross-phase ─────────────────────────────────────────────────────────────
+//
+// THE FIELD WAS NEVER SEPARABLE BY RIGHT; IT WAS SEPARABLE BY TIMING. Two
+// orthogonal standing waves at one frequency, the Y pair lagging the X pair by
+// phi in time:
+//
+//     p = A cos(tx) cos(wt) + A cos(ty) cos(wt + phi)
+//
+// The time averages are
+//
+//     <p^2>     = (A^2/2) (cos^2 tx + cos^2 ty + 2 cos(phi) cos tx cos ty)
+//     rho <v^2> = (kappa A^2/2) (sin^2 tx + sin^2 ty)
+//
+// and the velocity has NO cross term, because the two waves move the water
+// along perpendicular axes and a dot product of perpendicular vectors is zero.
+// Substituted into Gor'kov, the separable part is exactly fields.potentialAt
+// on each axis, and what is left over is
+//
+//     U_x(x, y) = (2/3) pi a^3 kappa_f A^2 f1 cos(phi) cos tx cos ty
+//
+// — the monopole coefficient alone, because only the pressure term crossed.
+// At phi = pi/2 it vanishes and the game is exactly the game it was. Away from
+// it, two things happen and neither is a tuning:
+//
+//   NODE-SEEKERS (f1 > 0 and Phi > 0: cells, motifs, the sovereign) find their
+//   dots joined into a DIAMOND MESH. cos tx + cos ty = 0 on both diagonal
+//   families, so in phase the pressure nodes are lines at 45 degrees and the
+//   only thing still corrugating them is the dipole term, f2. For a mammalian
+//   cell a well is 0.35 as deep along its diagonal as it was, and 1.65 across.
+//
+//   ANTINODE-SEEKERS (you, and the vesicles) find theirs split into a
+//   checkerboard: half the antinodes deeper by the same 1.65, half shallower by
+//   the same 0.35. Which half is under your hand is an IDT setting, so the
+//   pilot always takes the deep one — see `aimAt`'s flip.
+//
+// Both ratios are 1 +- |f1 cos(phi)| / (3 |Phi|). Nothing in them was chosen.
+
+/** cos(phi), and exactly zero at quadrature so the separable path is untouched. */
+export function crossCoupling(w: Wave): number {
+  return w.cross === QUADRATURE ? 0 : Math.cos(w.cross);
+}
+
+/**
+ * The cross term's force, N, from the two axes that make it.
+ *
+ * `c` is cos(phi). The envelope phase convention is fields.ts's — pressure goes
+ * as cos(k u + phase) — so the arguments here are the same ones forceAt uses.
+ */
+export function crossForce(
+  sx: StandingWave1D, sy: StandingWave1D, x: number, y: number, p: Particle, c: number,
+): { x: number; y: number } {
+  const tx = sx.k * x + sx.phase;
+  const ty = sy.k * y + sy.phase;
+  const amp = sx.amplitude;
+  const coef = (2 / 3) * Math.PI * Math.pow(p.radius, 3) * compressibility(sx.medium)
+    * amp * amp * f1(p, sx.medium) * c;
+  return {
+    x: coef * sx.k * Math.sin(tx) * Math.cos(ty),
+    y: coef * sy.k * Math.cos(tx) * Math.sin(ty),
+  };
+}
+
+/** The cross potential, J — for the tests, which differentiate it. */
+export function crossPotential(
+  sx: StandingWave1D, sy: StandingWave1D, x: number, y: number, p: Particle, c: number,
+): number {
+  const amp = sx.amplitude;
+  return (2 / 3) * Math.PI * Math.pow(p.radius, 3) * compressibility(sx.medium)
+    * amp * amp * f1(p, sx.medium) * c
+    * Math.cos(sx.k * x + sx.phase) * Math.cos(sy.k * y + sy.phase);
+}
+
+/**
+ * |f1 cos(phi)| / (3 |Phi|): how far out of quadrature this body can feel.
+ *
+ * The factor by which the cross term deepens one half of the wells and
+ * shallows the other. Infinity for a body with no net contrast and a monopole
+ * one — it answers ONLY to the cross term, which is honest and rare.
+ */
+export function crossReach(w: Wave, p: Particle): number {
+  const c = crossCoupling(w);
+  if (c === 0) return 0;
+  const phi = contrastFactor(p, w.medium);
+  const m = Math.abs(f1(p, w.medium) * c);
+  return phi === 0 ? (m === 0 ? 0 : Infinity) : m / (3 * Math.abs(phi));
+}
+
+/**
+ * How deep the well a body is sitting in is, against the same well at
+ * quadrature. 1 at quadrature, always.
+ *
+ * For an antinode-seeker it is the curvature at its own antinode, and which
+ * half of the checkerboard it is in is the sign of cos tx cos ty there. For a
+ * node-seeker every node is alike and what matters is the SOFT direction — the
+ * diagonal it can now slide along — because that is the way it leaves.
+ */
+export function wellDepth(w: Wave, x: number, y: number, p: Particle): number {
+  const c = crossCoupling(w);
+  if (c === 0) return 1;
+  const phi = contrastFactor(p, w.medium);
+  if (phi === 0) return 1;
+  const g = (f1(p, w.medium) * c) / (3 * phi);
+  if (phi > 0) return Math.max(0, 1 - Math.abs(g));
+  const sx = axisX(w), sy = axisY(w);
+  const s = Math.cos(sx.k * x + sx.phase) * Math.cos(sy.k * y + sy.phase) < 0 ? -1 : 1;
+  return Math.max(0, 1 + g * s);
+}
+
+/**
+ * Whether the deep half of the checkerboard lies under a cos tx cos ty = +1
+ * site, for this body. The pilot asks it to decide `aimAt`'s flip.
+ */
+export function deepWhereAligned(w: Wave, p: Particle): boolean {
+  const c = crossCoupling(w);
+  if (c === 0) return true;
+  // U_x goes as f1 c cos tx cos ty; the deep sites are where that is NEGATIVE.
+  return f1(p, w.medium) * c <= 0;
 }
 
 /**
@@ -297,8 +451,11 @@ export function advance(
   const amp = localAmplitude(w, x, y);
   if (amp <= 0) return { x, y, vx: 0, vy: 0 };
 
+  // Out of quadrature the stiffest well is deeper by 1 + crossReach, and the
+  // substep count has to follow the stiffest well, not the average one.
   const rate = 2 * (Math.PI / w.pitch)
-    * Math.abs(rateConstant(axisX(w, amp), p, viscosity(w.tC)));
+    * Math.abs(rateConstant(axisX(w, amp), p, viscosity(w.tC)))
+    * (1 + Math.min(8, crossReach(w, p)));
   const n = Math.min(SUBSTEP_CAP, Math.max(1, Math.ceil((rate * dt) / SUBSTEP_RELAX)));
   const h = dt / n;
 

@@ -24,7 +24,7 @@
 // No DOM. A pure function of (state, input, dt), so a bot can play whole aeons
 // headlessly and the tests can tell whether any of this is actually a game.
 
-import { type Resonance, constructIds, realm, resonanceStep, resonanceKill, resonanceBirth, wardHit } from "./resonance.js";
+import { type Resonance, constructIds, crossPhase, realm, resonanceStep, resonanceKill, resonanceBirth, wardHit } from "./resonance.js";
 import { beast } from "./beasts.js";
 import {
   type Bond, type Form, ADAPTATIONS, canBond, formFor, newBond, recruit, support, supported,
@@ -44,6 +44,7 @@ import {
 } from "./body.js";
 import { MAX_MODE, planes, reseat, together } from "./depth.js";
 import { type Feature, EDGE_GAIN, features, flowAt } from "./chip.js";
+import { type Plate, plates } from "./plates.js";
 import { mediumAt, streamAt } from "./streams.js";
 import { atTemperature, step as warm } from "./thermal.js";
 import {
@@ -54,7 +55,7 @@ import {
 } from "./lattice.js";
 import {
   type Wave, STAMINA_MAX, STAMINA_REGEN, advance, axisX, axisY, grip, localAmplitude, newWave,
-  rng, streamingSpeed,
+  rng, streamingSpeed, wellDepth,
 } from "./wave.js";
 import {
   type Pilot, CRUISE_AMPLITUDE, DASH_COST, aimFor, beginDash, carry, concentrate, handed,
@@ -99,6 +100,14 @@ export const CHANNEL_H = 3000e-6;
  * be a landmark here at all.
  */
 export const CHIP: readonly Feature[] = features(CHANNEL_W, CHANNEL_H);
+
+/**
+ * The metal on the expedition chip. A module constant for the same reason CHIP
+ * is one: it is glass, it outlives every world, and it is a map that stays a
+ * map. An ordinary run is on bare glass and never asks it — see game/plates.ts
+ * and `crossPhase`, which is the only reader.
+ */
+export const PLATES: readonly Plate[] = plates(CHANNEL_W, CHANNEL_H);
 
 export {
   type Feature, EDGE_STANDOFF_FRAC, featureName, flowAt, nearestFeature,
@@ -412,6 +421,7 @@ export type Ev =
   | { kind: "mended"; x: number; y: number }
   | { kind: "evolved"; trait: Trait; rank: number; cost: number }
   | { kind: "resonance"; text: string }
+  | { kind: "quadrature"; what: "tap"; x: number; y: number }
   | { kind: "death" };
 
 export interface Run {
@@ -716,6 +726,12 @@ export interface Input {
   dash: boolean;
   /** Held throne button during combat: offer a bond instead of dealing damage. */
   tame?: boolean;
+  /**
+   * Cross-phase trim, -1..1: a phase shifter on the Y pair's feed. Read only on
+   * a Resonant Expedition, and paid for in stored charge — see `crossPhase`.
+   * Absent is zero, and zero is the field the glass writes.
+   */
+  trim?: number;
 }
 
 export function step(run: Run, input: Input, dt: number): void {
@@ -755,6 +771,9 @@ export function step(run: Run, input: Input, dt: number): void {
     run.events.push({ kind: "dash", x: you.x, y: you.y });
   }
   concentrate(you, w, input.grip && alive && !w.spent, dt);
+  // The pairs' timing is set before the trap is pointed, because which half of
+  // the checkerboard goes under your hand depends on it.
+  crossPhase(run, alive ? input.trim ?? 0 : 0, dt);
   const trap = alive
     ? aimFor(you, w, input.move.x, input.move.y)
     : aimFor(you, w, 0, 0);
@@ -1137,6 +1156,9 @@ export function capturedAt(w: Wave, x: number, y: number, p: Particle): boolean 
   return Math.hypot(nx - x, ny - y) < captureRadius(w.pitch) + p.radius * 0.5;
 }
 
+/** The slowest a held body's clock may run, as a fraction of real time. */
+export const HELD_FLOOR = 0.1;
+
 function settle(run: Run, dt: number): void {
   const w = run.wave;
   const dead: Entity[] = [];
@@ -1144,12 +1166,18 @@ function settle(run: Run, dt: number): void {
   for (const e of run.entities) {
     // Your hand is a spot in three dimensions and it is centred on your plane.
     if (!together(e.layer, run.layer)) { e.held = 0; continue; }
-    if (!capturedAt(inWater(w, waterAt(run, e.y)), e.x, e.y, particleOf(e))) {
+    const lw = inWater(w, waterAt(run, e.y));
+    if (!capturedAt(lw, e.x, e.y, particleOf(e))) {
       e.held = 0;
       continue;
     }
-    e.held += dt;
-    if (e.faction !== "beast") continue;          // a motif has no species to ask
+    if (e.faction !== "beast") { e.held += dt; continue; } // a motif has no species to ask
+    // A deeper well comes apart faster, and a shallower one slower — in the
+    // same proportion as the well, which out of quadrature is not one. Exactly
+    // dt at quadrature, which is every ordinary run. Floored above zero,
+    // because `held > 0` is also what tells a hunter it is held (see `hunt`)
+    // and a body in your hand must never be free to strike from it.
+    e.held += dt * Math.max(HELD_FLOOR, wellDepth(lw, e.x, e.y, particleOf(e)));
     const holds = beast(e.species).hold * (1 - 0.2 * rankOf(run, "cilia"));
     if (e.held >= holds) dead.push(e);
   }
