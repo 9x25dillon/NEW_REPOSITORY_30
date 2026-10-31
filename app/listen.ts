@@ -33,8 +33,7 @@ const GLYPHS: Record<string, string> = {
 };
 
 /**
- * The chart this page opens with — the operator's own, computed from confirmed
- * birth data (1987-11-11, 13:09, UTC−8) against the Swiss ephemeris.
+ * The chart this page opens with is example data, not a real person's chart.
  *
  * THE ANGLES ARE DELIBERATELY ABSENT. A body's ecliptic longitude depends only
  * on the instant, so these fourteen are exact without knowing where the birth
@@ -53,20 +52,20 @@ const GLYPHS: Record<string, string> = {
  * Replace any of this in the panel. The page sounds a chart; it does not cast
  * one.
  */
-const DEFAULT_CHART = `Sun 228.94
-Moon 120.20
-Mercury 209.97
-Venus 249.86
-Mars 202.01
-Jupiter 21.64
-Saturn 259.67
-Uranus 264.74
-Neptune 276.05
-Pluto 220.27
-North Node 1.14
-South Node 181.14
-Chiron 88.04
-Lilith 129.55`;
+const DEFAULT_CHART = `Sun 10.00
+Moon 55.00
+Mercury 25.00
+Venus 340.00
+Mars 120.00
+Jupiter 200.00
+Saturn 275.00
+Uranus 300.00
+Neptune 150.00
+Pluto 80.00
+North Node 40.00
+South Node 220.00
+Chiron 95.00
+Lilith 260.00`;
 
 function parseChart(text: string): Placement[] {
   const out: Placement[] = [];

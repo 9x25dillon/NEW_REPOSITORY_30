@@ -11,7 +11,7 @@
 // acoustic result in this repo is a function of it. Change the cell radius and
 // the trap changes, in a way that is checkable against a microscope.
 //
-// `natal` is the operator's own chart, kept because this began as an astrology
+// `natal` is an example chart, kept because this began as an astrology
 // engine and because the operator wants the instrument developed against their
 // own data. NOTHING IN src/ READS IT, and that separation is deliberate rather
 // than incidental: an acoustic prediction that took a birth time as an input
@@ -19,9 +19,8 @@
 // it can be wrong in a way an experiment would show. Keep it a label on the
 // work, not a term in it. If that changes, it should change loudly.
 //
-// PRIVACY: this repository is private. Note that a commit is permanent even so
-// — scrubbing this file later does not remove it from git history, which would
-// need a history rewrite. If the repo is ever opened up, that is the step.
+// PRIVACY: this repository is public. Keep real birth data and other personal
+// details out of it, including out of commits that are later reverted.
 
 export interface Natal {
   /** ISO date of birth. */
@@ -50,18 +49,13 @@ export interface Biology {
 }
 
 /**
- * The operator's chart. Confirmed to the minute; the older readings in the
- * Downloads folder disagree with this and describe a different sky, so they
- * should not be used to cross-check it.
+ * An example chart. These values are placeholders, not a real person's birth data.
  */
 export const NATAL: Natal = {
-  date: "1987-11-11",
-  time: "13:09",
-  tzOffsetHours: -8,
-  notes:
-    "Confirmed date, time and offset. Birthplace coordinates deliberately absent " +
-    "until sourced from a document — the offset alone fixes the planets, but the " +
-    "houses and the angles need the latitude and would be quietly wrong without it.",
+  date: "2000-01-01",
+  time: "12:00",
+  tzOffsetHours: 0,
+  notes: "Example data. Replace locally; never commit real birth data.",
 };
 
 /**
